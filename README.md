@@ -1,4 +1,4 @@
-NVUFSE
+NVFUSE
 ======
 
 NVFUSE is an embeddable file system as a library running in the user-space incorporated with [SPDK library](https://github.com/spdk/spdk) which is a user-space NVMe driver newly introduced by Intel. Using this file system applications can directly submit I/O requests to NVMe SSDs. Then, it provides high performance, high reliability as well as POSIX like interfaces (e.g., nvfuse_open, nvfuse_read, nvfuse_write, and nvfuse_close functions). Note that this file system doesn't make use of well-know FUSE (File System Userspace) library to provide POSIX compatibility. Key features are listed as follows.
