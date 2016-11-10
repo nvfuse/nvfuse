@@ -1,0 +1,28 @@
+File System Subsystem and Layout
+	+ Unix Indirect Block (complete)
+	+ get_bh, release_bh, read_inode(), release_inode(); (complete)
+	+ free/used block stats per segment or disk (complete)
+
+File System Performance
+	+ Lock Manager
+	+ Dirty Flush / Buffer Cache Management
+	+ I/O Worker (Queue Manager)
+	+ Request based I/O
+	+ Directory Shrink
+	+ Fast FS format using multiple I/O requests
+	+ NVMe SPDK Driver Optimization
+
+Consistency
+	+ Fast File System Checker
+	+ Metadata logging
+
+Interface
+	+ AIO server layer (similar to Linux native AIO engine)
+	+ seekdir, telldir, closedir
+	+ O_DIRECT, O_SYNC flags
+
+B+tree 
+	+ B+-tree per file (complete)
+	+ B+-tree optimization that split sequential index
+	+ B+-tree shrink free space
+	+ B+-tree block allocation/deallocation

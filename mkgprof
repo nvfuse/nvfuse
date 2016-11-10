@@ -1,0 +1,3 @@
+#!/bin/bash
+
+gprof $1 gmon.out > gprof_profile.txt
