@@ -88,7 +88,7 @@ u64 get_no_of_sectors(s32 fd)
 #endif // NVFUSE_OS == NVFUSE_OS_LINUX
 
 
-static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_superblock *sb_disk, u32 seg_id, u32 seg_size)
+static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, struct nvfuse_superblock *sb_disk, u32 seg_id, u32 seg_size)
 {
 	struct nvfuse_segment_summary *ss;
 	struct nvfuse_inode *inode;
@@ -104,7 +104,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_superblock *sb_disk, u32
 		return -1;
 	}
 
-	nvfuse_read_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, nvfuse_io_manager);
+	nvfuse_read_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, io_manager);
 	ss = (struct nvfuse_segment_summary *)ss_buf;
 
 	buf = nvfuse_malloc(CLUSTER_SIZE);
@@ -115,26 +115,26 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_superblock *sb_disk, u32
 	}
 
 	// reserved and root inode bitmap allocation
-	nvfuse_read_cluster(buf, ss->ss_ibitmap_start, nvfuse_io_manager);
+	nvfuse_read_cluster(buf, ss->ss_ibitmap_start, io_manager);
 	for(ino = 0; ino < NUM_RESV_INO; ino++)
 	{
 		ext2fs_set_bit(ino, buf);
 		ss->ss_free_inodes--;
 		sb_disk->sb_free_inodes--;
 	}
-	nvfuse_write_cluster(buf, ss->ss_ibitmap_start, nvfuse_io_manager);
+	nvfuse_write_cluster(buf, ss->ss_ibitmap_start, io_manager);
 
 
 	// data block for root directory allocation
-	nvfuse_read_cluster(buf, ss->ss_dbitmap_start, nvfuse_io_manager);
+	nvfuse_read_cluster(buf, ss->ss_dbitmap_start, io_manager);
 	//printf(" data block for root dir = %d \n", (int)ss->ss_dtable_start);
 	ext2fs_set_bit(ss->ss_dtable_start % seg_size, buf);
 	ss->ss_free_blocks--;
 	sb_disk->sb_free_blocks--;
-	nvfuse_write_cluster(buf, ss->ss_dbitmap_start, nvfuse_io_manager);
+	nvfuse_write_cluster(buf, ss->ss_dbitmap_start, io_manager);
 
 	// root inode allocation
-	nvfuse_read_cluster(buf, ss->ss_itable_start, nvfuse_io_manager);
+	nvfuse_read_cluster(buf, ss->ss_itable_start, io_manager);
 	memset(buf, 0x0, CLUSTER_SIZE);
 	inode = (struct nvfuse_inode *)buf;
 	for (ino = 0; ino < NUM_RESV_INO; ino++)
@@ -158,10 +158,10 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_superblock *sb_disk, u32
 		inode[ino].i_links_count = 2;
 		inode[ino].i_blocks[0] = ss->ss_dtable_start;
 	}
-	nvfuse_write_cluster(buf, ss->ss_itable_start, nvfuse_io_manager);
+	nvfuse_write_cluster(buf, ss->ss_itable_start, io_manager);
 
 	// root data block allocation
-	nvfuse_read_cluster(buf, ss->ss_dtable_start, nvfuse_io_manager);
+	nvfuse_read_cluster(buf, ss->ss_dtable_start, io_manager);
 
 	memset(buf, 0x0, CLUSTER_SIZE);
 	d_entry = (struct nvfuse_dir_entry *)buf;
@@ -175,15 +175,15 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_superblock *sb_disk, u32
 	d_entry[1].d_ino = ROOT_INO;
 	d_entry[1].d_flag = DIR_USED;
 
-	nvfuse_write_cluster(buf, ss->ss_dtable_start, nvfuse_io_manager);
-	nvfuse_write_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, nvfuse_io_manager);
+	nvfuse_write_cluster(buf, ss->ss_dtable_start, io_manager);
+	nvfuse_write_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, io_manager);
 	nvfuse_free(buf);
 	nvfuse_free(ss_buf);
 
 	return 0;
 }
 
-static s32 nvfuse_format_segment(struct nvfuse_superblock *sb_disk, u32 num_segs, u32 seg_size)
+static s32 nvfuse_format_segment(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk, u32 num_segs, u32 seg_size)
 {
 	struct nvfuse_segment_summary *ss;
 	void *ss_buf;
@@ -192,6 +192,7 @@ static s32 nvfuse_format_segment(struct nvfuse_superblock *sb_disk, u32 num_segs
 	u32 seg_start;
 	u32 bits_per_bitmap;
 	u32 clu;
+	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 
 	ss_buf = nvfuse_malloc(CLUSTER_SIZE);
 	if (ss_buf == NULL)
@@ -244,11 +245,11 @@ static s32 nvfuse_format_segment(struct nvfuse_superblock *sb_disk, u32 num_segs
 		ss->ss_itable_start	+= seg_start;
 		ss->ss_dtable_start	+= seg_start;
 		
-		nvfuse_write_cluster(ss, ss->ss_summary_start, nvfuse_io_manager);
+		nvfuse_write_cluster(ss, ss->ss_summary_start, io_manager);
 
 		/* Initialize ibitmap table */
 		memset(buf, 0x00, CLUSTER_SIZE);
-		nvfuse_write_cluster(buf, ss->ss_ibitmap_start, nvfuse_io_manager);
+		nvfuse_write_cluster(buf, ss->ss_ibitmap_start, io_manager);
 
 		/* reserve clusters ranging from ss to itable */
 		memset(buf, 0x00, CLUSTER_SIZE);
@@ -256,7 +257,7 @@ static s32 nvfuse_format_segment(struct nvfuse_superblock *sb_disk, u32 num_segs
 		{
 			ext2fs_set_bit(clu % seg_size, buf);
 		}
-		nvfuse_write_cluster(buf, ss->ss_dbitmap_start, nvfuse_io_manager);
+		nvfuse_write_cluster(buf, ss->ss_dbitmap_start, io_manager);
 
 		/* write zero data to inode table */
 		memset(buf, 0x00, CLUSTER_SIZE);
@@ -264,7 +265,7 @@ static s32 nvfuse_format_segment(struct nvfuse_superblock *sb_disk, u32 num_segs
 		     clu < ss->ss_itable_start + ss->ss_itable_size; 
 		     clu++)
 		{
-			nvfuse_write_cluster(buf, clu, nvfuse_io_manager);
+			nvfuse_write_cluster(buf, clu, io_manager);
 		}
 
 #if 0
@@ -272,7 +273,7 @@ static s32 nvfuse_format_segment(struct nvfuse_superblock *sb_disk, u32 num_segs
 		     clu < ss->ss_dtable_start + ss->ss_dtable_size; 
 		     clu++)
 		{
-			nvfuse_write_cluster(buf, clu, nvfuse_io_manager);
+			nvfuse_write_cluster(buf, clu, io_manager);
 		}
 #endif
 
@@ -309,7 +310,7 @@ void nvfuse_type_check()
 }
 
 
-s32 nvfuse_format() {
+s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	s32 i, j, clu = 0, add_clu = 0;
 	
 	u32 seg_size_bits;
@@ -337,6 +338,7 @@ s32 nvfuse_format() {
 
 	struct timeval tv; 
 
+	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 	key_pair_t *pair;
 	s32 pair_count = 0;
 	s32 pair_size = 0;
@@ -376,28 +378,28 @@ s32 nvfuse_format() {
 	num_clu = (u32)NVFUSE_NUM_CLU;
 #else
 #	ifdef __USE_FUSE__
-	num_sectors = get_no_of_sectors(nvfuse_io_manager->dev);
+	num_sectors = get_no_of_sectors(io_manager->dev);
 	num_clu = (u32)num_sectors / (u32)SECTORS_PER_CLUSTER;
 #	else
 #		if USE_RAMDISK == 1 || USE_FILEDISK == 1
 		num_sectors = NO_OF_SECTORS;
 		num_clu = (u32)NVFUSE_NUM_CLU;
 #		elif USE_UNIX_IO == 1
-		printf(" unix: nvfuse_io_manager = %p\n", nvfuse_io_manager);
-		num_sectors = nvfuse_io_manager->total_blkcount;
+		printf(" unix: nvfuse_io_manager = %p\n", io_manager);
+		num_sectors = io_manager->total_blkcount;
 		num_clu = num_sectors / SECTORS_PER_CLUSTER;
 #		elif USE_SPDK == 1
-		printf(" spdk: nvfuse_io_manager = %p\n", nvfuse_io_manager);
-		num_sectors = nvfuse_io_manager->total_blkcount;
+		printf(" spdk: nvfuse_io_manager = %p\n", io_manager);
+		num_sectors = io_manager->total_blkcount;
 		num_clu = num_sectors / SECTORS_PER_CLUSTER;
 #		endif
 #	endif
-	num_sectors = nvfuse_io_manager->total_blkcount;
+	num_sectors = io_manager->total_blkcount;
 	num_clu = num_sectors / SECTORS_PER_CLUSTER;
 	/* FIXME: total_blkcount must be set to when io_manager is initialized. */
 #endif
 
-	printf(" nvfuse_io_manager = %p\n", nvfuse_io_manager);
+	printf(" nvfuse_io_manager = %p\n", io_manager);
 
 	printf(" sectors = %lu, blocks = %lu\n", (unsigned long)num_sectors, (unsigned long)num_clu);
 	
@@ -412,13 +414,13 @@ s32 nvfuse_format() {
 
 	seg_p_clu = 1 << (seg_size_bits-CLUSTER_SIZE_BITS);
 
-	ret = nvfuse_format_segment(nvfuse_sb_disk, num_seg, seg_p_clu);
+	ret = nvfuse_format_segment(nvh, nvfuse_sb_disk, num_seg, seg_p_clu);
 	if (ret)
 	{
 		return NVFUSE_ERROR;
 	}
 	
-	ret = nvfuse_alloc_root_inode_direct(nvfuse_sb_disk, 0, seg_p_clu);
+	ret = nvfuse_alloc_root_inode_direct(&nvh->nvh_iom, nvfuse_sb_disk, 0, seg_p_clu);
 	if (ret)
 	{
 		return NVFUSE_ERROR;
@@ -454,7 +456,7 @@ s32 nvfuse_format() {
 	nvfuse_sb_disk->sb_last_update_sec = tv.tv_sec;
 	nvfuse_sb_disk->sb_last_update_usec = tv.tv_usec;
 
-	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, nvfuse_io_manager);
+	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, io_manager);
 
 	printf(" BUFFER POOL NUM = %fMB\n",(float)(NVFUSE_BUFFER_SIZE * CLUSTER_SIZE)/(float)(1024*1024));	
 	printf("\n NVFUSE was formatted successfully. \n");

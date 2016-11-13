@@ -89,7 +89,7 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_head *bh;
 
-	inode = nvfuse_alloc_new_inode(sb, ROOT_DIR_INO);
+	inode = nvfuse_alloc_new_inode(sb);
 	if (!inode) {
 		printf(" inode allocation for b+tree master node failed \n");
 		return -1;

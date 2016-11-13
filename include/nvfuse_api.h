@@ -30,53 +30,65 @@ struct dirent {
 #define DT_DIR 1
 #define DT_REG 2
 #endif
+
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount);
+void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount);
+
 s32 nvfuse_lookup(struct nvfuse_superblock *sb, struct nvfuse_inode **file_inode, struct nvfuse_dir_entry *file_entry,
 	s8 *filename, s32 cur_dir_ino);
 
-s32 nvfuse_openfile_path(const char *path, int flags, int mode);
-s32 nvfuse_openfile(inode_t par_ino, s8 *filename, int flags, int mode);
-s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 mode);
+s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags, int mode);
+s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, s32 flags, s32 mode);
+s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags);
 
-s32 nvfuse_closefile(s32 fid);
+s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid);
 
-s32 nvfuse_readfile(u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
-s32 nvfuse_writefile(u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
+s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
+s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 
 s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode);
 
-s32 nvfuse_rmfile(inode_t par_ino, s8 *filename);
-s32 nvfuse_rmfile_path(const char *path);
+s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename);
+s32 nvfuse_rmfile_path(struct nvfuse_handle *nvh, const char *path);
 
-s32 nvfuse_mkdir(inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode); s32 nvfuse_rename(inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
-s32 nvfuse_mkdir_path(const char *path, mode_t mode);
-
-
-s32 nvfuse_rmdir(inode_t par_ino, s8 *filename);
-s32 nvfuse_rmdir_path(const char *path);
+s32 nvfuse_mkdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode); 
+s32 nvfuse_mkdir_path(struct nvfuse_handle *nvh, const char *path, mode_t mode);
 
 
-s32 nvfuse_rename(inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
-s32 nvfuse_mknod(const char *path, mode_t mode, dev_t dev);
+s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename);
+s32 nvfuse_rmdir_path(struct nvfuse_handle *nvh, const char *path);
 
-s32 nvfuse_symlink(const char *link, inode_t parent, const char *name);
-s32 nvfuse_symlink_path(const char *target_name, const char *link_name);
 
-s32 nvfuse_getattr(const char *path, struct stat *stbuf);
-s32 nvfuse_fgetattr(const char *path, struct stat *stbuf, s32 fd);
-s32 nvfuse_readlink(const char *path, char *buf, size_t size);
-s32 nvfuse_access(const char *path, int mask);
-struct dirent *nvfuse_readdir(inode_t par_ino, struct dirent *dentry, off_t dir_offset);
-s32 nvfuse_opendir(const char *path);
-s32 nvfuse_unlink(const char *path);
-s32 nvfuse_truncate_path(const char *path, nvfuse_off_t size);
-s32 nvfuse_ftruncate(s32 fid, nvfuse_off_t size);
-s32 nvfuse_statvfs(const char *path, struct statvfs *buf);
-s32 nvfuse_rename_path(const char *from, const char *to);
-s32 nvfuse_hardlink_path(const char *from, const char *to);
+s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
+s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t dev);
+
+s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, const char *name);
+s32 nvfuse_symlink_path(struct nvfuse_handle *nvh, const char *target_name, const char *link_name);
+
+s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf);
+s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf, s32 fd);
+s32 nvfuse_readlink(struct nvfuse_handle *nvh, const char *path, char *buf, size_t size);
+s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask);
+struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct dirent *dentry, off_t dir_offset);
+s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path);
+s32 nvfuse_unlink(struct nvfuse_handle *nvh, const char *path);
+s32 nvfuse_truncate_path(struct nvfuse_handle *nvh, const char *path, nvfuse_off_t size);
+s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size);
+s32 nvfuse_statvfs(struct nvfuse_handle *nvh, const char *path, struct statvfs *buf);
+s32 nvfuse_rename_path(struct nvfuse_handle *nvh, const char *from, const char *to);
+s32 nvfuse_hardlink_path(struct nvfuse_handle *nvh, const char *from, const char *to);
 #if NVFUSE_OS == NVFUSE_OS_LINUX
-s32 nvfuse_chmod_path(const char *path, mode_t mode);
-s32 nvfuse_chown(const char *path, uid_t uid, gid_t gid);
+s32 nvfuse_chmod_path(struct nvfuse_handle *nvh, const char *path, mode_t mode);
+s32 nvfuse_chown(struct nvfuse_handle *nvh, const char *path, uid_t uid, gid_t gid);
 #endif
-s32 nvfuse_fdatasync(int fd);
-s32 nvfuse_fsync(int fd);
+s32 nvfuse_fdatasync(struct nvfuse_handle *nvh, int fd);
+s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd);
+
+inode_t nvfuse_get_cwd_ino(struct nvfuse_handle *nvh);
+inode_t nvfuse_get_root_ino(struct nvfuse_handle *nvh);
+void nvfuse_set_cwd_ino(struct nvfuse_handle *nvh, inode_t cwd_ino);
+void nvfuse_set_root_ino(struct nvfuse_handle *nvh, inode_t root_ino);
+
+s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
+
 #endif

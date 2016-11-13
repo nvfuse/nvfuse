@@ -36,6 +36,11 @@ struct io_event;
 //#define USE_NVFUSE_TRACE 0 
 //#define USE_BUFFER_POOL 0
 
+#define IO_MANAGER_RAMDISK	1
+#define IO_MANAGER_FILEDISK	2
+#define IO_MANAGER_UNIXIO	3
+#define IO_MANAGER_SPDK		4
+
 #ifndef __USE_FUSE__
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #	define USE_RAMDISK  0

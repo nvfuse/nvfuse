@@ -472,7 +472,7 @@ void delete_index(master_node_t *master)
 	bkey_t *key;
 	int ret; 
 	int total = nodes_created - nodes_deleted;
-	struct nvfuse_superblock *sb;
+	//struct nvfuse_superblock *sb;
 
 	key = B_KEY_ALLOC();
 	B_KEY_INIT(key);
@@ -485,14 +485,14 @@ void delete_index(master_node_t *master)
 		if(rand_num  == 0)
 			continue;
 
-		sb = nvfuse_read_super(WRITE, 0);
+		//sb = nvfuse_read_super(WRITE, 0);
 
 		B_KEY_MAKE(key, rand_num);	
 
 		ret = B_REMOVE(master, key);
 		clear_used_rec(rand_num);
 		
-		nvfuse_release_super(sb, 0);
+		//nvfuse_release_super(sb);
 
 		if(ret == -1)			
 			printf(" [%d] %lu is not deleted\n", i, (long)*key);
@@ -506,8 +506,7 @@ void delete_index(master_node_t *master)
 }
 
 void printf_report(master_node_t *master, char *str)
-{
-	struct nvfuse_superblock *sb;
+{	
 	FILE *fp;
 
 	if(str == NULL)
@@ -524,8 +523,6 @@ void printf_report(master_node_t *master, char *str)
 	}	
 	fprintf(fp, " \n");
 
-	sb = nvfuse_read_super(READ, 0);
-
 	fprintf(fp, " %d way B + tree was tested!\n", master->m_fanout);
 	fprintf(fp, " insert time %d sec\n", insert_time);
 	fprintf(fp, " insert %.0f iops\n\n", (float)num_index/(float)insert_time);
@@ -535,8 +532,6 @@ void printf_report(master_node_t *master, char *str)
 	fprintf(fp, " delete %.0f iops\n\n", (float)(nodes_created - nodes_deleted)/(float)delete_time);
 	fprintf(fp, " total time %d sec \n", insert_time + transaction_time + delete_time);
 	
-	nvfuse_release_super(sb, 0);
-
 	fprintf(fp, " \n");
 
 	if(str != NULL)
@@ -547,11 +542,13 @@ void printf_report(master_node_t *master, char *str)
 
 time_t diff_time(time_t, time_t);
 
+extern struct nvfuse_handle *g_nvh;
+
 int imark_main(int argc, char *argv[]) {
 	int ret, rand_count = 0;
 	master_node_t _master;
 	master_node_t *master = &_master;
-	struct nvfuse_superblock *sb = nvfuse_read_super(0, 0);
+	struct nvfuse_superblock *sb = nvfuse_read_super(g_nvh);
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_header *bh;
 	printf(" iMark for B+tree Test and Validation (Ver 0.1) \n");

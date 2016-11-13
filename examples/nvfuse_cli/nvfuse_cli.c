@@ -27,11 +27,12 @@
 #include "nvfuse_api.h"
 #include "imark.h"
 
-s32 nvfuse_format();
+
+s32 nvfuse_type(struct nvfuse_handle *nvh, s8 *str);
 int parse_and_execute(char *input);
-s32 nvfuse_type(s8 *str);
 void postmark_main();
 
+struct nvfuse_handle *g_nvh;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	0
@@ -53,6 +54,15 @@ char *input;
 char *ptr, *tok;
 static char	tokens[512];
 
+/* globla nvfuse handle */
+struct nvfuse_handle *g_nvh;
+#define INIT_IOM	1
+#define FORMAT		0
+#define MOUNT		0
+#define DEINIT_IOM	1
+#define UMOUNT		0
+
+
 #ifndef __USE_FUSE__
 void main(int argc, char *argv[]) {
 #else
@@ -63,31 +73,30 @@ void mini_main(int argc, char *argv[]){
 	char *buf;
 	int ret;
 	char *devname = NULL;
+	struct nvfuse_io_manager *io_manager;
+
+	printf("\n");
+	printf(" Caution!: all data stored in your divice is removed permanently. \n");
+	printf("\n");
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	devname = argv[1];
-	if (argc < 2){
+	if (argc < 2) {
 		printf(" please enter the device file (e.g., /dev/sdb)\n");
 		return;
 	}
 	printf(" device name = %s \n", devname);
 #endif
-	printf("\n");
-	printf(" Caution!: all data stored in your divice is removed permanently. \n");
-	printf("\n");
-
-	nvfuse_io_manager = (struct nvfuse_io_manager *)malloc(sizeof(struct nvfuse_io_manager));
-#if EXAM_USE_RAMDISK == 1 
-	nvfuse_init_memio(nvfuse_io_manager, "RANDISK", "RAM");	
-#elif EXAM_USE_FILEDISK == 1
-	printf(" Open File = %s\n", DISK_FILE_PATH);
-	nvfuse_init_fileio(nvfuse_io_manager,"FILE", DISK_FILE_PATH);
-#elif EXAM_USE_UNIXIO == 1
-	nvfuse_init_unixio(nvfuse_io_manager, "SSD", devname, AIO_MAX_QDEPTH);
-#elif EXAM_USE_SPDK == 1
-	nvfuse_init_spdk(nvfuse_io_manager, "SPDK", devname, AIO_MAX_QDEPTH);
-#endif 
-	nvfuse_io_manager->io_open(nvfuse_io_manager, 0);	
+	
+#	if (EXAM_USE_RAMDISK == 1)
+	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
+#	elif (EXAM_USE_FILEDISK == 1)
+	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
+#	elif (EXAM_USE_UNIXIO == 1)
+	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
+#	elif (EXAM_USE_SPDK == 1)
+	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
+#	endif
 	
 	printf("NVFUSE-CLI # ");
 	input = linebuf;
@@ -98,6 +107,8 @@ void mini_main(int argc, char *argv[]){
 			break;
 		printf("NVFUSE-CLI # ");	
 	}
+	
+	nvfuse_destroy_handle(g_nvh, DEINIT_IOM, UMOUNT);
 }
 
 int get_token(char **outptr)
@@ -165,38 +176,37 @@ int parse_and_execute(char *input)
 			} else if (!strcmp(arg[0], "exit")) {
 				return -1;
 			} else if (!strcmp(arg[0],"dir")) {
-				nvfuse_dir();
+				nvfuse_dir(g_nvh);
 			} else if (!strcmp(arg[0],"cd")) {
-				nvfuse_cd(arg[1]);
+				nvfuse_cd(g_nvh, arg[1]);
 			} else if (!strcmp(arg[0],"mkdir")) {
-				nvfuse_mkdir_path(arg[1], 0);
+				nvfuse_mkdir_path(g_nvh, arg[1], 0);
 			} else if (!strcmp(arg[0],"mknod")) {
-				nvfuse_mknod(arg[1], 0, 0);
+				nvfuse_mknod(g_nvh, arg[1], 0, 0);
 			} else if (!strcmp(arg[0],"rmfile")) {
-				nvfuse_rmfile_path(arg[1]);
+				nvfuse_rmfile_path(g_nvh, arg[1]);
 			} else if (!strcmp(arg[0],"rmdir")) {
-				nvfuse_rmdir_path(arg[1]);
+				nvfuse_rmdir_path(g_nvh, arg[1]);
 			} else if (!strcmp(arg[0],"mkfile")) {
-				nvfuse_mkfile(arg[1], arg[2]);					
+				nvfuse_mkfile(g_nvh, arg[1], arg[2]);					
 			} else if (!strcmp(arg[0],"type")) {
-				nvfuse_type(arg[1]);
+				nvfuse_type(g_nvh, arg[1]);
 			} else if (!strcmp(arg[0],"mount")) {
-				nvfuse_mount();
+				nvfuse_mount(g_nvh);
 			} else if (!strcmp(arg[0],"umount")) {
-				nvfuse_umount();
+				nvfuse_umount(g_nvh);
 			} else if (!strcmp(arg[0], "imark")) {
 				imark_main(0, NULL);
 			} else if (!strcmp(arg[0],"format")) {
-				nvfuse_format();
+				nvfuse_format(g_nvh);
 			} else if (!strcmp(arg[0],"test")) {
-				nvfuse_test();			
+				nvfuse_test(g_nvh);
 			} else if (!strcmp(arg[0],"help")) {
 				help();
 			} else if (!strcmp(arg[0],"rdfile")) {
-				nvfuse_rdfile(arg[1]);
-			} else if (!strcmp(arg[0], "truncate")) {
-				nvfuse_rdfile(arg[1]);
-				nvfuse_truncate_path(arg[1], atoi(arg[2]));
+				nvfuse_rdfile(g_nvh, arg[1]);
+			} else if (!strcmp(arg[0], "truncate")) {				
+				nvfuse_truncate_path(g_nvh, arg[1], atoi(arg[2]));
 			} else if (!strcmp(arg[0],"pm")) {
 				postmark_main();
 			}

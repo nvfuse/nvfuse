@@ -21,12 +21,11 @@
 #include <pthread.h>
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
+
 #	include <Windows.h>
-
 #	include "nvfuse_gettimeofday.h"
-
-//#define _CRT_SECURE_NO_DEPRECATE 1
-//#pragma warning(disable:4996)
+#	define _CRT_SECURE_NO_DEPRECATE 1
+#	pragma warning(disable:4996)
 
 #else
 #include <unistd.h>
@@ -213,8 +212,8 @@ struct nvfuse_superblock{
 		s32	sb_cur_clu; /* SYNC TIME or BACKGROUND CLEANING*/
 	
 		s32 sb_last_allocated_ino;
-	
-	
+		struct nvfuse_io_manager *io_manager;
+
 		struct nvfuse_segment_summary *sb_ss; /* SYNC TIME*/
 		struct nvfuse_finfo *sb_ss_nfinfo; /* SYNC TIME*/
 	
@@ -235,9 +234,6 @@ struct nvfuse_superblock{
 		struct timeval sb_sync_time; /* LAST SYNC TIME */
 
 		pthread_mutex_t sb_iolock;
-
-		pthread_rwlock_t sb_rwlock;
-		s32 sb_rwcount;
 
 		pthread_mutex_t sb_request_lock;
 		s32 sb_request_count;
@@ -351,10 +347,14 @@ struct iovec{
 #define nvfuse_dirname fat_dirname
 #define nvfuse_filename fat_filename
 
-extern u32 ROOT_DIR_INO;
-extern u32 CUR_DIR_INO;
-extern struct timeval gstart_tv, gend_tv, gresult_tv;
-extern s32 gtime_use;
+struct nvfuse_handle {
+	struct nvfuse_superblock nvh_sb;
+	struct nvfuse_io_manager nvh_iom;
+	u32 nvh_cwd_ino;
+	u32 nvh_root_dir;
+	u32 nvh_root_ino;
+	u32 nvh_mounted;
+};
 
 u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset);
 
@@ -363,11 +363,14 @@ s32 fat_dirname(const s8 *path, s8 *dest);
 s32 fat_filename(const s8 *path, s8 *dest);
 __inline static u32 *nvfuse_dir_hash(s8 *filename, u32 *hash);
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager);
-struct nvfuse_superblock * nvfuse_read_super(s32 rwlock,s32 is_request);
-void nvfuse_release_super(struct nvfuse_superblock *sb, s32 is_update);
+
+struct nvfuse_superblock * nvfuse_read_super(struct nvfuse_handle *nvh);
+void nvfuse_release_super(struct nvfuse_superblock *sb);
+
+
 void nvfuse_print_inode(struct nvfuse_inode *inode, s8 *str);
 struct nvfuse_inode *nvfuse_read_inode(struct nvfuse_superblock *sb, inode_t ino,s32 read);
-struct nvfuse_inode *nvfuse_alloc_new_inode(struct nvfuse_superblock *sb,inode_t ino);
+struct nvfuse_inode *nvfuse_alloc_new_inode(struct nvfuse_superblock *sb);
 void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,u64 size);
 s32 ext2fs_set_bit(u32 nr,void * addr);
 s32 ext2fs_clear_bit(u32 nr, void * addr);
@@ -387,43 +390,37 @@ void *allocate_aligned_buffer(size_t size);
 u32 get_part_size(s32 fd);
 u32 get_sector_size(s32 fd);
 u64 get_no_of_sectors(s32 fd);
-s32 nvfuse_dir();
+
+s32 nvfuse_dir(struct nvfuse_handle *nvh);
+
 s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb);
-s32 nvfuse_chmod(inode_t par_ino,s8 *filename,mode_t mode);
-s32 nvfuse_path_open(s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
-s32 nvfuse_path_open2(s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
+s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino,s8 *filename,mode_t mode);
+s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
+s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
 s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, u32 offset, s32 position);
 void nvfuse_relocate_write_inode(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,inode_t ino, s32 dirty);
 s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb,struct nvfuse_inode *inode);
-s32 nvfuse_link(u32 oldino,s8 *old_filename, u32 newino,s8 *new_filename,s32 ino);
-s32 nvfuse_rm_direntry(inode_t par_ino,s8 *name,u32 *ino);
-s32 nvfuse_rename(inode_t par_ino,s8 *name, inode_t new_par_ino,s8 *newname);
-s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino,s8 *str,inode_t *new_ino,mode_t mode);
+s32 nvfuse_link(struct nvfuse_superblock *sb, u32 oldino, s8 *old_filename, u32 newino, s8 *new_filename, s32 ino);
+s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino,s8 *name,u32 *ino);
 u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, inode_t ino,lbno_t offset);
 s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 tail, s32 dirty);
 
-s32  nvfuse_mkfile(s8 *str,s8 *ssize);
-s32 nvfuse_cd(s8 *str);
+s32  nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str,s8 *ssize);
+s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str);
 void nvfuse_test();
-s32 nvfuse_rdfile(s8 *str);
+s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str);
 bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno,bkey_t *key,u32 type);
-s32 nvfuse_mount();
+s32 nvfuse_mount(struct nvfuse_handle *nvh);
 
-int nvfuse_trace_open(s8 *trace_file);
-int nvfuse_trace_write(u32 block, u32 num,u32 is_read);
-int nvfuse_trace_close();
-
-void nvfuse_start_time();
-void nvfuse_end_time(struct timeval *p_tv);
 s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, u64 trunc_size);
-s32 nvfuse_truncate(inode_t par_ino, s8 *filename, nvfuse_off_t trunc_size);
+s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, nvfuse_off_t trunc_size);
 u32 nvfuse_create_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode *inode);
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id);
 u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset);
 void nvfuse_free_blocks(struct nvfuse_superblock *sb, u32 block_to_delete, u32 count);
-s32 nvfuse_scan_superblock();
-s32 nvfuse_lseek(s32 fd, u32 offset, s32 position);
-s32 nvfuse_format();
+s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb);
+s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position);
+s32 nvfuse_format(struct nvfuse_handle *nvh);
 
 void nvfuse_syncer_start();
 void nvfuse_syncer_stop();

@@ -182,7 +182,7 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, inode_t i
 		{
 			sb->sb_read_blocks++;
 			sb->sb_read_ios++;	
-			nvfuse_read_block(bh->bh_buf, bh->bh_pno, nvfuse_io_manager);			
+			nvfuse_read_block(bh->bh_buf, bh->bh_pno, sb->io_manager);			
 		}
 	}else if(!bh->bh_pno && read && !bh->bh_load){
 		/* FIXME: how can we handle this case? */

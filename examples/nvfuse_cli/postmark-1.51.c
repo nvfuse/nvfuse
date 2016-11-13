@@ -60,20 +60,21 @@ Also changed MB definition to 1024KB, tweaked show command
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 
+extern struct nvfuse_handle *g_nvh;
 
 #define DELETE_REMAIN 0
 
 #define GETWD(x) "/"
-#define MKDIR(x) nvfuse_mkdir(CUR_DIR_INO, x, 0, 0)
+#define MKDIR(nvh, x) nvfuse_mkdir_path(nvh, x, 0)
 
 #define SEPARATOR "/"
 
-#define open(fname, mode1, mode2)	nvfuse_openfile_path(fname, mode1, 0) 
-#define write(fd, buffer, count)	nvfuse_writefile(fd, buffer, count, 0);
-#define read(fd, buffer, count)		nvfuse_readfile(fd, buffer, count, 0) 
-#define close(fd)			nvfuse_closefile(fd) 
-#define remove(fname)			nvfuse_rmfile_path(fname) 
-#define rmdir(x)			nvfuse_rmdir_path(x) 
+#define open(nvh, fname, mode1, mode2)	nvfuse_openfile_path(nvh, fname, mode1, 0) 
+#define write(nvh, fd, buffer, count)	nvfuse_writefile(nvh, fd, buffer, count, 0);
+#define read(nvh, fd, buffer, count)		nvfuse_readfile(nvh, fd, buffer, count, 0) 
+#define close(nvh, fd)			nvfuse_closefile(nvh, fd) 
+#define remove(nvh, fname)	nvfuse_rmfile_path(nvh, fname) 
+#define rmdir(nvh, x)			nvfuse_rmdir_path(nvh, x) 
 
 //----- Include files -------------------------------------------------------
 #include <assert.h>             // Needed for assert() macro
@@ -742,15 +743,12 @@ int size;   /* bytes to write to file */
 	/* write even blocks */
 	for (i=size; i>=write_block_size;
 		i-=write_block_size,offset+=write_block_size){
-		
-		//make_buf(buf);
-		//write(fd,buf,write_block_size);
-		write(fd,file_source[file_source_ptr]+offset,write_block_size);
+			
+		write(g_nvh,fd,file_source[file_source_ptr]+offset,write_block_size);
 
 	}
-	//make_buf(buf);
-	//write(fd,buf,write_block_size);
-	write(fd,file_source[file_source_ptr]+offset,i); /* write remainder */
+	
+	write(g_nvh,fd,file_source[file_source_ptr]+offset,i); /* write remainder */
 
 	bytes_written+=size; /* update counter */
 
@@ -761,7 +759,7 @@ int size;   /* bytes to write to file */
 
 	free(buf);
 
-	close(fd);
+	close(g_nvh, fd);
 }
 
 /* write 'size' bytes to file 'fp' using buffered I/O and close file */
@@ -871,7 +869,7 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 		if (buffered)
 			fp=fopen(file_table[free_file].name,"w");
 		else
-			fd=open(file_table[free_file].name,O_RDWR|O_CREAT,0644);
+			fd=open(g_nvh, file_table[free_file].name,O_RDWR|O_CREAT,0644);
 
 		if (fp || fd!=-1)
 		{
@@ -897,7 +895,7 @@ int number;
 	{
 		//if ( !(strcmp(file_table[number].name, "s64/68")) )
 		//	printf("debug");
-		if (remove(file_table[number].name))
+		if (remove(g_nvh, file_table[number].name))
 			fprintf(stderr,"Error: Cannot delete '%s'\n",file_table[number].name);
 		else
 		{ /* reset entry in file_table and update counter */
@@ -923,7 +921,7 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 	if (buffered)
 		fp=fopen(file_table[number].name,"r");
 	else
-		fd=open(file_table[number].name,O_RDONLY,0644);
+		fd=open(g_nvh, file_table[number].name,O_RDONLY,0644);
 
 	if (fp || fd!=-1)
 	{ /* read as many blocks as possible then read the remainder */
@@ -939,11 +937,11 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 		else
 		{
 			for (i=file_table[number].size; i>=read_block_size; i-=read_block_size)
-				read(fd,read_buffer,read_block_size);
+				read(g_nvh, fd,read_buffer,read_block_size);
 
-			read(fd,read_buffer,i);
+			read(g_nvh, fd,read_buffer,i);
 
-			close(fd);
+			close(g_nvh, fd);
 		}
 
 		/* increment counters to record transaction */
@@ -1012,7 +1010,7 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 		if (buffered)
 			fp=fopen(file_table[number].name,"a");
 		else
-			fd=open(file_table[number].name,O_RDWR|O_APPEND,0644);
+			fd=open(g_nvh, file_table[number].name,O_RDWR|O_APPEND,0644);
 
 		if ((fp || fd!=-1) && file_table[number].size<file_size_high)
 		{
@@ -1169,7 +1167,7 @@ int subdirs;
 		for (i=0; i<subdirs; i++)
 		{
 			sprintf(dir_name,"%ss%d",save_dir,i);
-			MKDIR(dir_name); 
+			MKDIR(g_nvh, dir_name); 
 		}
 	}
 }
@@ -1198,7 +1196,7 @@ int subdirs;
 		for (i=0; i<subdirs; i++)
 		{
 			sprintf(dir_name,"%ss%d",save_dir,i);
-			rmdir(dir_name); 
+			rmdir(g_nvh, dir_name); 
 		}
 	}
 }
@@ -1364,7 +1362,7 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 		if (buffered)
 			fp=fopen(file_table[number].name,"a");
 		else
-			fd=open(file_table[number].name,O_RDWR,0644);
+			fd=open(g_nvh, file_table[number].name,O_RDWR,0644);
 
 		//printf("file name = %s\n",file_table[number].name);
 

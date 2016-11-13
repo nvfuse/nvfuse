@@ -32,62 +32,42 @@
 #define EXAM_USE_SPDK		0
 #endif
 
-extern struct nvfuse_io_manager *nvfuse_io_manager; 
+#define INIT_IOM	1
+#define FORMAT		1
+#define MOUNT		1
+#define DEINIT_IOM	1
+#define UMOUNT		1
 
 int main()
 {
-	struct nvfuse_io_manager io_manager;
+	struct nvfuse_handle *nvh;	
 	int ret;
 	int fd;
 	int count;
 	char *buf;
 
-#if EXAM_USE_RAMDISK == 1 
-	nvfuse_init_memio(&io_manager, "RANDISK", "RAM");
-#elif EXAM_USE_FILEDISK == 1
-	printf(" Open File = %s\n", DISK_FILE_PATH);
-	nvfuse_init_fileio(&io_manager, "FILE", DISK_FILE_PATH);
-#elif EXAM_USE_UNIXIO == 1
-	nvfuse_init_unixio(&io_manager, "SSD", "/dev/sdb", AIO_MAX_QDEPTH);
-#elif EXAM_USE_SPDK == 1
-	nvfuse_init_spdk(&io_manager, "SPDK", "spdk:namespace0", AIO_MAX_QDEPTH);
-#endif 
-	
-	/* IMPORTANT: don't msiss set global variable */
-	nvfuse_io_manager = &io_manager;
+#	if (EXAM_USE_RAMDISK == 1)
+	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
+#	elif (EXAM_USE_FILEDISK == 1)
+	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
+#	elif (EXAM_USE_UNIXIO == 1)
+	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
+#	elif (EXAM_USE_SPDK == 1)
+	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
+#	endif
 
-	/* open I/O manager */
-	io_manager.io_open(&io_manager, 0);
-
-	printf(" hello world \n");
-
-	printf(" total blks = %ld \n", (long)nvfuse_io_manager->total_blkcount);
-	printf(" nvfuse_io_manager = %p\n", nvfuse_io_manager);
-
-	/* file system format */
-	ret = nvfuse_format();
-	if (ret < 0) {
-		printf(" Error: format() \n");
-	}
-
-	/* file system mount */
-	ret = nvfuse_mount();
-	if (ret < 0) {
-		printf(" Error: mount() \n");
-	}
-	
 	/* file open and create */
-	fd = nvfuse_openfile_path("helloworld.file", O_RDWR | O_CREAT, 0);
+	fd = nvfuse_openfile_path(nvh, "helloworld.file", O_RDWR | O_CREAT, 0);
 	if (fd == -1) {
 		printf(" Error: open() \n");
-		goto UMOUNT;
+		goto RET;
 	}
 
 	/* 4KB memory allocation */
 	buf = nvfuse_malloc(4096);
 	if (buf == NULL) {
 		printf(" Error: malloc() \n");
-		goto UMOUNT;
+		goto RET;
 	}
 
 	memset(buf, 0x00, 4096);
@@ -96,19 +76,19 @@ int main()
 	/* write 4KB */
 	printf(" Write Buf: %s", buf);
 	for (count = 0; count < 1024; count++) {
-		ret = nvfuse_writefile(fd, buf, 4096, 0);
+		ret = nvfuse_writefile(nvh, fd, buf, 4096, 0);
 		if (ret != 4096) {
 			printf(" Error: file write() \n");
 		}
 	}
 		
-	nvfuse_lseek(fd, 0, SEEK_SET);
+	nvfuse_lseek(nvh, fd, 0, SEEK_SET);
 
 	memset(buf, 0x00, 4096);
 
 	/* read 4KB */
 	for (count = 0; count < 1024; count++) {
-		ret = nvfuse_readfile(fd, buf, 4096, 0);
+		ret = nvfuse_readfile(nvh, fd, buf, 4096, 0);
 		if (ret != 4096) {
 			printf(" Error: file write() \n");
 		}
@@ -119,15 +99,9 @@ int main()
 	nvfuse_free(buf);
 		
 	/* close file */
-	nvfuse_closefile(fd);
+	nvfuse_closefile(nvh, fd);
 
-UMOUNT:;
-	/* umount file system */
-	ret = nvfuse_umount();
-	if (ret < 0) {
-		printf(" Error: umount() \n");
-	}
+RET:;
 
-	/* close I/O manager */
-	io_manager.io_close(&io_manager);
+	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 }
