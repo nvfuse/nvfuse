@@ -675,7 +675,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb){
 	nvfuse_aio_submit(iocb, num_dirty, sb->io_manager);
 	sb->io_manager->queue_cur_count = num_dirty;
 
-	nvfuse_wait_aio_completion(jobs, num_dirty);
+	nvfuse_wait_aio_completion(sb, jobs, num_dirty);
 
 	free(jobs);
 #else

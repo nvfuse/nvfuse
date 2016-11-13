@@ -332,8 +332,6 @@ RETRY:;
 	rbytes = pread64(io_manager->dev, buf, size, location);
 #endif 	
 
-	nvfuse_trace_write(block, count, 1);
-
 	if(rbytes != size) {
 		printf(" read error, block = %lu, count = %d, size = %d\n",block, count, rbytes);
 		//memcpy(NULL, NULL, 880);
@@ -356,7 +354,6 @@ RETRY:;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	wbytes = pwrite64(io_manager->dev, buf, size, location);
 #endif 
-	nvfuse_trace_write(block, count, 0);
 	
 	return wbytes;
 }

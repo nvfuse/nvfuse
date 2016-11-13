@@ -93,7 +93,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	int res;
 
 	printf(" Getattr path = %s\n", path);
-	res = nvfuse_getattr(&nvh, path, stbuf);
+	res = nvfuse_getattr(nvh, path, stbuf);
 	if (res < 0) {
 		return res;
 	}
@@ -109,7 +109,7 @@ static int xmp_fgetattr(const char *path, struct stat *stbuf,
 	(void) path;
 
 	printf(" Fgetattr \n");
-	res = nvfuse_fgetattr(&nvh, path, stbuf, fi->fh);
+	res = nvfuse_fgetattr(nvh, path, stbuf, fi->fh);
 	if (res < 0)
 		return errno;
 
@@ -121,7 +121,7 @@ static int xmp_access(const char *path, int mask)
 	int res;
 
 	printf(" Access %s\n", path);
-	res = nvfuse_access(&nvh, path, mask);
+	res = nvfuse_access(nvh, path, mask);
 	if (res < 0) {
 		printf(" ret %d\n", res);
 		return res;
@@ -135,7 +135,7 @@ static int xmp_readlink(const char *path, char *buf, size_t size)
 	int res;
 
 	printf(" Readlink\n");
-	res = nvfuse_readlink(&nvh, path, buf, size - 1);
+	res = nvfuse_readlink(nvh, path, buf, size - 1);
 	if (res < 0)
 		return res;
 
@@ -158,7 +158,7 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
 	if (d == NULL)
 		return -ENOMEM;
 
-	d->dp = nvfuse_opendir(&nvh, path);
+	d->dp = nvfuse_opendir(nvh, path);
 	if (d->dp == 0) {
 		res = -errno;
 		free(d);
@@ -195,7 +195,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 		off_t nextoff;
 
 		if (!d->entry) {
-			d->entry = nvfuse_readdir(&nvh, d->dp, &dentry, d->offset);
+			d->entry = nvfuse_readdir(nvh, d->dp, &dentry, d->offset);
 			if (!d->entry)
 				break;
 		}
@@ -235,7 +235,7 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 		//res = mkfifo(path, mode);
 		printf(" Error: mkfifo isn't supported in current implementation\n");
 	} else {
-		res = nvfuse_mknod(&nvh, path, mode, rdev);
+		res = nvfuse_mknod(nvh, path, mode, rdev);
 	}
 
 	if (res == -1)
@@ -249,7 +249,7 @@ static int xmp_mkdir(const char *path, mode_t mode)
 	int res;
 
 	printf(" Mkdir \n");
-	res = nvfuse_mkdir_path(&nvh, path, mode);
+	res = nvfuse_mkdir_path(nvh, path, mode);
 	if (res == -1)
 		return -errno;
 
@@ -261,7 +261,7 @@ static int xmp_unlink(const char *path)
 	int res;
 
 	printf(" Unlink\n");
-	res = nvfuse_unlink(&nvh, path);
+	res = nvfuse_unlink(nvh, path);
 	if (res == -1)
 		return -errno;
 
@@ -273,7 +273,7 @@ static int xmp_rmdir(const char *path)
 	int res;
 
 	printf(" Rmdir \n");
-	res = nvfuse_rmdir_path(&nvh, path);
+	res = nvfuse_rmdir_path(nvh, path);
 	if (res == -1)
 		return -errno;
 
@@ -285,7 +285,7 @@ static int xmp_symlink(const char *target, const char *link)
 	int res;
 
 	printf(" Symlink \n");
-	res = nvfuse_symlink_path(&nvh, target, link);
+	res = nvfuse_symlink_path(nvh, target, link);
 	if (res == -1)
 		return -errno;
 
@@ -297,7 +297,7 @@ static int xmp_rename(const char *from, const char *to)
 	int res;
 
 	printf(" Rename \n");
-	res = nvfuse_rename_path(&nvh, from, to);
+	res = nvfuse_rename_path(nvh, from, to);
 	if (res == -1)
 		return -errno;
 
@@ -309,7 +309,7 @@ static int xmp_link(const char *from, const char *to)
 	int res;
 
 	printf(" Link \n");
-	res = nvfuse_hardlink_path(&nvh, from, to);
+	res = nvfuse_hardlink_path(nvh, from, to);
 	if (res == -1)
 		return -errno;
 
@@ -321,7 +321,7 @@ static int xmp_chmod(const char *path, mode_t mode)
 	int res;
 
 	printf(" Chmod \n");
-	res = nvfuse_chmod_path(&nvh, path, mode);
+	res = nvfuse_chmod_path(nvh, path, mode);
 	if (res == -1)
 		return -errno;
 
@@ -333,7 +333,7 @@ static int xmp_chown(const char *path, uid_t uid, gid_t gid)
 	int res;
 
 	printf(" Chown\n");
-	res = nvfuse_chown(&nvh, path, uid, gid);
+	res = nvfuse_chown(nvh, path, uid, gid);
 	if (res == -1)
 		return -errno;
 
@@ -345,7 +345,7 @@ static int xmp_truncate(const char *path, off_t size)
 	int res;
 
 	printf(" Truncate \n");
-	res = nvfuse_truncate_path(&nvh, path, size);
+	res = nvfuse_truncate_path(nvh, path, size);
 	if (res == -1)
 		return -errno;
 
@@ -360,7 +360,7 @@ static int xmp_ftruncate(const char *path, off_t size,
 	(void) path;
 
 	printf(" Ftruncate \n");
-	res = nvfuse_ftruncate(&nvh, fi->fh, size);
+	res = nvfuse_ftruncate(nvh, fi->fh, size);
 	if (res == -1)
 		return -errno;
 
@@ -386,7 +386,7 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 	int fd;
 
 	printf(" Create \n");
-	fd = nvfuse_openfile_path(&nvh, path, fi->flags, mode);
+	fd = nvfuse_openfile_path(nvh, path, fi->flags, mode);
 	if (fd == -1)
 		return -errno;
 
@@ -399,7 +399,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	int fd;
 
 	printf(" Open \n");
-	fd = nvfuse_openfile_path(&nvh, path, fi->flags, 0);
+	fd = nvfuse_openfile_path(nvh, path, fi->flags, 0);
 	if (fd == -1)
 		return -errno;
 
@@ -414,7 +414,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	printf(" Read \n");
 	(void) path;
-	res = nvfuse_readfile(&nvh, fi->fh, buf, size, offset);
+	res = nvfuse_readfile(nvh, fi->fh, buf, size, offset);
 	if (res == -1)
 		res = -errno;
 
@@ -451,7 +451,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 	(void) path;
 	printf(" Write \n");
-	res = nvfuse_writefile(&nvh, fi->fh, buf, size, offset);
+	res = nvfuse_writefile(nvh, fi->fh, buf, size, offset);
 	if (res == -1)
 		res = -errno;
 
@@ -478,7 +478,7 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	int res;
 
 	printf(" Statfs \n");
-	res = nvfuse_statvfs(&nvh, path, stbuf);
+	res = nvfuse_statvfs(nvh, path, stbuf);
 	if (res == -1)
 		return -errno;
 
@@ -508,7 +508,7 @@ static int xmp_release(const char *path, struct fuse_file_info *fi)
 {
 	(void) path;
 	printf(" Release \n");
-	nvfuse_closefile(&nvh, fi->fh);
+	nvfuse_closefile(nvh, fi->fh);
 
 	return 0;
 }
@@ -521,9 +521,9 @@ static int xmp_fsync(const char *path, int isdatasync,
 
 	printf(" Fsync \n");
 	if (isdatasync)
-		res = nvfuse_fdatasync(&nvh, fi->fh);
+		res = nvfuse_fdatasync(nvh, fi->fh);
 	else
-		res = nvfuse_fsync(&nvh, fi->fh);
+		res = nvfuse_fsync(nvh, fi->fh);
 
 	if (res == -1)
 		return -errno;

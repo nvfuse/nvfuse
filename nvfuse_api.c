@@ -62,19 +62,23 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s32 init
 		io_manager = &nvh->nvh_iom;
 		switch (io_manager_type)
 		{
+#if NVFUSE_OS == NVFUSE_OS_WINDOWS
 		case IO_MANAGER_RAMDISK:
 			nvfuse_init_memio(io_manager, "RANDISK", "RAM");
 			break;
 		case IO_MANAGER_FILEDISK:
 			nvfuse_init_fileio(io_manager, "FILE", DISK_FILE_PATH);
 			break;
-#if NVFUSE_IO == NVFUSE_OS_LINUX
+#endif
+#if NVFUSE_OS == NVFUSE_OS_LINUX
 		case IO_MANAGER_UNIXIO:
 			nvfuse_init_unixio(io_manager, "SSD", "/dev/sdb", AIO_MAX_QDEPTH);
 			break;
+#	ifdef SPDK_ENABLED
 		case IO_MANAGER_SPDK:
 			nvfuse_init_spdk(io_manager, "SPDK", "spdk:namespace0", AIO_MAX_QDEPTH);
 			break;
+#	endif
 #endif
 		default:
 			printf(" Error: Invalid IO Manager Type = %d", io_manager_type);
