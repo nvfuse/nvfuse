@@ -17,6 +17,8 @@
 #ifndef _NVFUSE_CONFIG_H
 #define _NVFUSE_CONFIG_H
 
+#define NVFUSE_VERSION "0.1"
+
 #define NVFUSE_OS_WINDOWS 1
 #define NVFUSE_OS_LINUX 2
 
