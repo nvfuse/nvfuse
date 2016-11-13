@@ -1385,7 +1385,6 @@ s32 nvfuse_path_open(s8 *path, s8 *filename, struct nvfuse_dir_entry *get){
 	s32 i;
 	s32 count=0;
 	
-
 	strcpy(b,path);
 	i = strlen(b);
 

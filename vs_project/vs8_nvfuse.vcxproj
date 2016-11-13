@@ -77,9 +77,9 @@
     <None Include="..\TODO" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\examples\mini_sh\imark.c" />
-    <ClCompile Include="..\examples\mini_sh\nvfuse_cli.c" />
-    <ClCompile Include="..\examples\mini_sh\postmark-1.51.c" />
+    <ClCompile Include="..\examples\nvfuse_cli\imark.c" />
+    <ClCompile Include="..\examples\nvfuse_cli\nvfuse_cli.c" />
+    <ClCompile Include="..\examples\nvfuse_cli\postmark-1.51.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

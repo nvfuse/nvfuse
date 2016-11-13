@@ -19,13 +19,13 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\examples\mini_sh\postmark-1.51.c">
+    <ClCompile Include="..\examples\nvfuse_cli\imark.c">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="..\examples\mini_sh\imark.c">
+    <ClCompile Include="..\examples\nvfuse_cli\nvfuse_cli.c">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="..\examples\mini_sh\nvfuse_cli.c">
+    <ClCompile Include="..\examples\nvfuse_cli\postmark-1.51.c">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>
