@@ -716,14 +716,6 @@ int find_free_file()
 }
 
 
-void make_buf(char *buf){
-	
-	memset(buf, 0x00,write_block_size);
-	memcpy(buf, &cur_ptr,sizeof(int));
-	cur_ptr++;
-	if(cur_ptr == max_ptr)
-		cur_ptr = 0;
-}
 /* write 'size' bytes to file 'fd' using unbuffered I/O and close file */
 void write_blocks(fd,size)
 int fd;
@@ -1330,11 +1322,6 @@ char *param; /* unused */
 	free(read_buffer);
 	for(i = 0;i < file_source_num;i++)
 		free(file_source[i]);
-
-	//printf("fm_write_count: %d\n", fm_write_cnt);
-	//printf("fm_read_count: %d\n", fm_read_cnt);
-	//printf("fm_copyback_count: %d\n", fm_copy_cnt);
-	//printf("fm_erase_count: %d\n", fm_erase_cnt);
 
 	return(1); /* return 1 unless exit requested, then return 0 */
 }

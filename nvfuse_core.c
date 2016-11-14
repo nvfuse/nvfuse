@@ -567,7 +567,9 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		//collision
 		B_UPDATE(master, &key, &offset);
 	}
-
+	
+	bp_write_master(master);
+	bp_deinit_master(master);
 	return 0;
 }
 
