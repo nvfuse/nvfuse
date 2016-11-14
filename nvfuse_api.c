@@ -871,8 +871,8 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	nvfuse_shrink_dentry(sb, dir_inode, found_entry, dir_inode->i_links_count);
 	
 	if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
-		//nvfuse_truncate_blocks(sb, dir_inode, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
-		//dir_inode->i_size -= CLUSTER_SIZE;
+		nvfuse_truncate_blocks(sb, dir_inode, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+		dir_inode->i_size -= CLUSTER_SIZE;
 	}
 
 	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, 1/*dirty*/);
@@ -1007,10 +1007,11 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	nvfuse_shrink_dentry(sb, dir_inode, found_entry, dir_inode->i_links_count);
 	
 	/* Free block reclaimation is necessary but test is required. */
-	/*if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
+	if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
 		nvfuse_truncate_blocks(sb, dir_inode, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
 		dir_inode->i_size -= CLUSTER_SIZE;
-	}*/
+	}
+
 	/* Parent Directory Modification */
 	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, DIRTY);
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
