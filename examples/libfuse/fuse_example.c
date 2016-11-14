@@ -134,7 +134,7 @@ static int xmp_readlink(const char *path, char *buf, size_t size)
 {
 	int res;
 
-	printf(" Readlink\n");
+	printf(" Readlink path = %s\n", path);
 	res = nvfuse_readlink(nvh, path, buf, size - 1);
 	if (res < 0)
 		return res;
@@ -284,7 +284,7 @@ static int xmp_symlink(const char *target, const char *link)
 {
 	int res;
 
-	printf(" Symlink \n");
+	printf(" Symlink target = %s link = %s \n", target, link);
 	res = nvfuse_symlink_path(nvh, target, link);
 	if (res == -1)
 		return -errno;
@@ -412,7 +412,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 {
 	int res;
 
-	printf(" Read \n");
+	printf(" Read fd = %d size = %d offset = %d\n", (int)fi->fh, (int)size, (int)offset);
 	(void) path;
 	res = nvfuse_readfile(nvh, fi->fh, buf, size, offset);
 	if (res == -1)
@@ -428,7 +428,7 @@ static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
 
 	(void) path;
 
-	printf(" Readbuf \n");
+	printf(" Readbuf fd = %d offset = %d\n", (int)fi->fh, (int)offset);
 	src = malloc(sizeof(struct fuse_bufvec));
 	if (src == NULL)
 		return -ENOMEM;
@@ -450,7 +450,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	int res;
 
 	(void) path;
-	printf(" Write \n");
+	printf(" Write fd = %d size = %d offset = %d\n", (int)fi->fh, (int)size, (int)offset);
 	res = nvfuse_writefile(nvh, fi->fh, buf, size, offset);
 	if (res == -1)
 		res = -errno;
@@ -465,7 +465,7 @@ static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
 
 	(void) path;
 
-	printf(" Writebuf \n");
+	printf(" Writebuf fd = %d offset = %d\n", (int)fi->fh, (int)offset);
 	dst.buf[0].flags = FUSE_BUF_IS_FD | FUSE_BUF_FD_SEEK;
 	dst.buf[0].fd = fi->fh;
 	dst.buf[0].pos = offset;
@@ -640,9 +640,9 @@ static struct fuse_operations xmp_oper = {
 	.create		= xmp_create,
 	.open		= xmp_open,
 	.read		= xmp_read,
-	.read_buf	= xmp_read_buf,
+	//.read_buf	= xmp_read_buf,
 	.write		= xmp_write,
-	.write_buf	= xmp_write_buf,
+	//.write_buf	= xmp_write_buf,
 	.statfs		= xmp_statfs,
 	//.flush		= xmp_flush,
 	.release	= xmp_release,
