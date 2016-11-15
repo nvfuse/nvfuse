@@ -231,12 +231,7 @@ static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 	int res = -1;
 
 	printf(" Mknod \n");
-	if (S_ISFIFO(mode)) {
-		//res = mkfifo(path, mode);
-		printf(" Error: mkfifo isn't supported in current implementation\n");
-	} else {
-		res = nvfuse_mknod(nvh, path, mode, rdev);
-	}
+	res = nvfuse_mknod(nvh, path, mode, rdev);
 
 	if (res == -1)
 		return -errno;
@@ -367,19 +362,16 @@ static int xmp_ftruncate(const char *path, off_t size,
 	return 0;
 }
 
-#ifdef HAVE_UTIMENSAT
 static int xmp_utimens(const char *path, const struct timespec ts[2])
 {
 	int res;
 
-	/* don't use utime/utimes since they follow symlinks */
-	res = utimensat(0, path, ts, AT_SYMLINK_NOFOLLOW);
+	res = nvfuse_utimens(nvh, path, ts);
 	if (res == -1)
 		return -errno;
 
 	return 0;
 }
-#endif
 
 static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 {
@@ -634,9 +626,7 @@ static struct fuse_operations xmp_oper = {
 	.chown		= xmp_chown,
 	.truncate	= xmp_truncate,
 	.ftruncate	= xmp_ftruncate,
-#ifdef HAVE_UTIMENSAT
 	.utimens	= xmp_utimens,
-#endif
 	.create		= xmp_create,
 	.open		= xmp_open,
 	.read		= xmp_read,

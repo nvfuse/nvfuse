@@ -344,7 +344,7 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
 	if (res < 0) { // no such file 
 		if (flags & O_RDWR || flags & O_CREAT) {
-			res = nvfuse_createfile(sb, par_ino, filename, 0, mode);
+			res = nvfuse_createfile(sb, par_ino, filename, 0, mode, 0);
 			if (res == NVFUSE_SUCCESS) {
 				res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
 			}
@@ -621,7 +621,37 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 	return wcount;
 }
 
-s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode) 
+/* ported from fuse_ext2 project */
+static inline u16 old_encode_dev(dev_t dev)
+{
+	return (major(dev) << 8) | minor(dev);
+}
+
+static inline u32 new_encode_dev(dev_t dev)
+{
+	unsigned major = major(dev);
+	unsigned minor = minor(dev);
+	return (minor & 0xff) | (major << 8) | ((minor & ~0xff) << 12);
+}
+
+static inline int old_valid_dev(dev_t dev)
+{
+	return major(dev) < 256 && minor(dev) < 256;
+}
+
+static inline dev_t old_decode_dev(u16 val)
+{
+	return makedev((val >> 8) & 255, val & 255);
+}
+
+static inline dev_t new_decode_dev(u32 dev)
+{
+	unsigned major = (dev & 0xfff00) >> 8;
+	unsigned minor = (dev & 0xff) | ((dev >> 12) & 0xfff00);
+	return makedev(major, minor);
+}
+
+s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode, dev_t dev) 
 {
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_dir_entry dir_entry;
@@ -716,6 +746,20 @@ find:
 	new_inode->i_atime = time(NULL);
 	new_inode->i_ctime = time(NULL);
 	new_inode->i_mtime = time(NULL);
+
+	if (S_ISCHR(mode) || S_ISBLK(mode)) {
+		if (old_valid_dev(dev))
+			new_inode->i_blocks[0] = old_encode_dev(dev);
+		else
+			new_inode->i_blocks[1] = new_encode_dev(dev);
+	}
+
+	/*if(S_ISBLK(mode))
+		printf(" mknode blkdevice \n");
+	if(S_ISCHR(mode))
+		printf(" mknode chrdevice \n");
+	if(S_ISFIFO(mode))
+		printf(" mknode fifo \n");*/
 
 	if (new_ino)
 		*new_ino = new_inode->i_ino;
@@ -1336,7 +1380,7 @@ s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t
 	}
 	else {
 		sb = nvfuse_read_super(nvh);
-		res = nvfuse_createfile(sb, dir_entry.d_ino, filename, 0, mode);
+		res = nvfuse_createfile(sb, dir_entry.d_ino, filename, 0, mode, dev);
 		nvfuse_release_super(sb);
 	}
 
@@ -1436,7 +1480,7 @@ s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, 
 	
 	nvfuse_lock();
 
-	res = nvfuse_createfile(sb, parent, (char *)name, &ino, 0777 | S_IFLNK);
+	res = nvfuse_createfile(sb, parent, (char *)name, &ino, 0777 | S_IFLNK, 0);
 	if (res != NVFUSE_SUCCESS) {
 		printf(" create file error \n");
 		return res;
@@ -1552,23 +1596,20 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 				goto RET;
 			}
 
-			//if (inode->i_mode & S_IFLNK)
-			//	stbuf->st_mode = S_IFLNK | inode->i_mode;
-			//else 
-			if(inode->i_type == NVFUSE_TYPE_FILE)
-				stbuf->st_mode = S_IFREG | inode->i_mode;
-			else
-				stbuf->st_mode = S_IFDIR | inode->i_mode;
+			stbuf->st_mode	= inode->i_mode;
+			stbuf->st_nlink	= inode->i_links_count;
+			stbuf->st_size	= inode->i_size;
+			stbuf->st_atime	= inode->i_atime;
+			stbuf->st_mtime	= inode->i_mtime;
+			stbuf->st_ctime	= inode->i_ctime;
+			stbuf->st_gid	= inode->i_gid;
+			stbuf->st_uid	= inode->i_uid;
 
-			stbuf->st_nlink = inode->i_links_count;
-
-			stbuf->st_size = inode->i_size;
-			stbuf->st_atime = inode->i_atime;
-			stbuf->st_mtime = inode->i_mtime;
-			stbuf->st_ctime = inode->i_ctime;
-
-			stbuf->st_gid = inode->i_gid;
-			stbuf->st_uid = inode->i_uid;
+			if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode)) {
+				stbuf->st_rdev = old_decode_dev(inode->i_blocks[0]);
+			} else {
+				stbuf->st_rdev = new_decode_dev(inode->i_blocks[1]);
+			}
 
 			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
 			nvfuse_release_super(sb);
@@ -1600,21 +1641,15 @@ s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *st
 		sb = nvfuse_read_super(nvh);
 
 		ft = sb->sb_file_table + fd;
+		
 		inode = nvfuse_read_inode(sb, ft->ino, READ);
 
-		//if (inode->i_mode & S_IFLNK)
-		//	stbuf->st_mode = S_IFLNK | inode->i_mode;
-		//else 
-		if(inode->i_type == NVFUSE_TYPE_FILE)
-			stbuf->st_mode = S_IFREG | inode->i_mode;
-		else
-			stbuf->st_mode = S_IFDIR | inode->i_mode; 
-
-		stbuf->st_nlink = inode->i_links_count;
-		stbuf->st_size = inode->i_size;
-		stbuf->st_atime = inode->i_atime;
-		stbuf->st_mtime = inode->i_mtime;
-		stbuf->st_ctime = inode->i_ctime;
+		stbuf->st_mode	= inode->i_mode;
+		stbuf->st_nlink	= inode->i_links_count;
+		stbuf->st_size	= inode->i_size;
+		stbuf->st_atime	= inode->i_atime;
+		stbuf->st_mtime	= inode->i_mtime;
+		stbuf->st_ctime	= inode->i_ctime;
 
 		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
 		nvfuse_release_super(sb);
@@ -1820,6 +1855,47 @@ s32 nvfuse_chown(struct nvfuse_handle *nvh, const char *path, uid_t uid, gid_t g
 
 			inode->i_uid = uid;
 			inode->i_gid = gid;
+
+			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_release_super(sb);
+		}
+	}
+
+RET:
+	return res;
+}
+
+s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct timespec ts[2])
+{
+	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode *inode;
+	struct nvfuse_superblock *sb;
+	char dirname[FNAME_SIZE];
+	char filename[FNAME_SIZE];
+	int res;
+
+	if (strcmp(path, "/") == 0) {
+		res = -1;
+	} else {
+
+		res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
+		if (res < 0)
+			return res;
+
+		if (dir_entry.d_ino == 0) {
+			printf("invalid path\n");
+			res = -1;
+			goto RET;
+		} else {
+			sb = nvfuse_read_super(nvh);
+			if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+				res = -1;
+				goto RET;
+			}
+			/* set new access time */
+			inode->i_atime = ts[0].tv_sec;
+			/* sec new modification time */
+			inode->i_mtime = ts[1].tv_sec;
 
 			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
 			nvfuse_release_super(sb);

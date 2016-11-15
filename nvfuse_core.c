@@ -1777,6 +1777,9 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 		return NVFUSE_ERROR;
 
 
+	/* link count decrement */
+	inode->i_links_count--;
+
 #if NVFUSE_USE_DIR_INDEXING == 1
 	nvfuse_del_dir_indexing(sb, dir_inode, name);
 #endif 

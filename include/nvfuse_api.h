@@ -46,7 +46,7 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid);
 s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
 s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 
-s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode);
+s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode, dev_t dev);
 
 s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename);
 s32 nvfuse_rmfile_path(struct nvfuse_handle *nvh, const char *path);
@@ -90,5 +90,6 @@ void nvfuse_set_cwd_ino(struct nvfuse_handle *nvh, inode_t cwd_ino);
 void nvfuse_set_root_ino(struct nvfuse_handle *nvh, inode_t root_ino);
 
 s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
+s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct timespec ts[2]);
 
 #endif
