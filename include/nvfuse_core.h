@@ -400,7 +400,7 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct 
 s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, u32 offset, s32 position);
 void nvfuse_relocate_write_inode(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,inode_t ino, s32 dirty);
 s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb,struct nvfuse_inode *inode);
-s32 nvfuse_link(struct nvfuse_superblock *sb, u32 oldino, s8 *old_filename, u32 newino, s8 *new_filename, s32 ino);
+s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino);
 s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino,s8 *name,u32 *ino);
 u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, inode_t ino,lbno_t offset);
 s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 tail, s32 dirty);
@@ -434,5 +434,7 @@ extern pthread_mutex_t mutex_lock;
 
 void nvfuse_lock_init();
 void nvfuse_lock_exit();
+
+s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir);
 
 #endif /* NVFUSE_HEADER_H*/

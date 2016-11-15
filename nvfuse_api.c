@@ -304,7 +304,7 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 
 	dir += (dir_offset % (CLUSTER_SIZE / DIR_ENTRY_SIZE));
 
-	if (dir->d_flag == DIR_EMPTY || dir->d_flag == DIR_DELETED) {
+	if (nvfuse_dir_is_invalid(dir)) {
 		return_dentry = NULL;
 	} else {
 		dentry->d_ino = dir->d_ino;
@@ -673,14 +673,10 @@ retry:
 				search_entry = 0;
 			}
 						
-			if (dir[search_entry].d_flag == DIR_EMPTY || 
-				dir[search_entry].d_flag == DIR_DELETED) {
+			if (nvfuse_dir_is_invalid(dir + search_entry)) {
 				flag = 1;
 				dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
 				dir_inode->i_links_count++;
-				//if (dir_inode->i_links_count != dir_inode->i_ptr + 1) {
-				//	printf("debug");
-				//}
 				goto find;
 			}
 		}
@@ -1110,8 +1106,7 @@ retry:
 			if (search_entry == DIR_ENTRY_NUM) {
 				search_entry = 0;
 			}
-			if (dir[search_entry].d_flag == DIR_EMPTY || 
-				dir[search_entry].d_flag == DIR_DELETED) {
+			if (nvfuse_dir_is_invalid(dir + search_entry)) {
 				flag = 1;
 				goto find;
 			}
@@ -1232,7 +1227,7 @@ s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t 
 		}
 	}
 
-	nvfuse_link(sb, par_ino, name, new_par_ino, newname, ino);
+	nvfuse_link(sb, new_par_ino, newname, ino);
 
 	nvfuse_check_flush_segment(sb);
 	nvfuse_release_super(sb);
@@ -1265,22 +1260,27 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 	struct nvfuse_inode *inode;
 	struct nvfuse_dir_entry direntry;
 	inode_t ino = 0;
+	s32 res;
 
-	nvfuse_lookup(sb, NULL, &direntry, name, par_ino); 
+	printf(" src name = %s dst name = %s \n", name, newname);
+
+	if(nvfuse_lookup(sb, NULL, &direntry, name, par_ino) < 0) 
+	{
+		printf(" link: source inode doesn't exist\n");
+		return -1;
+	}
+
 	ino = direntry.d_ino;
 
 	if (!nvfuse_lookup(sb, &inode, NULL, newname, new_par_ino)) {
-		if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
-			nvfuse_rmdir(sb, new_par_ino, newname);
-		}
-		else {
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
-			nvfuse_rmfile(sb, new_par_ino, newname);
-		}
+		printf(" link: link exists %s \n", newname);
+		return -1;
 	}
 
-	nvfuse_link(sb, par_ino, name, new_par_ino, newname, ino);
+	res = nvfuse_link(sb, new_par_ino, newname, ino);
+	if (res) {
+		printf(" Error: link() \n");
+	}
 
 	nvfuse_check_flush_segment(sb);
 	
@@ -1289,26 +1289,28 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 
 s32 nvfuse_hardlink_path(struct nvfuse_handle *nvh, const char *from, const char *to)
 {
-	struct nvfuse_dir_entry old_dir_entry;
-	s8 old_filename[FNAME_SIZE];
+	struct nvfuse_dir_entry from_dir_entry;
+	s8 from_filename[FNAME_SIZE];
 
-	struct nvfuse_dir_entry new_dir_entry;
-	s8 new_filename[FNAME_SIZE];
+	struct nvfuse_dir_entry to_dir_entry;
+	s8 to_filename[FNAME_SIZE];
 
 	struct nvfuse_superblock *sb;
 	s32 res;
 
-	res = nvfuse_path_resolve(nvh, from, old_filename, &old_dir_entry);
+	printf(" hardlink: from = %s to = %s\n", from, to);
+
+	res = nvfuse_path_resolve(nvh, from, from_filename, &from_dir_entry);
 	if (res < 0)
 		return res;
 	
-	res = nvfuse_path_resolve(nvh, from, new_filename, &new_dir_entry);
+	res = nvfuse_path_resolve(nvh, to, to_filename, &to_dir_entry);
 	if (res < 0)
 		return res;
 
 	sb = nvfuse_read_super(nvh);
 
-	res = nvfuse_hardlink(sb, old_dir_entry.d_ino, old_filename, new_dir_entry.d_ino, new_filename);
+	res = nvfuse_hardlink(sb, from_dir_entry.d_ino, from_filename, to_dir_entry.d_ino, to_filename);
 	
 	nvfuse_release_super(sb);
 

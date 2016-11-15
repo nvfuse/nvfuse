@@ -44,6 +44,14 @@ void nvfuse_release_super(struct nvfuse_superblock *sb)
 	return;
 }
 
+s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir) 
+{
+	if (dir->d_flag == DIR_EMPTY || dir->d_flag == DIR_DELETED)
+		return 1;
+
+	return 0;
+}
+
 void nvfuse_print_inode(struct nvfuse_inode *inode, s8 *str)
 {
 	if(inode->i_type == NVFUSE_TYPE_DIRECTORY){
@@ -1620,7 +1628,7 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t 
 	return 0;
 }
 
-s32 nvfuse_link(struct nvfuse_superblock *sb, u32 oldino, s8 *old_filename, u32 newino, s8 *new_filename, s32 ino){
+s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino){
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode *dir_inode, *inode;
@@ -1667,9 +1675,9 @@ retry:
 			search_entry++;
 			if(search_entry == DIR_ENTRY_NUM)
 				search_entry = 0;
-			if(dir[search_entry].d_flag == DIR_EMPTY){				
-				flag = 1;				
-				dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;				
+			if (nvfuse_dir_is_invalid(dir + search_entry)) {
+				flag = 1;
+				dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;				 
 				dir_inode->i_links_count++;
 				goto find;
 			}
@@ -1696,6 +1704,8 @@ retry:
 find:	
 	
 	inode = nvfuse_read_inode(sb, ino,  WRITE);
+	inode->i_links_count++;
+
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;	
 	dir[search_entry].d_flag = DIR_USED;
 	dir[search_entry].d_ino = ino;
@@ -1706,9 +1716,9 @@ find:
 	nvfuse_set_dir_indexing(sb, dir_inode, new_filename, dir_inode->i_ptr);
 #endif 
 	
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino,1);
-	nvfuse_release_bh(sb, dir_bh, 0, 1);
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino,1);
+	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, DIRTY);
+	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
+	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
 
 	nvfuse_check_flush_segment(sb);	
 	
