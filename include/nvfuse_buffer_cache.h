@@ -25,37 +25,60 @@
 #define INSERT_HEAD 0
 #define INSERT_TAIL 1
 
-#define BUFFER_TYPE_UNUSED	0
-#define BUFFER_TYPE_REF		1
-#define BUFFER_TYPE_CLEAN	2
-#define BUFFER_TYPE_DIRTY	3
-#define BUFFER_TYPE_NUM		4
+#define BUFFER_TYPE_UNUSED		0
+#define BUFFER_TYPE_REF			1
+#define BUFFER_TYPE_CLEAN		2
+#define BUFFER_TYPE_DIRTY		3
+#define BUFFER_TYPE_FLUSHING	4
+#define BUFFER_TYPE_NUM			5
 
 #define BUFFER_STATUS_UNUSED	0
 #define BUFFER_STATUS_CLEAN		1
 #define BUFFER_STATUS_DIRTY		2
 #define BUFFER_STATUS_LOAD		3
 #define BUFFER_STATUS_META		4
+#define BUFFER_STATUS_MAX		5
 
-struct nvfuse_buffer_head{
-	s32 bh_type;
-	struct list_head bh_list;
-	struct hlist_node bh_hash;
-	struct nvfuse_superblock *bh_sb;
+#define DIRTY_FLUSH_DELAY		0
+#define DIRTY_FLUSH_FORCE		1
 
-	u64 bh_bno;
-	lbno_t bh_lbno;//logical block no
-	inode_t bh_ino; // inode number
-	pbno_t bh_pno; //physical block no
+/* buffer head to track dirty buffer for each inode */
+struct nvfuse_buffer_head {
+	struct list_head bh_dirty_list; /* metadata buffer list for specific inode */	
+	struct list_head bh_bc_list;	/* bc_list for linked buffer list*/
 	
-	s32 bh_meta;
-	u32 bh_dirty;
-	u32 bh_load;
-	s32 bh_ref;
+	struct nvfuse_inode_ctx *bh_ictx; /* inode context pointer */
+
+	struct nvfuse_buffer_cache *bh_bc; /* pointer to actual buffer head */
+	s32 bh_status; /* status (e.g., clean, dirty, meta) */
+	s32 bh_seq;
 	s8 *bh_buf;
+};
+
+/* buffer cache allocated to each physical block */
+struct nvfuse_buffer_cache {
+	struct hlist_node bc_hash;	/* hash list*/
+	struct list_head bc_list;	/* main buffer list */	
+	struct list_head bc_bh_head; /* buffer list to retrieve */
+	s32 bc_bh_count; 
+
+	s32 bc_list_type;				/* buffer status (e.g., clean, dirty, unused) */
+	u64 bc_bno;					/* buffer number (type | inode | block number)*/
+	lbno_t bc_lbno;				/* logical block number */
+	inode_t bc_ino;				/* inode number */
+	pbno_t bc_pno;				/* physical block no*/
+	
+	s32 bc_meta;				/* metadata buffer head*/
+	u32 bc_dirty;				/* dirty status */
+	u32 bc_load;				/* data loaded from storage */
+	s32 bc_ref;					/* reference count*/
+	s8 *bc_buf;					/* actual buffered data */
+
+	struct nvfuse_superblock *bc_sb; /* FIXME: it must be eliminated. */
 }; 
 
-struct nvfuse_buffer_manager{
+struct nvfuse_buffer_manager {
+	/* block buffer manager */
 	struct list_head bm_list[BUFFER_TYPE_NUM];	
 	struct hlist_head bm_hash[HASH_NUM + 1]; /* regular hash list and unused hash list (1) */
 
@@ -66,19 +89,43 @@ struct nvfuse_buffer_manager{
 	u64 bm_cache_hit;
 };
 
+/* inode context cache manager */
+struct nvfuse_ictx_manager {
+	struct list_head ictxc_list[BUFFER_TYPE_NUM];
+	struct hlist_head ictxc_hash[HASH_NUM + 1]; /* regular hash list and unused hash list (1) */
+
+	s32 ictxc_list_count[BUFFER_TYPE_NUM];
+	s32 ictxc_hash_count[HASH_NUM + 1];
+	s32 ictxc_cache_size;
+	u64 ictxc_cache_ref;
+	u64 ictxc_cache_hit;
+};
+
+
 int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb);
 void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb);
 
-struct nvfuse_buffer_head *nvfuse_alloc_bh();
-struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb,inode_t ino,lbno_t lblock,int read);
-struct nvfuse_buffer_head *nvfuse_find_bh(struct nvfuse_superblock *sb, u64 key,inode_t ino, lbno_t lblock);
-struct nvfuse_buffer_head *nvfuse_replcae_buffer(struct nvfuse_superblock *sb,u64 key);
-struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb, inode_t ino, lbno_t lblock);
-void nvfuse_move_buffer_type(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 buffer_type, s32 tail);
+struct nvfuse_buffer_cache *nvfuse_alloc_bc();
+struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 read, s32 is_meta);
+struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key, lbno_t lblock);
+struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb,u64 key);
+struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 is_meta);
+void nvfuse_move_buffer_type(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bh, s32 buffer_type, s32 tail);
 
 s32 nvfuse_get_dirty_count(struct nvfuse_superblock *sb);
 
 s32 nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh);
-struct nvfuse_buffer_head *nvfuse_hash_lookup(struct nvfuse_buffer_manager *bm, u64 key);
+struct nvfuse_buffer_cache *nvfuse_hash_lookup(struct nvfuse_buffer_manager *bm, u64 key);
+
+struct nvfuse_inode_ctx *nvfuse_get_ictx(struct nvfuse_superblock *sb, inode_t ino);
+s32 nvfuse_release_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 dirty);
+int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb);
+void nvfuse_free_ictx_cache(struct nvfuse_superblock *sb);
+struct nvfuse_inode_ctx *nvfuse_alloc_ictx(struct nvfuse_superblock *sb);
+struct nvfuse_buffer_head *nvfuse_find_bh_in_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lbno);
+void nvfuse_set_bh_status(struct nvfuse_buffer_head *bh, s32 status);
+void nvfuse_clear_bh_status(struct nvfuse_buffer_head *bh, s32 status);
+void nvfuse_insert_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+void nvfuse_move_ictx_type(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 desired_type);
 
 #endif

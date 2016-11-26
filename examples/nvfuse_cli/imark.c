@@ -386,7 +386,7 @@ int make_index(master_node_t *master){
 			continue;
 		}
 	
-		nvfuse_check_flush_segment(master->m_sb);
+		nvfuse_check_flush_dirty(master->m_sb, DIRTY_FLUSH_FORCE);
 		
 		nodes_created++;
 	}
@@ -424,7 +424,7 @@ static void transactions(master_node_t *master)
 					printf(" cannot update [%lu]\n\n", (long)*key);
 					continue;
 				}
-				nvfuse_check_flush_segment(master->m_sb);
+				nvfuse_check_flush_dirty(master->m_sb, DIRTY_FLUSH_FORCE);
 			}
 		}		
 		if(i % 10000 == 0)
@@ -458,7 +458,7 @@ static void transactions(master_node_t *master)
 					nodes_deleted++;
 				}
 			}
-			nvfuse_check_flush_segment(master->m_sb);
+			nvfuse_check_flush_dirty(master->m_sb, DIRTY_FLUSH_FORCE);
 		}
 		if(i % 10000 == 0)
 			printf(" 2nd transactions %3d%% (%7d keys)\r",i / (num_transaction/100), i);
@@ -499,7 +499,7 @@ void delete_index(master_node_t *master)
 
 		if(i % 10000 == 0)
 			printf(" delete %3d%% (%7d keys)\r",i/(total/100), i);
-		nvfuse_check_flush_segment(master->m_sb);
+		nvfuse_check_flush_dirty(master->m_sb, DIRTY_FLUSH_FORCE);
 	}
 	
 	B_KEY_FREE(key);
@@ -549,8 +549,7 @@ int imark_main(int argc, char *argv[]) {
 	master_node_t _master;
 	master_node_t *master = &_master;
 	struct nvfuse_superblock *sb = nvfuse_read_super(g_nvh);
-	struct nvfuse_inode *inode;
-	struct nvfuse_buffer_header *bh;
+	struct nvfuse_inode *inode;	
 	printf(" iMark for B+tree Test and Validation (Ver 0.1) \n");
 	printf(" Developed by Yongseok Oh (Yongseok Oh@sk.com)\n");
 
@@ -597,7 +596,7 @@ int imark_main(int argc, char *argv[]) {
 		bp_alloc_master(sb, master);
 		bp_init_root(master);
 
-		nvfuse_check_flush_segment(sb);
+		nvfuse_check_flush_dirty(sb, DIRTY_FLUSH_FORCE);
 	}
 
 	alloc_ntable();
@@ -633,9 +632,10 @@ int imark_main(int argc, char *argv[]) {
 
 	/* delete allocated b+tree inode */
 	{	
-		inode = nvfuse_read_inode(master->m_sb, master->m_ino, 0);
-		nvfuse_free_inode_size(sb, inode, 0);
-		nvfuse_relocate_delete_inode(sb, inode);
+		struct nvfuse_inode_ctx *ictx;
+		ictx = nvfuse_read_inode(master->m_sb, NULL, master->m_ino);
+		nvfuse_free_inode_size(sb, ictx, 0);
+		nvfuse_relocate_delete_inode(sb, ictx);
 	}
 
 	free_workload();

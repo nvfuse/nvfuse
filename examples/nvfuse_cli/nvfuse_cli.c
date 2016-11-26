@@ -199,9 +199,11 @@ int parse_and_execute(char *input)
 				imark_main(0, NULL);
 			} else if (!strcmp(arg[0],"format")) {
 				nvfuse_format(g_nvh);
-			} else if (!strcmp(arg[0],"test")) {
+			} else if (!strcmp(arg[0], "test")) {
 				nvfuse_test(g_nvh);
-			} else if (!strcmp(arg[0],"help")) {
+			} else if (!strcmp(arg[0], "sync")) {
+				nvfuse_sync(g_nvh);
+			} else if (!strcmp(arg[0], "help")) {
 				help();
 			} else if (!strcmp(arg[0],"rdfile")) {
 				nvfuse_rdfile(g_nvh, arg[1]);

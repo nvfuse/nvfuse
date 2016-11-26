@@ -138,11 +138,12 @@ void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_u
 * result: found=0, not found=-1 
 */
 s32 nvfuse_lookup(struct nvfuse_superblock *sb, 
-		struct nvfuse_inode **file_inode, 
+		struct nvfuse_inode_ctx **file_ictx, 
 		struct nvfuse_dir_entry *file_entry, 
-		s8 *filename, 
-		s32 cur_dir_ino) 
+		const s8 *filename, 
+		const s32 cur_dir_ino) 
 {
+	struct nvfuse_inode_ctx *dir_ictx;
 	struct nvfuse_inode *dir_inode = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	struct nvfuse_dir_entry *dir;
@@ -152,12 +153,14 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 	u32 offset = 0;
 	s32 res = -1;
 
-	dir_inode = nvfuse_read_inode(sb, cur_dir_ino, READ);
-	if (dir_inode == NULL)
+	dir_ictx = nvfuse_read_inode(sb, NULL, cur_dir_ino);
+	if (dir_ictx == NULL)
 		return res;
 
+	dir_inode = dir_ictx->ictx_inode;
+
 #if NVFUSE_USE_DIR_INDEXING == 1	
-	res = nvfuse_get_dir_indexing(sb, dir_inode, filename, &offset);
+	res = nvfuse_get_dir_indexing(sb, dir_inode, (char *)filename, &offset);
 	if (res < 0) {
 		goto RES;
 	}
@@ -169,7 +172,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 	start = offset * DIR_ENTRY_SIZE;
 
 	if ((start & (CLUSTER_SIZE - 1))) {
-		dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, start / CLUSTER_SIZE, READ);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, start / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		dir += (offset % DIR_ENTRY_NUM);
 	}
@@ -179,14 +182,14 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 		if (!(read_bytes&(CLUSTER_SIZE - 1))) {
 			if (dir_bh)
 				nvfuse_release_bh(sb, dir_bh, 0, 0);
-			dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, read_bytes >> CLUSTER_SIZE_BITS, READ);
+			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, read_bytes >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
 
 		if (dir->d_flag == DIR_USED) {
 			if (!strcmp(dir->d_filename, filename)) {
-				if (file_inode) {
-					*file_inode = nvfuse_read_inode(sb, dir->d_ino, READ);
+				if (file_ictx) {
+					*file_ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
 				}
 				if (file_entry) {
 					memcpy(file_entry, dir, DIR_ENTRY_SIZE);
@@ -202,9 +205,9 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 
 RES:;
 
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, 0);
 	nvfuse_release_bh(sb, dir_bh, 0, 0);
-
+	nvfuse_release_inode(sb, dir_ictx, CLEAN);
+	
 	return res;
 }
 
@@ -282,6 +285,7 @@ s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
 
 struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct dirent *dentry, off_t dir_offset) 
 {
+	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode;
 	struct nvfuse_buffer_head *dir_bh;
 	struct nvfuse_dir_entry *dir;
@@ -291,15 +295,16 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 	s32 res = 0;
 	struct dirent *return_dentry = NULL;
 
-	dir_inode = nvfuse_read_inode(sb, par_ino, READ);
+	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
+	dir_inode = dir_ictx->ictx_inode;
 	dir_size = dir_offset * DIR_ENTRY_SIZE;
 
-	if (dir_inode->i_size <= (dir_size)) {
+	if (dir_inode->i_size <= dir_size) {
 		res = NVFUSE_ERROR;
 		goto RES;
 	}
 
-	dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, (dir_offset * DIR_ENTRY_SIZE) >> CLUSTER_SIZE_BITS, READ);
+	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (dir_offset * DIR_ENTRY_SIZE) >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
 	dir += (dir_offset % (CLUSTER_SIZE / DIR_ENTRY_SIZE));
@@ -310,13 +315,15 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 		dentry->d_ino = dir->d_ino;
 		strcpy(dentry->d_name, dir->d_filename);
 
-		inode = nvfuse_read_inode(sb, dir->d_ino, 0);
+		ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
+		inode = ictx->ictx_inode;
+
 		if (inode->i_type == NVFUSE_TYPE_DIRECTORY) 
 			dentry->d_type = DT_DIR;
 		else 
 			dentry->d_type = DT_REG;
 
-		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
+		nvfuse_release_inode(sb, ictx, CLEAN);
 
 		return_dentry = dentry;
 	}
@@ -324,7 +331,7 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 	nvfuse_release_bh(sb, dir_bh, 0, 0);
 RES:;
 
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, CLEAN);
+	nvfuse_release_inode(sb, dir_ictx, CLEAN);
 	nvfuse_release_super(sb);
 
 	return return_dentry;
@@ -333,6 +340,7 @@ RES:;
 s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, s32 flags, s32 mode) 
 {
 	struct nvfuse_dir_entry dir_temp;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;	
 	struct nvfuse_file_table *ft;
 	s32 fid = -1;
@@ -342,11 +350,14 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		return error_msg("open file error, invalid file name");
 
 	res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
-	if (res < 0) { // no such file 
-		if (flags & O_RDWR || flags & O_CREAT) {
-			res = nvfuse_createfile(sb, par_ino, filename, 0, mode, 0);
-			if (res == NVFUSE_SUCCESS) {
-				res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
+	if (res < 0) 
+	{ // no such file 
+		if (flags & O_RDWR || flags & O_CREAT) 
+		{
+			res = nvfuse_createfile(sb, par_ino, filename, NULL, mode, 0);
+			if (res == NVFUSE_SUCCESS) 
+			{
+				res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);				
 			}
 		}
 		else {
@@ -357,16 +368,16 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		}
 	}
 
-	inode = nvfuse_read_inode(sb, dir_temp.d_ino, READ);
-	if (inode->i_type != NVFUSE_TYPE_FILE) {
-		inode = nvfuse_read_inode(sb, dir_temp.d_ino, READ);
+	ictx = nvfuse_read_inode(sb, NULL, dir_temp.d_ino);
+	inode = ictx->ictx_inode;
+	if (inode->i_type != NVFUSE_TYPE_FILE) {		
 		printf("This is not a file");
 		fid = -1;
 		goto RES;
 	}
 
 	fid = nvfuse_allocate_open_file_table(sb);
-	if (fid<0) {
+	if (fid < 0) {
 		goto RES;
 	}
 
@@ -377,14 +388,19 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	ft->ino = dir_temp.d_ino;
 	ft->size = inode->i_size;
 	ft->rwoffset = 0;
+	ft->flags = flags;
 
 	if (O_APPEND & flags)
 		nvfuse_seek(sb, ft, inode->i_size, SEEK_SET);
 	else
 		nvfuse_seek(sb, ft, 0, SEEK_SET);
+
 	pthread_mutex_unlock(&ft->ft_lock);
 
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, 0 /*clean*/);
+	nvfuse_release_inode(sb, ictx, 0 /*clean*/);
+	
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+
 
 RES:;
 	nvfuse_release_super(sb);
@@ -425,18 +441,20 @@ s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags,
 s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags)
 {
 	struct nvfuse_dir_entry dir_temp;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *ft;
 	s32 fid = -1;
 	s32 res = 0;
 
 	fid = nvfuse_allocate_open_file_table(sb);
-	if (fid<0) {
-		printf(" debug ");
+	if (fid<0) 
+	{		
 		return NVFUSE_ERROR;
 	}
 
-	inode = nvfuse_read_inode(sb, ino, READ);
+	ictx = nvfuse_read_inode(sb, NULL, ino);
+	inode = ictx->ictx_inode;
 
 	if (inode->i_type != NVFUSE_TYPE_FILE) {
 		return error_msg("This is not a file");
@@ -457,7 +475,7 @@ s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags)
 
 	pthread_mutex_unlock(&ft->ft_lock);
 
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
+	nvfuse_release_inode(sb, ictx, CLEAN);
 	return(fid);
 }
 
@@ -469,15 +487,13 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 	pthread_mutex_lock(&sb->sb_file_table_lock);
 	ft = sb->sb_file_table + fid;
 
-	pthread_mutex_lock(&ft->ft_lock);
-	//	ft->status = 0;
-	ft->ino = 0;
-	//ft->attr = 0;
-	//ft->date = 0;
+	pthread_mutex_lock(&ft->ft_lock);	
+	ft->ino = 0;	
 	ft->size = 0;
 	ft->used = 0;
 	ft->rwoffset = 0;
 	ft->prefetch_cur = 0;
+	ft->flags = 0;
 	pthread_mutex_unlock(&ft->ft_lock);
 
 	pthread_mutex_unlock(&sb->sb_file_table_lock);
@@ -489,6 +505,7 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 
 s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset) 
 {
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_head *bh;
 	struct nvfuse_file_table *of;
@@ -499,7 +516,8 @@ s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, n
 	of = &(sb->sb_file_table[fid]);
 	pthread_mutex_lock(&of->ft_lock);
 
-	inode = nvfuse_read_inode(sb, of->ino, READ);
+	ictx = nvfuse_read_inode(sb, NULL, of->ino);
+	inode = ictx->ictx_inode;
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 	if (roffset) {
@@ -511,7 +529,7 @@ s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, n
 	
 	while (count > 0 && of->rwoffset < inode->i_size) {
 
-		bh = nvfuse_get_bh(sb, inode->i_ino, of->rwoffset >> CLUSTER_SIZE_BITS, READ);
+		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, of->rwoffset >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
 			printf(" read error \n");
 			goto RES;
@@ -531,7 +549,7 @@ s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, n
 		nvfuse_release_bh(sb, bh, 0, 0);
 	}
 
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, 0/*clean*/);
+	nvfuse_release_inode(sb, ictx, CLEAN);
 	nvfuse_release_super(sb);
 
 	pthread_mutex_unlock(&of->ft_lock);
@@ -552,6 +570,7 @@ RES:
 
 s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset) 
 {
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
 	struct nvfuse_buffer_head *bh = NULL;
@@ -573,7 +592,8 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 
 	while (count > 0) {
 
-		inode = nvfuse_read_inode(sb, of->ino, WRITE);
+		ictx = nvfuse_read_inode(sb, NULL, of->ino);
+		inode = ictx->ictx_inode;
 
 		lblock = of->rwoffset >> CLUSTER_SIZE_BITS;
 		offset = of->rwoffset & (CLUSTER_SIZE - 1);
@@ -583,7 +603,7 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 
 		if (count && inode->i_size <= of->rwoffset)
 		{
-			ret = nvfuse_get_block(sb, inode, inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
+			ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
 			if (ret)
 			{
 				printf(" data block allocation fails.");
@@ -593,9 +613,9 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 
 		/*read modify write or partial write */
 		if (remain != CLUSTER_SIZE)
-			bh = nvfuse_get_bh(sb, inode->i_ino, lblock, READ);
+			bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, READ, NVFUSE_TYPE_DATA);
 		else
-			bh = nvfuse_get_bh(sb, inode->i_ino, lblock, WRITE);
+			bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
 
 		memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
 
@@ -608,20 +628,41 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 
 		inode->i_type = NVFUSE_TYPE_FILE;
 		inode->i_size = of->size;
-
-		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+		
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
+		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
 
+	if (of->flags & O_SYNC) {
+		if (of->flags & __O_SYNC)
+		{
+			ictx = nvfuse_read_inode(sb, NULL, of->ino);
+			nvfuse_fsync_ictx(sb, ictx);
+			nvfuse_release_inode(sb, ictx, CLEAN);
+		}
+		else /* in case of O_DSYNC*/
+		{
+			ictx = nvfuse_read_inode(sb, NULL, of->ino);
+			nvfuse_fsync_ictx(sb, ictx);
+			nvfuse_release_inode(sb, ictx, CLEAN);
+		}
+	}
+	
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+	
 	pthread_mutex_unlock(&of->ft_lock);
+	
 	nvfuse_release_super(sb);
-
-	nvfuse_check_flush_segment(sb);
 
 	return wcount;
 }
 
 /* ported from fuse_ext2 project */
+#if NVFUSE_OS == NVFUSE_OS_WINDOWS
+#define major(dev) ((int)(((unsigned int) (dev) >> 8) & 0xff))
+#define minor(dev) ((int)((dev) & 0xff))
+#define makedev(x, y) (x | y)
+#endif
 static inline u16 old_encode_dev(dev_t dev)
 {
 	return (major(dev) << 8) | minor(dev);
@@ -651,12 +692,13 @@ static inline dev_t new_decode_dev(u32 dev)
 	return makedev(major, minor);
 }
 
-s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode, dev_t dev) 
+s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename, inode_t *new_ino, mode_t mode, dev_t dev) 
 {
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *new_ictx, *dir_ictx;
 	struct nvfuse_inode *new_inode, *dir_inode;
-	struct nvfuse_buffer_head *dir_bh = NULL;
+	struct nvfuse_buffer_head *dir_bh = NULL;	
 	s32 j = 0, i = 0;
 	s32 new_entry = 0, flag = 0;
 	s32 search_lblock = 0, search_entry = 0;
@@ -665,15 +707,16 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, in
 	s32 num_block;
 	u32 dir_hash;
 
-	if (strlen(str) < 1 || strlen(str) >= FNAME_SIZE) {
-		printf("create file : name  = %s, %d\n", str, (int)strlen(str));
+	if (strlen(fiename) < 1 || strlen(fiename) >= FNAME_SIZE) {
+		printf("create file : name  = %s, %d\n", fiename, (int)strlen(fiename));
 		return -1;
 	}
 
-	if (!nvfuse_lookup(sb, NULL, NULL, str, par_ino))
+	if (!nvfuse_lookup(sb, NULL, NULL, fiename, par_ino))
 		return error_msg(" exist file or directory\n");
 
-	dir_inode = nvfuse_read_inode(sb, par_ino, WRITE);
+	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
+	dir_inode = dir_ictx->ictx_inode;
 
 	search_lblock = (dir_inode->i_links_count - 1) / DIR_ENTRY_NUM;
 	search_entry = (dir_inode->i_links_count - 1) % DIR_ENTRY_NUM;
@@ -694,7 +737,7 @@ retry:
 
 	// find an empty dentry
 	for (i = 0; i < num_block; i++) {
-		dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, search_lblock, READ);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
 		for (new_entry = 0; new_entry < DIR_ENTRY_NUM; new_entry++) {
@@ -725,9 +768,9 @@ retry:
 	if (!flag) // allocate new direcct block 
 	{
 		nvfuse_release_bh(sb, dir_bh, 0, 0);
-		nvfuse_get_block(sb, dir_inode, dir_inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
-		dir_bh = nvfuse_get_new_bh(sb, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS);
-		nvfuse_release_bh(sb, dir_bh, INSERT_HEAD, dir_bh->bh_dirty);
+		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
+		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
+		nvfuse_release_bh(sb, dir_bh, INSERT_HEAD, DIRTY);
 		dir_inode->i_size += CLUSTER_SIZE;
 		goto retry;
 	}
@@ -736,7 +779,19 @@ find:
 
 	assert(dir_inode->i_links_count == dir_inode->i_ptr + 1);
 
-	new_inode = nvfuse_alloc_new_inode(sb);
+	{
+		inode_t ino;
+		
+		new_ictx = nvfuse_alloc_ictx(sb);
+		if (new_ictx == NULL)
+			return -1;
+		
+		ino = nvfuse_alloc_new_inode(sb, new_ictx);				
+		set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
+		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
+		nvfuse_insert_ictx(sb, new_ictx);
+	}
+	new_inode = new_ictx->ictx_inode;
 	new_inode->i_type = NVFUSE_TYPE_FILE;
 	new_inode->i_size = 0;
 	new_inode->i_mode = mode;
@@ -753,14 +808,7 @@ find:
 		else
 			new_inode->i_blocks[1] = new_encode_dev(dev);
 	}
-
-	/*if(S_ISBLK(mode))
-		printf(" mknode blkdevice \n");
-	if(S_ISCHR(mode))
-		printf(" mknode chrdevice \n");
-	if(S_ISFIFO(mode))
-		printf(" mknode fifo \n");*/
-
+	
 	if (new_ino)
 		*new_ino = new_inode->i_ino;
 
@@ -768,21 +816,21 @@ find:
 	dir[search_entry].d_flag = DIR_USED;
 	dir[search_entry].d_ino = new_inode->i_ino;
 	dir[search_entry].d_version = new_inode->i_version;
-	strcpy(dir[search_entry].d_filename, str);
+	strcpy(dir[search_entry].d_filename, fiename);
 	
 #if NVFUSE_USE_DIR_INDEXING == 1
-	nvfuse_set_dir_indexing(sb, dir_inode, str, dir_inode->i_ptr);
+	nvfuse_set_dir_indexing(sb, dir_inode, fiename, dir_inode->i_ptr);
 #endif 
-
-	nvfuse_relocate_write_inode(sb, new_inode, new_inode->i_ino, DIRTY);
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, DIRTY);
+		
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
-	nvfuse_check_flush_segment(sb);
+
+	nvfuse_release_inode(sb, new_ictx, DIRTY);
+	nvfuse_release_inode(sb, dir_ictx, DIRTY);	
 
 	return NVFUSE_SUCCESS;
 }
 
-s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 to_entry, u32 from_entry)
+s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 to_entry, u32 from_entry)
 {
 	struct nvfuse_buffer_head *dir_bh_from;
 	struct nvfuse_dir_entry *dir_from;
@@ -790,17 +838,21 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode *inod
 	struct nvfuse_buffer_head *dir_bh_to;
 	struct nvfuse_dir_entry *dir_to;
 
+	struct nvfuse_inode *inode;
+
 	if (to_entry == from_entry) 
 		return -1;
-		
+	
+	inode = ictx->ictx_inode;
+
 	assert(to_entry < from_entry);
 
-	dir_bh_from = nvfuse_get_bh(sb, inode->i_ino, from_entry * DIR_ENTRY_SIZE / CLUSTER_SIZE, READ);
+	dir_bh_from = nvfuse_get_bh(sb, ictx, inode->i_ino, from_entry * DIR_ENTRY_SIZE / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 	dir_from = (struct nvfuse_dir_entry *)dir_bh_from->bh_buf;
 	dir_from += (from_entry % DIR_ENTRY_NUM);	
 	assert(dir_from->d_flag != DIR_DELETED);
 	
-	dir_bh_to = nvfuse_get_bh(sb, inode->i_ino, to_entry * DIR_ENTRY_SIZE / CLUSTER_SIZE, READ);
+	dir_bh_to = nvfuse_get_bh(sb, ictx, inode->i_ino, to_entry * DIR_ENTRY_SIZE / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 	dir_to = (struct nvfuse_dir_entry *)dir_bh_to->bh_buf;
 	dir_to += (to_entry % DIR_ENTRY_NUM);
 	assert(dir_to->d_flag == DIR_DELETED);
@@ -831,6 +883,7 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode *inod
 
 s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 {
+	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode = NULL;
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_buffer_head *dir_bh = NULL;
@@ -842,12 +895,10 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	u64 dir_size = 0;
 	u32 found_entry;
 	
-	dir_inode = nvfuse_read_inode(sb, par_ino, WRITE);
+	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
+	dir_inode = dir_ictx->ictx_inode;
 	dir_size = dir_inode->i_size;
-
-	if (!strcmp(filename, "9999")) {
-		dir_size = dir_inode->i_size;
-	}
+		
 #if NVFUSE_USE_DIR_INDEXING == 1
 	if (nvfuse_get_dir_indexing(sb, dir_inode, filename, &offset) < 0) {
 		printf(" fixme: filename (%s) is not in the index.\n", filename);
@@ -857,7 +908,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 
 	start = offset * DIR_ENTRY_SIZE;
 	if ((start & (CLUSTER_SIZE - 1))) {
-		dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, start / CLUSTER_SIZE, READ);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, start / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		dir += (offset % DIR_ENTRY_NUM);
 	}
@@ -867,13 +918,14 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 			if (dir_bh)
 				nvfuse_release_bh(sb, dir_bh, 0/*tail*/, 0/*dirty*/);
 			lblock = read_bytes >> CLUSTER_SIZE_BITS;
-			dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, read_bytes >> CLUSTER_SIZE_BITS, READ);
+			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, read_bytes >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
 
 		if (dir->d_flag == DIR_USED) {
 			if (!strcmp(dir->d_filename, filename)) {
-				inode = nvfuse_read_inode(sb, dir->d_ino, WRITE);
+				ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
+				inode = ictx->ictx_inode;
 				found_entry = read_bytes / DIR_ENTRY_SIZE;
 				break;
 			}
@@ -897,11 +949,11 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 
 	inode->i_links_count--;
 	if (inode->i_links_count == 0) {	
-		nvfuse_free_inode_size(sb, inode, 0/*size*/);
-		nvfuse_relocate_delete_inode(sb, inode);
+		nvfuse_free_inode_size(sb, ictx, 0/*size*/);
+		nvfuse_relocate_delete_inode(sb, ictx);
 	}
 	else {
-		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, 1/*dirty*/);
+		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
 		
 	dir_inode->i_links_count--;
@@ -909,17 +961,17 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	dir->d_flag = DIR_DELETED;
 
 	/* Shrink directory entry that last entry is moved to delete entry. */
-	nvfuse_shrink_dentry(sb, dir_inode, found_entry, dir_inode->i_links_count);
+	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
 	
-	if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
-		nvfuse_truncate_blocks(sb, dir_inode, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+	/*if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
+		nvfuse_truncate_blocks(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
 		dir_inode->i_size -= CLUSTER_SIZE;
-	}
+	}*/
 
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, 1/*dirty*/);
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
+	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
-	nvfuse_check_flush_segment(sb);
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 	nvfuse_release_super(sb);
 
 	return NVFUSE_SUCCESS;
@@ -957,6 +1009,7 @@ s32 nvfuse_unlink(struct nvfuse_handle *nvh, const char *path)
 s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename) 
 {
 	struct nvfuse_dir_entry *dir;
+	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode = NULL, *inode = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;	
 	s32 j, count = 0;
@@ -966,7 +1019,8 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	u32 size, read_bytes, offset = 0;
 	u32 found_entry;
 
-	dir_inode = nvfuse_read_inode(sb, par_ino, WRITE);
+	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
+	dir_inode = dir_ictx->ictx_inode;
 
 	dir_size = dir_inode->i_size;
 
@@ -980,7 +1034,7 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	dir_size = dir_inode->i_size;
 	start = offset * DIR_ENTRY_SIZE;
 	if ((start & (CLUSTER_SIZE - 1))) {
-		dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, start / CLUSTER_SIZE, READ);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, start / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		dir += (offset % DIR_ENTRY_NUM);
 	}
@@ -991,13 +1045,14 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 				nvfuse_release_bh(sb, dir_bh, 0, 0);
 
 			lblock = read_bytes >> CLUSTER_SIZE_BITS;
-			dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, lblock, READ);
+			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, lblock, READ, NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
 
 		if (dir->d_flag == DIR_USED) {
 			if (!strcmp(dir->d_filename, filename)) {
-				inode = nvfuse_read_inode(sb, dir->d_ino, WRITE);
+				ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
+				inode = ictx->ictx_inode;
 				found_entry = read_bytes / DIR_ENTRY_SIZE;
 				break;
 			}
@@ -1035,29 +1090,30 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 #endif 
 	/* delete allocated b+tree inode */
 	{
-		struct nvfuse_inode *bpinode = nvfuse_read_inode(sb, inode->i_bpino, 0);
-		nvfuse_free_inode_size(sb, bpinode, 0);
-		nvfuse_relocate_delete_inode(sb, bpinode);
+		struct nvfuse_inode_ctx *bp_ictx;		
+		bp_ictx = nvfuse_read_inode(sb, NULL, inode->i_bpino);
+		nvfuse_free_inode_size(sb, bp_ictx, 0);
+		nvfuse_relocate_delete_inode(sb, bp_ictx);
 	}
 
 	/* Current Directory inode Deletion*/
-	nvfuse_free_inode_size(sb, inode, 0);
-	nvfuse_relocate_delete_inode(sb, inode);
+	nvfuse_free_inode_size(sb, ictx, 0);
+	nvfuse_relocate_delete_inode(sb, ictx);
 	
 	/* Shrink directory entry that last entry is moved to delete entry. */
-	nvfuse_shrink_dentry(sb, dir_inode, found_entry, dir_inode->i_links_count);
+	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
 	
 	/* Free block reclaimation is necessary but test is required. */
-	if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
-		nvfuse_truncate_blocks(sb, dir_inode, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+	/*if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
+		nvfuse_truncate_blocks(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
 		dir_inode->i_size -= CLUSTER_SIZE;
-	}
+	}*/
 
 	/* Parent Directory Modification */
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, DIRTY);
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
+	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
-	nvfuse_check_flush_segment(sb);
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 	nvfuse_release_super(sb);
 
 	return NVFUSE_SUCCESS;
@@ -1090,12 +1146,14 @@ s32 nvfuse_rmdir_path(struct nvfuse_handle *nvh, const char *path)
 	return res;
 }
 
-s32 nvfuse_mkdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode)
+s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *dirname, inode_t *new_ino, const mode_t mode)
 {
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *new_ictx, *dir_ictx;
 	struct nvfuse_inode *new_inode = NULL, *dir_inode = NULL;
-	struct nvfuse_buffer_head *dir_bh = NULL;
+
+	struct nvfuse_buffer_head *dir_bh = NULL;	
 	s32 i = 0, j, flag = 0;
 	lbno_t lblock = 0;
 	s32 new_entry = 0;
@@ -1106,19 +1164,20 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t
 	s32 num_block;
 	s32 ret;
 	
-	if (strlen(str) < 1 || strlen(str) >= FNAME_SIZE) {
-		printf(" mkdir : name  = %s, %d\n", str, (int)strlen(str));
+	if (strlen(dirname) < 1 || strlen(dirname) >= FNAME_SIZE) {
+		printf(" mkdir : name  = %s, %d\n", dirname, (int)strlen(dirname));
 		ret = NVFUSE_ERROR;
 		goto RET;
 	}
 
-	if (!nvfuse_lookup(sb, NULL, NULL, str, par_ino)) {
+	if (!nvfuse_lookup(sb, NULL, NULL, dirname, par_ino)) {
 		printf(" exist file or directory\n");
 		ret = NVFUSE_ERROR;
 		goto RET;
 	}
 
-	dir_inode = nvfuse_read_inode(sb, par_ino, WRITE);
+	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
+	dir_inode = dir_ictx->ictx_inode;
 
 	// last update entry pointer
 	search_lblock = (dir_inode->i_links_count - 1) / DIR_ENTRY_NUM;
@@ -1142,7 +1201,7 @@ retry:
 	}
 
 	for (i = 0; i < num_block; i++) {
-		dir_bh = nvfuse_get_bh(sb, dir_inode->i_ino, search_lblock, READ);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
 		for (new_entry = 0; new_entry < DIR_ENTRY_NUM; new_entry++) {
@@ -1174,11 +1233,10 @@ retry:
 	if (!flag) {
 		nvfuse_release_bh(sb, dir_bh, 0, CLEAN);
 		//new dentiry allocation		
-		nvfuse_get_block(sb, dir_inode, dir_inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
-		dir_bh = nvfuse_get_new_bh(sb, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS);
-		nvfuse_release_bh(sb, dir_bh, 0, dir_bh->bh_dirty);
-		dir_inode->i_size += CLUSTER_SIZE;
-		nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, DIRTY);
+		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
+		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
+		nvfuse_release_bh(sb, dir_bh, 0, dir_bh->bh_bc->bc_dirty);
+		dir_inode->i_size += CLUSTER_SIZE;		
 		goto retry;
 	}
 
@@ -1187,29 +1245,41 @@ find:
 	dir_inode->i_links_count++;
 	
 	assert(dir_inode->i_ptr + 1 == dir_inode->i_links_count);
-
-	new_inode = nvfuse_alloc_new_inode(sb);
+	
+	{
+		inode_t ino;
+		
+		new_ictx = nvfuse_alloc_ictx(sb);
+		if (new_ictx == NULL)
+			return -1;
+		set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
+		ino = nvfuse_alloc_new_inode(sb, new_ictx);
+		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
+		nvfuse_insert_ictx(sb, new_ictx);
+	}
+	
+	new_inode = new_ictx->ictx_inode;
+	
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 	dir[search_entry].d_flag = DIR_USED;
 	dir[search_entry].d_ino = new_inode->i_ino;
 	dir[search_entry].d_version = new_inode->i_version;
-	strcpy(dir[search_entry].d_filename, str);
-
-
+	strcpy(dir[search_entry].d_filename, dirname);
+	
 #if NVFUSE_USE_DIR_INDEXING == 1		
-	nvfuse_set_dir_indexing(sb, dir_inode, str, dir_inode->i_ptr);
+	nvfuse_set_dir_indexing(sb, dir_inode, (char *)dirname, dir_inode->i_ptr);
 #endif
-
-	nvfuse_relocate_write_inode(sb, dir_inode, dir_inode->i_ino, DIRTY);
+		
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
+	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
-	ret = nvfuse_get_block(sb, new_inode, new_inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
+	ret = nvfuse_get_block(sb, new_ictx, new_inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
 	if (ret)
 	{
 		printf(" data block allocation fails.");
 		return NVFUSE_ERROR;
 	}
-	dir_bh = nvfuse_get_bh(sb, new_inode->i_ino, 0, WRITE);
+	dir_bh = nvfuse_get_bh(sb, new_ictx, new_inode->i_ino, 0, WRITE, NVFUSE_TYPE_META);
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
 	strcpy(dir[0].d_filename, "."); // current dir
@@ -1237,11 +1307,11 @@ find:
 
 	/* create bptree related nodes for new directory's denties */
 	nvfuse_create_bptree(sb, new_inode);
-
-	nvfuse_relocate_write_inode(sb, new_inode, new_inode->i_ino, DIRTY);
+		
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
+	nvfuse_release_inode(sb, new_ictx, DIRTY);
 
-	nvfuse_check_flush_segment(sb);
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 	
 	ret = NVFUSE_SUCCESS;
 
@@ -1253,6 +1323,7 @@ RET:
 s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname) 
 {
 	struct nvfuse_superblock *sb;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	inode_t ino = 0;
 
@@ -1260,20 +1331,22 @@ s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t 
 
 	nvfuse_rm_direntry(sb, par_ino, name, &ino);
 
-	if (!nvfuse_lookup(sb, &inode, NULL, newname, new_par_ino)) {
+	if (!nvfuse_lookup(sb, &ictx, NULL, newname, new_par_ino)) {
+		inode = ictx->ictx_inode;
 		if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_rmdir(sb, new_par_ino, newname);
 		}
 		else {
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_rmfile(sb, new_par_ino, newname);
 		}
 	}
 
 	nvfuse_link(sb, new_par_ino, newname, ino);
 
-	nvfuse_check_flush_segment(sb);
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+
 	nvfuse_release_super(sb);
 
 	return 0;
@@ -1300,8 +1373,7 @@ s32 nvfuse_rename_path(struct nvfuse_handle *nvh, const char *from, const char *
 }
 
 s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname)
-{
-	struct nvfuse_inode *inode;
+{	
 	struct nvfuse_dir_entry direntry;
 	inode_t ino = 0;
 	s32 res;
@@ -1316,7 +1388,7 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 
 	ino = direntry.d_ino;
 
-	if (!nvfuse_lookup(sb, &inode, NULL, newname, new_par_ino)) {
+	if (!nvfuse_lookup(sb, NULL, NULL, newname, new_par_ino)) {
 		printf(" link: link exists %s \n", newname);
 		return -1;
 	}
@@ -1326,7 +1398,7 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 		printf(" Error: link() \n");
 	}
 
-	nvfuse_check_flush_segment(sb);
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 	
 	return 0;
 }
@@ -1378,9 +1450,12 @@ s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t
 		printf("invalid path\n");
 		res = -1;
 	}
-	else {
+	else 
+	{
 		sb = nvfuse_read_super(nvh);
 		res = nvfuse_createfile(sb, dir_entry.d_ino, filename, 0, mode, dev);
+		nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+
 		nvfuse_release_super(sb);
 	}
 
@@ -1446,6 +1521,7 @@ s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size)
 {
 	struct nvfuse_superblock *sb;
 	struct nvfuse_file_table *ft;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	int res = 0;
 
@@ -1453,21 +1529,22 @@ s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size)
 
 	ft = sb->sb_file_table + fid;
 
-	inode = nvfuse_read_inode(sb, ft->ino, READ);
-	nvfuse_free_inode_size(sb, inode, size);
-	inode->i_size = size;
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
+	inode = ictx->ictx_inode;
+
+	nvfuse_free_inode_size(sb, ictx, size);
 	
-	nvfuse_check_flush_segment(sb);
-	nvfuse_sync(sb);	
+	inode->i_size = size;
+	nvfuse_release_inode(sb, ictx, DIRTY);
+	
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 
 	return res;
 }
 
 s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, const char *name)
 {
-	struct nvfuse_superblock *sb;
-	struct nvfuse_inode *inode;	
+	struct nvfuse_superblock *sb;	
 	int res = 0;
 	int ino = 0;
 	int fid = 0;
@@ -1494,11 +1571,9 @@ s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, 
 		printf(" symlink error \n");
 		return -1;
 	}
+			
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 
-	inode = nvfuse_read_inode(sb, ino, 0);
-
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, 0);
-	
 	nvfuse_closefile(nvh, fid);
 
 	nvfuse_release_super(sb);
@@ -1526,8 +1601,7 @@ s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_
 	int rc;
 	unsigned int bytes; 
 	int fid; 
-	int res = 0;
-	struct nvfuse_inode *inode; 
+	int res = 0;	
 	struct nvfuse_superblock *sb;
 	
 	sb = nvfuse_read_super(nvh);
@@ -1538,12 +1612,6 @@ s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_
 		ino = ROOT_INO;
 
 	nvfuse_lock();
-	inode = nvfuse_read_inode(sb, ino, READ);
-
-	printf("op_readlink: inode contents: i_mode=0%o, i_links_count=%d \n",
-		inode->i_mode, inode->i_links_count);
-
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
 		
 	fid = nvfuse_openfile_ino(sb, ino, O_RDONLY);
 	
@@ -1560,14 +1628,13 @@ s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_
 
 	nvfuse_unlock();
 	
-	//free (buf);
-
 	return bytes;
 }
 
 s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf)
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char dirname[FNAME_SIZE];
@@ -1591,10 +1658,12 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 			goto RET;
 		} else {
 			sb = nvfuse_read_super(nvh);
-			if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+			if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 				res = -ENOENT;
 				goto RET;
 			}
+			
+			inode = ictx->ictx_inode;
 
 			stbuf->st_mode	= inode->i_mode;
 			stbuf->st_nlink	= inode->i_links_count;
@@ -1611,7 +1680,7 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 				stbuf->st_rdev = new_decode_dev(inode->i_blocks[1]);
 			}
 
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
+			nvfuse_release_inode(sb, ictx, CLEAN);
 			nvfuse_release_super(sb);
 
 			res = 0;
@@ -1625,6 +1694,7 @@ RET:
 s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf, s32 fd)
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	struct nvfuse_file_table *ft;
@@ -1642,7 +1712,8 @@ s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *st
 
 		ft = sb->sb_file_table + fd;
 		
-		inode = nvfuse_read_inode(sb, ft->ino, READ);
+		ictx = nvfuse_read_inode(sb, NULL, ft->ino);
+		inode = ictx->ictx_inode;
 
 		stbuf->st_mode	= inode->i_mode;
 		stbuf->st_nlink	= inode->i_links_count;
@@ -1651,7 +1722,7 @@ s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *st
 		stbuf->st_mtime	= inode->i_mtime;
 		stbuf->st_ctime	= inode->i_ctime;
 
-		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
+		nvfuse_release_inode(sb, ictx, CLEAN);
 		nvfuse_release_super(sb);
 
 		res = 0;
@@ -1664,6 +1735,7 @@ RET:
 s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask)
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char dirname[FNAME_SIZE];
@@ -1685,10 +1757,12 @@ s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask)
 			goto RET;
 		} else {
 			sb = nvfuse_read_super(nvh);
-			if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+			if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 				res = -1;
 				goto RET;
 			}
+
+			inode = ictx->ictx_inode;
 
 			if(inode->i_type == NVFUSE_TYPE_FILE)
 			{
@@ -1710,7 +1784,7 @@ s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask)
 			}
 
 
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, CLEAN);
+			nvfuse_release_inode(sb, ictx, CLEAN);
 			nvfuse_release_super(sb);
 		}
 	}
@@ -1787,6 +1861,7 @@ s32 nvfuse_statvfs(struct nvfuse_handle *nvh, const char *path, struct statvfs *
 s32 nvfuse_chmod_path(struct nvfuse_handle *nvh, const char *path, mode_t mode)
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char dirname[FNAME_SIZE];
@@ -1808,15 +1883,17 @@ s32 nvfuse_chmod_path(struct nvfuse_handle *nvh, const char *path, mode_t mode)
 			goto RET;
 		} else {
 			sb = nvfuse_read_super(nvh);
-			if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+			if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 				res = -1;
 				goto RET;
 			}
 
+			inode = ictx->ictx_inode;
+
 			mask = S_IRWXU | S_IRWXG | S_IRWXO | S_ISUID | S_ISGID | S_ISVTX;
 			inode->i_mode = (inode->i_mode & ~mask) | (mode & mask);
 
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_release_super(sb);
 		}
 	}
@@ -1828,6 +1905,7 @@ RET:
 s32 nvfuse_chown(struct nvfuse_handle *nvh, const char *path, uid_t uid, gid_t gid)
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char dirname[FNAME_SIZE];
@@ -1848,15 +1926,16 @@ s32 nvfuse_chown(struct nvfuse_handle *nvh, const char *path, uid_t uid, gid_t g
 			goto RET;
 		} else {
 			sb = nvfuse_read_super(nvh);
-			if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+			if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 				res = -1;
 				goto RET;
 			}
 
+			inode = ictx->ictx_inode;
 			inode->i_uid = uid;
 			inode->i_gid = gid;
 
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_release_super(sb);
 		}
 	}
@@ -1868,6 +1947,7 @@ RET:
 s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct timespec ts[2])
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char dirname[FNAME_SIZE];
@@ -1888,16 +1968,17 @@ s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct tim
 			goto RET;
 		} else {
 			sb = nvfuse_read_super(nvh);
-			if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+			if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 				res = -1;
 				goto RET;
 			}
+			inode = ictx->ictx_inode;
 			/* set new access time */
 			inode->i_atime = ts[0].tv_sec;
 			/* sec new modification time */
 			inode->i_mtime = ts[1].tv_sec;
 
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_release_super(sb);
 		}
 	}
@@ -1910,24 +1991,148 @@ RET:
 s32 nvfuse_fdatasync(struct nvfuse_handle *nvh, int fd)
 {
 	struct nvfuse_superblock *sb;
+	struct nvfuse_file_table *ft;
+	struct nvfuse_inode_ctx *ictx;
+
+	int res;
+
 	sb = nvfuse_read_super(nvh);
-	nvfuse_sync(sb);
+	ft = sb->sb_file_table + fd;
+	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
+	/* flush dirty pages associated with inode context including only data pages */
+	nvfuse_fdsync_ictx(sb, ictx);
+	nvfuse_release_inode(sb, ictx, CLEAN);
 	nvfuse_release_super(sb);
+
 	return 0;
 }
 
 s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd)
-{
+{	
 	struct nvfuse_superblock *sb;
+	struct nvfuse_file_table *ft;
+	struct nvfuse_inode_ctx *ictx;
+	int res;
+	
 	sb = nvfuse_read_super(nvh);
-	nvfuse_sync(sb);
+	ft = sb->sb_file_table + fd;
+	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
+	
+	/* flush dirty pages associated with inode context including meta and data pages */
+	nvfuse_fsync_ictx(sb, ictx);
+
+	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_super(sb);
+	
+	return 0;
+}
+
+s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
+{
+	struct list_head *dirty_head, *flushing_head;
+	struct list_head *temp, *ptr;
+	struct nvfuse_buffer_head *bh;
+	struct nvfuse_buffer_cache *bc;
+	s32 dirty_count = 0;
+	s32 flushing_count = 0;
+	s32 res;
+		
+	/* ictx doesn't keep dirty data */
+	if (!ictx->ictx_data_dirty_count && 
+		!ictx->ictx_meta_dirty_count)
+		goto RES;
+
+	/* dirty list for file data */
+	dirty_head = &ictx->ictx_data_bh_head;
+	flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
+
+	list_for_each_safe(ptr, temp, dirty_head)
+	{
+		bh = (struct nvfuse_buffer_head *)list_entry(ptr, struct nvfuse_buffer_head, bh_dirty_list);
+		assert(test_bit(&bh->bh_status, BUFFER_STATUS_DIRTY));
+		
+		bc = bh->bh_bc;
+
+		list_move(&bc->bc_list, flushing_head);
+		flushing_count++;
+	}
+
+	/* dirty list for meta data */
+	dirty_head = &ictx->ictx_meta_bh_head;
+	flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
+
+	list_for_each_safe(ptr, temp, dirty_head)
+	{
+		bh = (struct nvfuse_buffer_head *)list_entry(ptr, struct nvfuse_buffer_head, bh_dirty_list);
+		assert(test_bit(&bh->bh_status, BUFFER_STATUS_DIRTY));
+
+		bc = bh->bh_bc;
+
+		list_move(&bc->bc_list, flushing_head);
+		flushing_count++;
+	}
+
+	assert(ictx->ictx_data_dirty_count + ictx->ictx_meta_dirty_count == flushing_count);
+
+	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
+
+RES:;
+
+	return 0;
+}
+
+s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
+{
+	struct list_head *dirty_head, *flushing_head;
+	struct list_head *temp, *ptr;
+	struct nvfuse_buffer_head *bh;
+	struct nvfuse_buffer_cache *bc;
+	s32 dirty_count = 0;
+	s32 flushing_count = 0;
+	s32 res;
+
+	/* ictx doesn't keep dirty data */
+	if (!ictx->ictx_data_dirty_count)
+		goto RES;
+
+	/* dirty list for file data */
+	dirty_head = &ictx->ictx_data_bh_head;
+	flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
+
+	list_for_each_safe(ptr, temp, dirty_head)
+	{
+		bh = (struct nvfuse_buffer_head *)list_entry(ptr, struct nvfuse_buffer_head, bh_dirty_list);
+		assert(test_bit(&bh->bh_status, BUFFER_STATUS_DIRTY));
+
+		bc = bh->bh_bc;
+
+		list_move(&bc->bc_list, flushing_head);
+		flushing_count++;
+	}
+
+	assert(ictx->ictx_data_dirty_count == flushing_count);
+
+	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
+
+RES:;
+
+	return 0;
+}
+
+
+s32 nvfuse_sync(struct nvfuse_handle *nvh) {
+	struct nvfuse_superblock *sb;	
+	sb = nvfuse_read_super(nvh);
+	nvfuse_check_flush_dirty(sb, DIRTY_FLUSH_FORCE);
 	nvfuse_release_super(sb);
 	return 0;
 }
 
+
 s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, off_t length) 
 {
 	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char dirname[FNAME_SIZE];
@@ -1945,14 +2150,14 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, o
 		goto RET;
 	} else {
 		sb = nvfuse_read_super(nvh);
-		if(nvfuse_lookup(sb, &inode, &dir_entry, filename, dir_entry.d_ino) < 0){
+		if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 			res = -1;
 			goto RET;
 		}
 
 		for (curr_block = start;curr_block < start+length; curr_block)
 		{
-			res = nvfuse_get_block(sb, inode, curr_block, NULL, 1 /*create*/);
+			res = nvfuse_get_block(sb, ictx, curr_block, NULL, 1 /*create*/);
 			if (res < 0) {
 				printf(" Error: nvfuse_get_block()\n");
 				res = -1;
@@ -1960,8 +2165,8 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, o
 			}
 		}
 
-		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
-		nvfuse_sync(sb);
+		nvfuse_release_inode(sb, ictx, DIRTY);
+		nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 		nvfuse_release_super(sb);
 	}
 RET:;

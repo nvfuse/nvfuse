@@ -29,16 +29,16 @@
 #include <windows.h>
 #endif
 
-//extern u32 CWD;
-//extern u32 ROOT_DIR;
 extern struct nvfuse_handle *g_nvh;
 
-s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize){
+s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
+{
+#define BLOCK_IO_SIZE (CLUSTER_SIZE * 8)
 	u64 size;
-	s32 i = CLUSTER_SIZE, fd, write_block_size = CLUSTER_SIZE;
+	s32 i = CLUSTER_SIZE, fd, write_block_size = BLOCK_IO_SIZE;
 	s32 ret = 0;
 	s32 num_block;
-	s8 file_source[CLUSTER_SIZE];
+	s8 file_source[BLOCK_IO_SIZE];
 
 	if(strlen(str) < 1 || strlen(str) >= FNAME_SIZE)
 		return error_msg("mkfile  [filename] [size]\n");
@@ -54,16 +54,16 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize){
 
 		if(size  < 1) size = CLUSTER_SIZE;
 
-		for (size; size>=write_block_size;
-			size-=write_block_size){
-				ret = nvfuse_writefile(nvh, fd,file_source,write_block_size, 0);
+		for (size; size>=write_block_size; size-=write_block_size){
+			ret = nvfuse_writefile(nvh, fd, file_source, write_block_size, 0);
 
-				if(ret == -1)
-					return -1;
+			if(ret == -1)
+				return -1;
 		}
 		nvfuse_writefile(nvh, fd,file_source, i, 0); /* write remainder */
 	}
 	
+	nvfuse_fsync(nvh, fd);
 	nvfuse_closefile(nvh, fd);
 
 	return NVFUSE_SUCCESS;
@@ -71,7 +71,8 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize){
 
 s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str)
 {
-	struct nvfuse_dir_entry dir_temp;
+	struct nvfuse_dir_entry dir_temp;	
+	struct nvfuse_inode_ctx *d_ictx;
 	struct nvfuse_inode *d_inode;
 	struct nvfuse_superblock *sb;
 	
@@ -82,57 +83,87 @@ s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str)
 		return NVFUSE_SUCCESS;
 	}
 
-	if(nvfuse_lookup(sb, &d_inode, &dir_temp, str, nvfuse_get_cwd_ino(nvh)) < 0)
+	if(nvfuse_lookup(sb, &d_ictx, &dir_temp, str, nvfuse_get_cwd_ino(nvh)) < 0)
 		return error_msg(" invalid dir path ");
 
-	d_inode = nvfuse_read_inode(sb, dir_temp.d_ino, READ);
+	d_inode = d_ictx->ictx_inode;
 
 	if(d_inode->i_type == NVFUSE_TYPE_DIRECTORY){
 		nvfuse_set_cwd_ino(nvh, dir_temp.d_ino);
 	}else{
 		return error_msg(" invalid dir path ");
 	}
-
+	nvfuse_release_inode(sb, d_ictx, CLEAN);
 	nvfuse_release_super(sb);
 	return NVFUSE_SUCCESS;
 }
 
-
-
 void nvfuse_test(struct nvfuse_handle *nvh)
 {
-	s32 i;
+	s32 i, k, j;
 	s8 str[128];
-	float time;
-
+	s32 nr = 100000;
+	s32 iter = 2;
+	
 	memset(str, 0, 128);
 
-	/* create files*/
-	for(i =0;i < 100000;i++)
+	for (k = 0; k < iter; k++)
 	{
-		sprintf(str,"file%d",i);
-		nvfuse_mkfile(nvh, str, "4096");
-	}
-	/* delete files */
-	for (i = 0; i < 100000; i++)
-	{
-		sprintf(str, "file%d", i);
-		nvfuse_rmfile_path(nvh, str);
+		/* create files*/
+		for (i = 0; i < nr; i++)
+		{
+			sprintf(str, "file%d", i);
+			nvfuse_mkfile(nvh, str, "4096");			
+		}		
+
+		/* lookup files */
+		for (i = 0; i < nr; i++)
+		{
+			struct stat st_buf;
+			int res;
+
+			sprintf(str, "file%d", i);
+			res = nvfuse_getattr(nvh, str, &st_buf);
+			if (res)
+				printf(" No such file %s\n", str);
+		}
+		
+		/* delete files */
+		for (i = 0; i < nr; i++)
+		{
+			sprintf(str, "file%d", i);
+			nvfuse_rmfile_path(nvh, str);
+		}
 	}
 	
-	/* create directories */
-	for (i = 0; i < 100000; i++)
+	for (k = 0; k < iter; k++)
 	{
-		sprintf(str, "dir%d", i);		
-		nvfuse_mkdir_path(nvh, str, 0644);
-	}
+		/* create directories */
+		for (i = 0; i < nr; i++)
+		{
+			sprintf(str, "dir%d", i);
+			nvfuse_mkdir_path(nvh, str, 0644);
+		}
 
-	/* delete directories */
-	for (i = 0; i < 100000; i++)
-	{
-		sprintf(str, "dir%d", i);
-		nvfuse_rmdir_path(nvh, str);
-	}
+		/* lookup files */
+		for (i = 0; i < nr; i++)
+		{
+			struct stat st_buf;
+			int res;
+
+			sprintf(str, "dir%d", i);
+			res = nvfuse_getattr(nvh, str, &st_buf);
+			if (res)
+				printf(" No such dir %s\n", str);
+		}
+		
+		/* delete directories */
+		for (i = 0; i < nr; i++)
+		{
+			sprintf(str, "dir%d", i);
+			nvfuse_rmdir_path(nvh, str);
+		}
+	}	
 }
 
 s32 nvfuse_type(struct nvfuse_handle *nvh, s8 *str)
@@ -166,8 +197,7 @@ s32 nvfuse_type(struct nvfuse_handle *nvh, s8 *str)
 	printf("\n");
 
 	nvfuse_closefile(nvh, fid);
-
-
+	
 	return NVFUSE_SUCCESS;
 }
 

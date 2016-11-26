@@ -34,8 +34,8 @@ struct dirent {
 struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount);
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount);
 
-s32 nvfuse_lookup(struct nvfuse_superblock *sb, struct nvfuse_inode **file_inode, struct nvfuse_dir_entry *file_entry,
-	s8 *filename, s32 cur_dir_ino);
+s32 nvfuse_lookup(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx **file_ictx, struct nvfuse_dir_entry *file_entry,
+	const s8 *filename, const s32 cur_dir_ino);
 
 s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags, int mode);
 s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, s32 flags, s32 mode);
@@ -51,13 +51,11 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, in
 s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename);
 s32 nvfuse_rmfile_path(struct nvfuse_handle *nvh, const char *path);
 
-s32 nvfuse_mkdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode); 
+s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *dirname, inode_t *new_ino, const mode_t mode);
 s32 nvfuse_mkdir_path(struct nvfuse_handle *nvh, const char *path, mode_t mode);
-
 
 s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename);
 s32 nvfuse_rmdir_path(struct nvfuse_handle *nvh, const char *path);
-
 
 s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
 s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t dev);
@@ -83,6 +81,10 @@ s32 nvfuse_chown(struct nvfuse_handle *nvh, const char *path, uid_t uid, gid_t g
 #endif
 s32 nvfuse_fdatasync(struct nvfuse_handle *nvh, int fd);
 s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd);
+s32 nvfuse_sync(struct nvfuse_handle *nvh);
+
+s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 
 inode_t nvfuse_get_cwd_ino(struct nvfuse_handle *nvh);
 inode_t nvfuse_get_root_ino(struct nvfuse_handle *nvh);
@@ -91,5 +93,7 @@ void nvfuse_set_root_ino(struct nvfuse_handle *nvh, inode_t root_ino);
 
 s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, inode_t new_par_ino, s8 *newname);
 s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct timespec ts[2]);
+
+s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 to_entry, u32 from_entry);
 
 #endif

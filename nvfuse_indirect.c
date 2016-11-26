@@ -170,7 +170,7 @@ static inline int verify_chain(Indirect *from, Indirect *to)
 *	or when it reads all @depth-1 indirect blocks successfully and finds
 *	the whole chain, all way to the data (returns %NULL, *err == 0).
 */
-static Indirect *nvfuse_get_branch(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,
+static Indirect *nvfuse_get_branch(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, struct nvfuse_inode *inode,
 	int depth,
 	int *offsets,
 	Indirect chain[4],
@@ -185,7 +185,7 @@ static Indirect *nvfuse_get_branch(struct nvfuse_superblock *sb, struct nvfuse_i
 	if (!p->key)
 		goto no_block;
 	while (--depth) {
-		bh = nvfuse_get_bh(sb, BLOCK_IO_INO, p->key, READ);
+		bh = nvfuse_get_bh(sb, ictx, BLOCK_IO_INO, p->key, READ, NVFUSE_TYPE_META);
 		if (!bh)
 			goto failure;
 		if (!verify_chain(chain, p))
@@ -312,7 +312,7 @@ nvfuse_blks_to_allocate(Indirect * branch, int k, unsigned long blks,
 *	as described above and return 0.
 */
 
-static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,
+static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, struct nvfuse_inode *inode,
 	int indirect_blks, int *blks, u32 goal,
 	int *offsets, Indirect *branch)
 {
@@ -341,7 +341,7 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 		* and set the pointer to new one, then send
 		* parent to disk.
 		*/
-		bh = nvfuse_get_bh(sb, BLOCK_IO_INO, new_blocks[n - 1], WRITE);
+		bh = nvfuse_get_bh(sb, ictx, BLOCK_IO_INO, new_blocks[n - 1], WRITE, NVFUSE_TYPE_META);
 		if (!bh) {
 			err = -ENOMEM;
 			goto failed;
@@ -401,7 +401,7 @@ failed:
 * inode (->i_blocks, etc.). In case of success we end up with the full
 * chain to new block and return 0.
 */
-static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,
+static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
 	Indirect *where, int num, int blks)
 {
 	int i;
@@ -432,7 +432,7 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 
 	//inode->i_ctime = CURRENT_TIME_SEC;
 	//mark_inode_dirty(inode);
-	nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+	nvfuse_mark_inode_dirty(ictx);
 }
 
 /*
@@ -453,7 +453,7 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 * return = 0, if plain lookup failed.
 * return < 0, error case.
 */
-s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 lblock, u32 *pblock, u32 create)
+s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 *pblock, u32 create)
 {
 	u32 offsets[INDIRECT_BLOCKS_LEVEL];
 	Indirect chain[INDIRECT_BLOCKS_LEVEL];
@@ -468,7 +468,7 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u
 	int blocks_to_boundary = 0;
 		
 	depth = nvfuse_block_to_path(lblock, offsets, &blocks_to_boundary);
-	partial = nvfuse_get_branch(sb, inode, depth, offsets, chain, &err);
+	partial = nvfuse_get_branch(sb, ictx, ictx->ictx_inode, depth, offsets, chain, &err);
 	if (!partial) {
 		first_block = chain[depth - 1].key;
 		//clear_buffer_new(bh_result); /* What's this do? */
@@ -507,14 +507,14 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u
 
 	count = nvfuse_blks_to_allocate(partial, indirect_blks, maxblocks, blocks_to_boundary);
 
-	err = nvfuse_alloc_branch(sb, inode, indirect_blks, &count, 0, offsets + (partial - chain), partial);
+	err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, 0, offsets + (partial - chain), partial);
 
 	if (err) {
 		goto cleanup;
 	}
 
 	/* attach indirect block to inode */
-	nvfuse_splice_branch(sb, inode, partial, indirect_blks, count);
+	nvfuse_splice_branch(sb, ictx, partial, indirect_blks, count);
 
 got_it:
 	if (pblock)
@@ -556,7 +556,7 @@ static inline int all_zeroes(u32 *p, u32 *q)
 *	stored as little-endian 32-bit) and updating @inode->i_blocks
 *	appropriately.
 */
-static inline void nvfuse_free_data(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *p, u32 *q)
+static inline void nvfuse_free_data(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 *p, u32 *q)
 {
 	unsigned long block_to_free = 0, count = 0;
 	unsigned long nr;
@@ -571,9 +571,8 @@ static inline void nvfuse_free_data(struct nvfuse_superblock *sb, struct nvfuse_
 			else if (block_to_free == nr - count)
 				count++;
 			else {
-				nvfuse_free_blocks(sb, block_to_free, count);
-				//mark_inode_dirty(inode);
-				nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+				nvfuse_free_blocks(sb, block_to_free, count);				
+				nvfuse_mark_inode_dirty(ictx);
 			free_this:
 				block_to_free = nr;
 				count = 1;
@@ -581,9 +580,8 @@ static inline void nvfuse_free_data(struct nvfuse_superblock *sb, struct nvfuse_
 		}
 	}
 	if (count > 0) {
-		nvfuse_free_blocks(sb, block_to_free, count);
-		//mark_inode_dirty(inode);
-		nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+		nvfuse_free_blocks(sb, block_to_free, count);		
+		nvfuse_mark_inode_dirty(ictx);
 	}
 }
 
@@ -621,7 +619,7 @@ static inline void nvfuse_free_data(struct nvfuse_superblock *sb, struct nvfuse_
 *			(no partially truncated stuff there).
 */
 
-static Indirect *nvfuse_find_shared(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,
+static Indirect *nvfuse_find_shared(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
 	int depth,
 	int offsets[4],
 	Indirect chain[4],
@@ -633,7 +631,7 @@ static Indirect *nvfuse_find_shared(struct nvfuse_superblock *sb, struct nvfuse_
 	*top = 0;
 	for (k = depth; k > 1 && !offsets[k - 1]; k--)
 		;
-	partial = nvfuse_get_branch(sb, inode, k, offsets, chain, &err);
+	partial = nvfuse_get_branch(sb, ictx, ictx->ictx_inode, k, offsets, chain, &err);
 	if (!partial)
 		partial = chain + k - 1;
 	/*
@@ -683,9 +681,9 @@ no_top:
 *	stored as little-endian 32-bit) and updating @inode->i_blocks
 *	appropriately.
 */
-static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *p, u32 *q, int depth)
+static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 *p, u32 *q, int depth)
 {
-	struct nvfuse_buffer_head * bh;
+	struct nvfuse_buffer_head *bh;
 	unsigned long nr;
 
 	if (depth--) {
@@ -695,37 +693,36 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 			if (!nr)
 				continue;
 			*p = 0;
-			//bh = sb_bread(inode->i_sb, nr);
-			bh = nvfuse_get_bh(sb, BLOCK_IO_INO, nr, READ);
+			
+			bh = nvfuse_get_bh(sb, NULL, BLOCK_IO_INO, nr, READ, NVFUSE_TYPE_META);
 			/*
 			* A read failure? Report error and clear slot
 			* (should be rare).
 			*/
 			if (!bh) {
 				printf("ext2_free_branches Read failure, inode=%ld, block=%ld",
-					(unsigned long)inode->i_ino, (unsigned long)nr);
+					(unsigned long)ictx->ictx_inode->i_ino, (unsigned long)nr);
 				continue;
 			}
-			nvfuse_free_branches(sb, inode,
+			nvfuse_free_branches(sb, ictx,
 				(u32*)bh->bh_buf,
 				(u32*)bh->bh_buf + addr_per_block,
 				depth);
-			//bforget(bh);
+			
 			nvfuse_release_bh(sb, bh, 0, DIRTY);
-			nvfuse_free_blocks(sb, nr, 1);
-			//mark_inode_dirty(inode);
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_free_blocks(sb, nr, 1);			
+			nvfuse_mark_inode_dirty(ictx);
 		}
 	}
 	else
-		nvfuse_free_data(sb, inode, p, q);
+		nvfuse_free_data(sb, ictx, p, q);
 }
 
 
 /* dax_sem must be held when calling this function */
-static void __nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u64 offset)
+static void __nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u64 offset)
 {
-	u32 *i_data = inode->i_blocks;
+	u32 *i_data = ictx->ictx_inode->i_blocks;
 	//struct ext2_inode_info *ei = EXT2_I(inode);
 	int addr_per_block = PTRS_PER_BLOCK;
 	int offsets[4];
@@ -749,24 +746,24 @@ static void __nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse
 	//mutex_lock(&ei->truncate_mutex);
 
 	if (n == 1) {
-		nvfuse_free_data(sb, inode, i_data + offsets[0],
+		nvfuse_free_data(sb, ictx, i_data + offsets[0],
 			i_data + DIRECT_BLOCKS);
 		goto do_indirects;
 	}
 	
-	partial = nvfuse_find_shared(sb, inode, n, offsets, chain, &nr);
+	partial = nvfuse_find_shared(sb, ictx, n, offsets, chain, &nr);
 	/* Kill the top of shared branch (already detached) */
 	if (nr) {
 		if (partial == chain)
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
+			nvfuse_mark_inode_dirty(ictx);
 		else {
 			nvfuse_release_bh(sb, partial->bh, 0, DIRTY);
 		}
-		nvfuse_free_branches(sb, inode, &nr, &nr + 1, (chain + n - 1) - partial);
+		nvfuse_free_branches(sb, ictx, &nr, &nr + 1, (chain + n - 1) - partial);
 	}
 	/* Clear the ends of indirect blocks on the shared branch */
 	while (partial > chain) {
-		nvfuse_free_branches(sb, inode,
+		nvfuse_free_branches(sb, ictx,
 			partial->p + 1,
 			(u32*)partial->bh->bh_buf + addr_per_block,
 			(chain + n - 1) - partial);
@@ -780,24 +777,23 @@ do_indirects:
 	default:
 		nr = i_data[INDIRECT_BLOCKS];
 		if (nr) {
-			i_data[INDIRECT_BLOCKS] = 0;
-			//mark_inode_dirty(inode);
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
-			nvfuse_free_branches(sb, inode, &nr, &nr + 1, 1);			
+			i_data[INDIRECT_BLOCKS] = 0;			
+			nvfuse_mark_inode_dirty(ictx);
+			nvfuse_free_branches(sb, ictx, &nr, &nr + 1, 1);			
 		}
 	case INDIRECT_BLOCKS:
 		nr = i_data[DINDIRECT_BLOCKS];
 		if (nr) {
 			i_data[DINDIRECT_BLOCKS] = 0;			
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
-			nvfuse_free_branches(sb, inode, &nr, &nr + 1, 2);
+			nvfuse_mark_inode_dirty(ictx);
+			nvfuse_free_branches(sb, ictx, &nr, &nr + 1, 2);
 		}
 	case DINDIRECT_BLOCKS:
 		nr = i_data[TINDIRECT_BLOCKS];
 		if (nr) {
 			i_data[TINDIRECT_BLOCKS] = 0;			
-			nvfuse_relocate_write_inode(sb, inode, inode->i_ino, DIRTY);
-			nvfuse_free_branches(sb, inode, &nr, &nr + 1, 3);
+			nvfuse_mark_inode_dirty(ictx);
+			nvfuse_free_branches(sb, ictx, &nr, &nr + 1, 3);
 		}
 	case TINDIRECT_BLOCKS:
 		;
@@ -808,7 +804,7 @@ do_indirects:
 	//mutex_unlock(&ei->truncate_mutex);
 }
 
-void nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u64 offset)
+void nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u64 offset)
 {
 	/*
 	* XXX: it seems like a bug here that we don't allow
@@ -827,6 +823,6 @@ void nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		return;*/
 
 	//dax_sem_down_write(EXT2_I(inode));
-	__nvfuse_truncate_blocks(sb, inode, offset);
+	__nvfuse_truncate_blocks(sb, ictx, offset);
 	//dax_sem_up_write(EXT2_I(inode));
 }

@@ -105,7 +105,7 @@ typedef struct index_node{
 	key_pair_t *i_pair;	//4086B	
 	char *i_buf;
 	struct nvfuse_buffer_head *i_bh;
-	master_node_t *i_master;
+	master_node_t *i_master;	
 }index_node_t;
 
 
@@ -136,6 +136,7 @@ typedef struct master_node{
 	int m_fanout;				//32
 
 	//struct in-memory 
+	struct nvfuse_inode_ctx *m_ictx;
 	inode_t m_ino;
 	pthread_mutex_t m_big_lock;
 	struct nvfuse_superblock *m_sb;
@@ -304,21 +305,21 @@ int bp_insert_key_tree(master_node_t *master,bkey_t *key, bitem_t *value, bitem_
 
 int bp_update_key_tree(master_node_t *master,bkey_t *key, bitem_t *value);
 int get_pair_tree(index_node_t *dp,bkey_t *key);
-index_node_t *traverse_empty(master_node_t *master, index_node_t *ip,bkey_t *key);
-index_node_t *bp_alloc_node(master_node_t *master, int flag,int offset,int is_new);
+index_node_t *traverse_empty(master_node_t *master, index_node_t *ip, bkey_t *key);
+index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_new);
 int bp_release_node(master_node_t *master, index_node_t *p);
 int bp_release_bh(struct nvfuse_buffer_head *bh);
 int bp_bin_search(bkey_t *key, key_pair_t *pair, int max,
 	int(*compare)(void *, void *, void * start, int num, int mid));
 
-struct nvfuse_buffer_head *bp_read_block(master_node_t *master, char *buf, int offset, int rwlock);
+struct nvfuse_buffer_head *bp_read_block(master_node_t *master, int offset, int rwlock);
 int bp_read_node(master_node_t *master, index_node_t *node, int offset, int sync, int rwlock);
 int bp_write_node(master_node_t *master, index_node_t *node, int offset);
 
 void stack_push(master_node_t *master, offset_t v);
 offset_t stack_pop(master_node_t *master);
 void bp_init_pair(key_pair_t *node, int num);
-index_node_t *bp_alloc_node(master_node_t *master, int flag,int offset,int is_new);
+
 int bp_dealloc_bitmap(master_node_t *master, index_node_t *p);
 void bp_write_master(master_node_t *master);
 void bp_init_root(master_node_t *master);
@@ -327,7 +328,7 @@ master_node_t *bp_init_master();
 int key_compare(void *k1, void *k2,void *start, int num,int mid);
 key_pair_t *bp_alloc_pair(int num);
 int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t *value);
-int bp_write_block(struct nvfuse_superblock *sb,struct nvfuse_buffer_head *bh,char *buf,int offset);
+int bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, char *buf, int offset);
 
 int bp_merge_key(master_node_t *master, index_node_t *dp, bkey_t *key,bitem_t *value);
 void bp_release_pair(key_pair_t *pair);
@@ -343,6 +344,7 @@ void bp_print_node(index_node_t *node);
 void bubble_sort(key_pair_t *pair, int num, int(*compare)(void *src1, void *src2));
 int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master);
 void bp_deinit_master(master_node_t *master);
+offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx);
 
 #define set_bit(b, i)	ext2fs_set_bit(i, b) 
 #define clear_bit(b, i) ext2fs_clear_bit(i, b)

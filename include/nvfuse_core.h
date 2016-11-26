@@ -17,6 +17,7 @@
 #include "nvfuse_types.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_bp_tree.h"
+#include "list.h"
 
 #include <pthread.h>
 
@@ -132,6 +133,7 @@
 #define NVFUSE_KILO_BYTES (1024)
 
 /* # OF MAX OPEN FILE */
+#define START_OPEN_FILE	3 /* STDIN, STDOUT, STDERR*/
 #define MAX_OPEN_FILE	16
 
 #define NVFUSE_BP_TYPE_DATA 0
@@ -221,9 +223,13 @@ struct nvfuse_superblock{
 		struct nvfuse_segment_buffer	*sb_sb; /* SYNC TIME*/
 		s32 sb_sb_cur;
 		s32 sb_sb_flush;
-			
+		
+		/* block buffer manager */
 		struct nvfuse_buffer_manager *sb_bm;
-				
+
+		/* inode context cache */
+		struct nvfuse_ictx_manager *sb_ictxc;
+						
 		struct nvfuse_file_table *sb_file_table; /* INCLUDING FINE GRAINED LOCK */
 		pthread_mutex_t sb_file_table_lock; /* COARSE LOCK */
 		pthread_mutex_t sb_prefetch_lock;
@@ -238,6 +244,8 @@ struct nvfuse_superblock{
 		pthread_mutex_t sb_request_lock;
 		s32 sb_request_count;
 
+		s32 sb_dirty_sync_policy;
+
 		/* Read and Write statistics*/
 		u64 sb_write_blocks;
 		u64 sb_read_blocks;
@@ -249,11 +257,6 @@ struct nvfuse_superblock{
 		u64 sb_meta_read_ios;
 		u64 sb_bp_write_blocks;
 
-		struct timeval sb_time_segwrite;
-		struct timeval sb_time_ssr;
-		struct timeval sb_time_cleaning;
-		struct timeval sb_time_checkpoint;
-
 		struct timeval sb_time_start;
 		struct timeval sb_time_end;
 		struct timeval sb_time_total;
@@ -261,11 +264,12 @@ struct nvfuse_superblock{
 };
 
 struct nvfuse_file_table{	
-	inode_t	ino;	
+	inode_t	ino;
 	u64	size;
-	s32	used;	
-	nvfuse_off_t prefetch_cur;	
+	s32	used;
+	nvfuse_off_t prefetch_cur;
 	nvfuse_off_t rwoffset;
+	s32 flags;
 	pthread_mutex_t ft_lock;
 };
 
@@ -336,13 +340,31 @@ struct nvfuse_inode{
 	u32 resv2[1];	
 };
 
+struct nvfuse_inode_ctx{
+	inode_t ictx_ino;
+	struct list_head ictx_cache_list;   /* cache list */
+	struct hlist_node ictx_hash;		/* hash list*/
+
+	struct nvfuse_inode *ictx_inode;
+	struct nvfuse_buffer_head *ictx_bh;
+
+	struct list_head ictx_meta_bh_head;
+	struct list_head ictx_data_bh_head;	
+	
+	s32 ictx_meta_dirty_count;
+	s32 ictx_data_dirty_count;
+
+	s32 ictx_type;
+	s32 ictx_status;
+	s32 ictx_ref;
+};
+
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 struct iovec{
 	s8 *iov_base;
 	u32 iov_len;
 };
 #endif 
-
 
 #define nvfuse_dirname fat_dirname
 #define nvfuse_filename fat_filename
@@ -369,9 +391,15 @@ void nvfuse_release_super(struct nvfuse_superblock *sb);
 
 
 void nvfuse_print_inode(struct nvfuse_inode *inode, s8 *str);
-struct nvfuse_inode *nvfuse_read_inode(struct nvfuse_superblock *sb, inode_t ino,s32 read);
-struct nvfuse_inode *nvfuse_alloc_new_inode(struct nvfuse_superblock *sb);
-void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,u64 size);
+struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino);
+
+inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+
+void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 dirty);
+s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx);
+
+void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u64 size);
 s32 ext2fs_set_bit(u32 nr,void * addr);
 s32 ext2fs_clear_bit(u32 nr, void * addr);
 s32 ext2fs_test_bit(u32 nr, const void * addr);
@@ -379,8 +407,8 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb,struct nvfuse_inode *in
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename,bitem_t *offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename,bitem_t *offset);
 s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename);
-s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb);
-s32 nvfuse_sync(struct nvfuse_superblock *sb);
+s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head, s32 num_blocks);
+
 s32 nvfuse_umount();
 void nvfuse_copy_mem_sb_to_disk_sb(struct nvfuse_superblock *disk, struct nvfuse_superblock *memory);
 void nvfuse_copy_disk_sb_to_sb(struct nvfuse_superblock *memory, struct nvfuse_superblock *disk);
@@ -398,11 +426,10 @@ s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino,s8 *filename,mode_t 
 s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
 s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
 s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, u32 offset, s32 position);
-void nvfuse_relocate_write_inode(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,inode_t ino, s32 dirty);
-s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb,struct nvfuse_inode *inode);
 s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino);
 s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino,s8 *name,u32 *ino);
-u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, inode_t ino,lbno_t offset);
+u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t offset);
+
 s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 tail, s32 dirty);
 
 s32  nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str,s8 *ssize);
@@ -422,10 +449,9 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb);
 s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position);
 s32 nvfuse_format(struct nvfuse_handle *nvh);
 
-void nvfuse_syncer_start();
-void nvfuse_syncer_stop();
-int nvfuse_segflush_init(struct nvfuse_superblock *sb);
-void nvfuse_check_flush_segment(struct nvfuse_superblock *sb);
+void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force);
+
+void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino);
 
 extern pthread_mutex_t mutex_lock;
 
@@ -436,5 +462,7 @@ void nvfuse_lock_init();
 void nvfuse_lock_exit();
 
 s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir);
+void nvfuse_init_ictx(struct nvfuse_inode_ctx *ictx);
+void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc);
 
 #endif /* NVFUSE_HEADER_H*/

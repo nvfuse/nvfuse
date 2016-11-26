@@ -13,7 +13,6 @@
 * more details.
 */
 
-
 #ifndef _NVFUSE_CONFIG_H
 #define _NVFUSE_CONFIG_H
 
@@ -55,10 +54,11 @@
 #	define NVFUSE_BUFFER_SIZE (32*1024) //128MB
 #endif
 
+#	define NVFUSE_ICTXC_SIZE (32*1024)
+
 #define NVFUSE_SYNC_TIME	30 /* seconds */
 //#define NVFUSE_SYNC_DIRTY_COUNT (1024) /* blocks */
-#define NVFUSE_SYNC_DIRTY_COUNT (4096) /* blocks */
-//#define NVFUSE_ADAPTIVE_BUFFERING_SIZE (1024) /* blocks */
+#define NVFUSE_SYNC_DIRTY_COUNT (256) /* blocks */
 
 /* Segment Summary Logging Size for SSR scheme */
 #define NVFUSE_SS_LOG_FLUSH	(4096* 4)
@@ -70,15 +70,17 @@
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define USE_AIO_WRITE
 #endif
+
 /* Sync Thread Timeout */
 #define NVFUSE_SYNC_TIMEOUT_USEC 1000
 #define NVFUSE_SYNC_TIMEOUT_SEC 5
 
-#define USE_READV
-#define USE_WRITEV
-//#define NVFUSE_TIME_PROFILE
-//#define NVFUSE_DOUBLE_BUFFERING
-//#define NVFUSE_READ_AHEAD
+/* Meta Data Dirty Sync Policy */
+/* buffer cache keeps dirty meta data until a centain amount of time passes*/
+#define NVFUSE_META_DIRTY_SYNC_DELAYED DIRTY_FLUSH_DELAY
+/* flush dirty meta data right after data updates */
+#define NVFUSE_META_DIRTY_SYNC_FORCE   DIRTY_FLUSH_FORCE
+#define NVFUSE_META_DIRTY_POLICY NVFUSE_META_DIRTY_SYNC_FORCE
 
 /* Readahead Size*/
 #define NVFUSE_MIN_RA_SIZE (4*CLUSTER_SIZE)

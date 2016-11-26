@@ -31,6 +31,8 @@
 	typedef unsigned int		u32; 
 	typedef unsigned long       u64; 
 
+	#define __O_SYNC        04000000
+
 #	else
 		
 	typedef signed char			s8;	
@@ -87,6 +89,24 @@
 	#define S_IWOTH 00002
 	#define S_IXOTH 00001
 
+	
+	#define S_ISLNK(m)      (((m)& S_IFMT) == S_IFLNK)
+	#define S_ISREG(m)      (((m)& S_IFMT) == S_IFREG)
+	#define S_ISDIR(m)      (((m)& S_IFMT) == S_IFDIR)
+	#define S_ISCHR(m)      (((m)& S_IFMT) == S_IFCHR)
+	#define S_ISBLK(m)      (((m)& S_IFMT) == S_IFBLK)
+	#define S_ISFIFO(m)     (((m)& S_IFMT) == S_IFIFO)
+	#define S_ISSOCK(m)     (((m)& S_IFMT) == S_IFSOCK)
+
+	#ifndef O_DSYNC
+	#define O_DSYNC         00010000
+	#endif
+
+	#ifndef O_SYNC
+	#define __O_SYNC        04000000
+	#define O_SYNC			(__O_SYNC | O_DSYNC)
+	#endif
+
 #	endif  
 	
 typedef u64	nvfuse_off_t;
@@ -96,5 +116,8 @@ typedef u32	nvfuse_loff_t;
 typedef u32 inode_t;//inode number
 typedef u32 pbno_t;//physical block number
 typedef u32 lbno_t;//logical block num
+
+#define NVFUSE_TYPE_DATA 0
+#define NVFUSE_TYPE_META 1
 
 #endif 

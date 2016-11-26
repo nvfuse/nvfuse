@@ -15,6 +15,6 @@
 
 #ifndef _NVFUSE_INDIRECT_H
 #define _NVFUSE_INDIRECT_H
-s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 lblock, u32 *pblock, u32 create);
-void nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u64 offset);
+s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 *pblock, u32 create);
+void nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u64 offset);
 #endif
