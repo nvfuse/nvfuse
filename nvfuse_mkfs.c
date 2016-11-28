@@ -27,11 +27,9 @@
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_dirhash.h"
-
+#include "nvfuse_gettimeofday.h"
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
-
-#include "mtd/mtd-user.h"
 
 #ifndef __NOUSE_FUSE__
 
@@ -183,7 +181,39 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 	return 0;
 }
 
-static s32 nvfuse_format_segment(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk, u32 num_segs, u32 seg_size)
+void nvfuse_make_segment_summary(struct nvfuse_segment_summary *ss, u32 seg_id, u32 seg_start, u32 seg_size)
+{
+	u32 bits_per_bitmap;
+
+	ss->ss_id		= seg_id;
+	ss->ss_seg_start	= 0;
+	ss->ss_summary_start	= NVFUSE_SUMMARY_OFFSET;
+	ss->ss_ibitmap_start	= NVFUSE_IBITMAP_OFFSET;
+	ss->ss_ibitmap_size	= NVFUSE_IBITMAP_SIZE;
+
+	bits_per_bitmap		= NVFUSE_IBITMAP_SIZE * CLUSTER_SIZE * 8;
+	ss->ss_max_inodes	= bits_per_bitmap / 2;
+	ss->ss_max_blocks	= bits_per_bitmap;
+
+	ss->ss_dbitmap_start	= NVFUSE_DBITMAP_OFFSET;
+	ss->ss_dbitmap_size	= NVFUSE_DBITMAP_SIZE;
+	ss->ss_itable_start	= ss->ss_dbitmap_start + ss->ss_dbitmap_size;
+	ss->ss_itable_size	= ss->ss_max_inodes * INODE_ENTRY_SIZE / CLUSTER_SIZE;
+	ss->ss_dtable_start	= ss->ss_itable_start + ss->ss_itable_size;
+	ss->ss_dtable_size	= seg_size - ss->ss_dtable_start;
+
+	ss->ss_free_inodes = ss->ss_max_inodes;
+	ss->ss_free_blocks = ss->ss_max_blocks - ss->ss_dtable_start; // reserve metadata blocks including sb, inode, and bitmaps.
+
+	ss->ss_seg_start	+= seg_start;
+	ss->ss_summary_start	+= seg_start;
+	ss->ss_ibitmap_start	+= seg_start;
+	ss->ss_dbitmap_start	+= seg_start;
+	ss->ss_itable_start	+= seg_start;
+	ss->ss_dtable_start	+= seg_start;
+}
+
+static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk, u32 num_segs, u32 seg_size)
 {
 	struct nvfuse_segment_summary *ss;
 	void *ss_buf;
@@ -216,36 +246,82 @@ static s32 nvfuse_format_segment(struct nvfuse_handle *nvh, struct nvfuse_superb
 		memset(ss_buf, 0x00, CLUSTER_SIZE);
 		ss = (struct nvfuse_segment_summary *)ss_buf;
 
-		ss->ss_id		= seg_id;
-		ss->ss_seg_start	= 0;
-		ss->ss_summary_start	= NVFUSE_SUMMARY_OFFSET;
-		ss->ss_ibitmap_start	= NVFUSE_IBITMAP_OFFSET;
-		ss->ss_ibitmap_size	= NVFUSE_IBITMAP_SIZE;
+		/* make segment sumamry */
+		nvfuse_make_segment_summary(ss, seg_id, seg_start, seg_size);
 
-		bits_per_bitmap		= NVFUSE_IBITMAP_SIZE * CLUSTER_SIZE * 8;
-		ss->ss_max_inodes	= bits_per_bitmap / 2;
-		ss->ss_max_blocks	= bits_per_bitmap;
-
-		ss->ss_dbitmap_start	= NVFUSE_DBITMAP_OFFSET;
-		ss->ss_dbitmap_size	= NVFUSE_DBITMAP_SIZE;
-		ss->ss_itable_start	= ss->ss_dbitmap_start + ss->ss_dbitmap_size;
-		ss->ss_itable_size	= ss->ss_max_inodes * INODE_ENTRY_SIZE / CLUSTER_SIZE;
-		ss->ss_dtable_start	= ss->ss_itable_start + ss->ss_itable_size;
-		ss->ss_dtable_size	= seg_size - ss->ss_dtable_start;
-		
-		ss->ss_free_inodes = ss->ss_max_inodes;
-		ss->ss_free_blocks = ss->ss_max_blocks - ss->ss_dtable_start; // reserve metadata blocks including sb, inode, and bitmaps.
 		sb_disk->sb_free_inodes += ss->ss_free_inodes;
 		sb_disk->sb_free_blocks += ss->ss_free_blocks;
 
-		ss->ss_seg_start	+= seg_start;
-		ss->ss_summary_start	+= seg_start;
-		ss->ss_ibitmap_start	+= seg_start;
-		ss->ss_dbitmap_start	+= seg_start;
-		ss->ss_itable_start	+= seg_start;
-		ss->ss_dtable_start	+= seg_start;
-		
+
 		nvfuse_write_cluster(ss, ss->ss_summary_start, io_manager);
+
+#if 1
+		if(seg_id != 0)
+			continue;
+
+		printf(" \n");
+		printf(" inode size = %u bytes \n", INODE_ENTRY_SIZE);
+		printf(" ss_summary_start = %u\n", ss->ss_summary_start);
+		printf(" ss_ibitmap_start = %u\n", ss->ss_ibitmap_start);
+		printf(" ss_ibitmap_size = %u blocks \n", ss->ss_ibitmap_size);
+		printf(" ss_dbitmap_start = %u\n", ss->ss_dbitmap_start);
+		printf(" ss_dbitmap_size = %u blocks \n", ss->ss_dbitmap_size);
+		printf(" itable start = %u \n", ss->ss_itable_start);
+		printf(" itable size = %u blocks \n", ss->ss_itable_size);
+		printf(" dtable start = %u \n", ss->ss_dtable_start);
+		printf(" dtable size = %u blocks\n", ss->ss_dtable_size);
+		printf(" ss end = %u \n", ss->ss_dtable_start + ss->ss_dtable_size);
+		printf("\n");
+#endif
+	}
+
+
+	nvfuse_free(ss_buf);
+	nvfuse_free(buf);
+
+	return 0;
+
+}
+
+static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk, u32 num_segs, u32 seg_size)
+{
+	struct nvfuse_segment_summary *ss;
+	void *ss_buf;
+	void *buf;
+
+	void *zeroing_buf;
+	u32 zeroing_blocks;
+
+	u32 seg_id;
+	u32 seg_start;
+	u32 bits_per_bitmap;
+	u32 clu;
+	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
+
+	ss_buf = nvfuse_malloc(CLUSTER_SIZE);
+	if (ss_buf == NULL)
+	{
+		printf(" malloc error \n");
+		return -1;
+	}
+
+	buf = nvfuse_malloc(CLUSTER_SIZE);
+	if (ss_buf == NULL)
+	{
+		printf(" malloc error \n");
+		return -1;
+	}
+
+	for (seg_id = 0; seg_id < num_segs; seg_id++)
+	{
+		seg_start = seg_id * seg_size;
+
+		/* Initialize and Write Segment Summary */
+		memset(ss_buf, 0x00, CLUSTER_SIZE);
+		ss = (struct nvfuse_segment_summary *)ss_buf;
+
+		/* make segment sumamry */
+		nvfuse_make_segment_summary(ss, seg_id, seg_start, seg_size);
 
 		/* Initialize ibitmap table */
 		memset(buf, 0x00, CLUSTER_SIZE);
@@ -259,13 +335,26 @@ static s32 nvfuse_format_segment(struct nvfuse_handle *nvh, struct nvfuse_superb
 		}
 		nvfuse_write_cluster(buf, ss->ss_dbitmap_start, io_manager);
 
-		/* write zero data to inode table */
-		memset(buf, 0x00, CLUSTER_SIZE);
-		for (clu = ss->ss_itable_start; 
-		     clu < ss->ss_itable_start + ss->ss_itable_size; 
-		     clu++)
+
+		if (seg_id == 0) 
 		{
-			nvfuse_write_cluster(buf, clu, io_manager);
+			zeroing_blocks = ss->ss_itable_size;
+			zeroing_buf = nvfuse_malloc(zeroing_blocks * CLUSTER_SIZE);
+			if (zeroing_buf == NULL)
+			{
+				printf(" malloc error \n");
+				return -1;
+			}
+			memset(zeroing_buf, 0x00, zeroing_blocks * CLUSTER_SIZE);
+			//printf(" zeroing blocks = %d \n", zeroing_blocks);
+		}
+
+		/* write zero data to inode table */
+		io_manager->io_write(io_manager, ss->ss_itable_start, ss->ss_itable_size, zeroing_buf);
+
+		if (seg_id + 1 == num_segs)
+		{
+			free(zeroing_buf);
 		}
 
 #if 0
@@ -276,27 +365,31 @@ static s32 nvfuse_format_segment(struct nvfuse_handle *nvh, struct nvfuse_superb
 			nvfuse_write_cluster(buf, clu, io_manager);
 		}
 #endif
-
-#if 1
-		if(seg_id != 0)
-			continue;
-
-		printf(" \n");
-		printf(" inode size = %u bytes \n", INODE_ENTRY_SIZE);
-		printf(" ss_ibitmap_start = %u\n", ss->ss_ibitmap_start);
-		printf(" ss_ibitmap_size = %u blocks \n", ss->ss_ibitmap_size);
-		printf(" ss_dbitmap_start = %u\n", ss->ss_dbitmap_start);
-		printf(" ss_dbitmap_size = %u blocks \n", ss->ss_dbitmap_size);
-		printf(" itable start = %u \n", ss->ss_itable_start);
-		printf(" itable size = %u blocks \n", ss->ss_itable_size);
-		printf(" dtable start = %u \n", ss->ss_dtable_start);
-		printf(" dtable size = %u blocks\n", ss->ss_dtable_size);
-		printf(" ss end = %u \n", ss->ss_dtable_start + ss->ss_dtable_size);
-		printf("\n");
-#endif
 	}
+
 	nvfuse_free(ss_buf);
 	nvfuse_free(buf);
+
+	return 0;
+}
+
+static s32 nvfuse_format_segment(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk, u32 num_segs, u32 seg_size)
+{
+	s32 res;
+	/* building and writing segment summary for each segment */
+	res = nvfuse_format_write_segment_summary(nvh, sb_disk, num_segs, seg_size);
+	if (res)
+	{
+		printf(" Error: format write segment summary \n");
+		return res;
+	}
+	/* zeroing bitmap and inode tables */
+	res = nvfuse_format_metadata_zeroing(nvh, sb_disk, num_segs, seg_size);
+	if(res)
+	{
+		printf(" Error: Metadata Zeroing \n");
+		return res;
+	}
 
 	return 0;
 }
@@ -337,6 +430,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	master_node_t *bp_master;
 
 	struct timeval tv; 
+	struct timeval format_tv;
 
 	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 	key_pair_t *pair;
@@ -351,6 +445,9 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	printf("--------------------Option------------------------------------------\n");
 
 	nvfuse_type_check();
+
+	/* beginning of format time measurement */
+	gettimeofday(&format_tv, NULL);
 
 	if(INODE_ENTRY_SIZE != sizeof(struct nvfuse_inode)){
 		printf(" check inode size = %d \n", (int)sizeof(struct nvfuse_inode)); 
@@ -459,7 +556,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, io_manager);
 
 	printf(" BUFFER POOL NUM = %fMB\n",(float)(NVFUSE_BUFFER_SIZE * CLUSTER_SIZE)/(float)(1024*1024));	
-	printf("\n NVFUSE was formatted successfully. \n");
+	printf("\n NVFUSE was formatted successfully. (%.3f sec)\n", time_since_now(&format_tv));
 	printf("-------------------------------------------------------------------\n");
 	fflush(stdout);
 

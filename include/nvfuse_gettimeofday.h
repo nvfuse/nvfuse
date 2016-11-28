@@ -28,4 +28,8 @@ int gettimeofday(struct timeval *tp, void *tzp);
 
 int timeval_subtract (struct timeval *result,struct timeval *x, struct timeval *y);
 void timeval_add(struct timeval *t1,struct timeval *t2);
+double time_since_ms(struct timeval *start_tv, struct timeval *stop_tv);
+double time_since(struct timeval *start_tv, struct timeval *stop_tv);
+double time_since_now(struct timeval *start_tv);
+float tv_to_sec(struct timeval *tv);
 #endif /* GETTIMEOFDAY_H */

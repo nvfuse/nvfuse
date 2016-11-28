@@ -19,6 +19,9 @@
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 #	include <windows.h>
+#elif NVFUSE_OS == NVFUSE_OS_LINUX
+#	include <unistd.h>
+#	include <sys/time.h>
 #endif
 
 int timeval_subtract (struct timeval *result, struct timeval *x, struct timeval *y)
@@ -56,6 +59,52 @@ void timeval_add(struct timeval *t1, struct timeval *t2)
 		t1->tv_sec += t2->tv_sec;
 		t1->tv_sec += nsec;
 	}
+}
+
+double time_since_ms(struct timeval *start_tv, struct timeval *stop_tv)
+{
+    double sec, usec;
+    double ret;
+    sec = stop_tv->tv_sec - start_tv->tv_sec;
+    usec = stop_tv->tv_usec - start_tv->tv_usec;
+    if (sec > 0 && usec < 0) {
+        sec--;
+	usec += 1000000;
+    } 
+    ret = sec *1000 + usec / (double)1000;
+    if (ret < 0)
+        ret = 0;
+    return ret;
+}
+
+double time_since(struct timeval *start_tv, struct timeval *stop_tv)
+{
+    double sec, usec;
+    double ret;
+    sec = stop_tv->tv_sec - start_tv->tv_sec;
+    usec = stop_tv->tv_usec - start_tv->tv_usec;
+    if (sec > 0 && usec < 0) {
+        sec--;
+		usec += 1000000;
+    } 
+    ret = sec + usec / (double)1000000;
+    if (ret < 0)
+        ret = 0;
+    return ret;
+}
+
+/*
+ * return seconds between start_tv and now in double precision
+ */
+double time_since_now(struct timeval *start_tv)
+{
+    struct timeval stop_time;
+    gettimeofday(&stop_time, NULL);
+    return time_since(start_tv, &stop_time);
+}
+
+float tv_to_sec(struct timeval *tv){
+	return (float)tv->tv_sec + (float)tv->tv_usec/1000000;
 }
 
 
