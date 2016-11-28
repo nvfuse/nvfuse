@@ -667,7 +667,7 @@ struct nvfuse_buffer_head *nvfuse_find_bh_in_ictx(struct nvfuse_superblock *sb,
 	}
 #endif
 
-#if 1
+#if 0
 	dirty_head = &ictx->ictx_data_bh_head;
 	list_for_each_safe(ptr, temp, dirty_head) 
 	{
@@ -694,7 +694,7 @@ struct nvfuse_buffer_head *nvfuse_find_bh_in_ictx(struct nvfuse_superblock *sb,
 	}
 #endif
 
-#if 1
+#if 0
 	dirty_head = &ictx->ictx_meta_bh_head;
 	list_for_each_safe(ptr, temp, dirty_head)
 	{

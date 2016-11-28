@@ -53,7 +53,7 @@ s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ct
 		case NVFUSE_READY_QUEUE:
 			if (aioq->arq_cur_depth == aioq->arq_max_depth)
 			{
-				printf(" aio ready queue is full %d\n", aioq->arq_cur_depth);
+				//printf(" aio ready queue is full %d\n", aioq->arq_cur_depth);
 				return -1;
 			}
 			list_add_tail(&actx->actx_list, &aioq->arq_head);
@@ -62,7 +62,7 @@ s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ct
 		case NVFUSE_SUBMISSION_QUEUE:
 			if (aioq->asq_cur_depth == aioq->asq_max_depth)
 			{
-				printf(" aio submission queue is full %d\n", aioq->asq_cur_depth);
+				//printf(" aio submission queue is full %d\n", aioq->asq_cur_depth);
 				return -1;
 			}
 			list_add_tail(&actx->actx_list, &aioq->asq_head);
@@ -71,7 +71,7 @@ s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ct
 		case NVFUSE_COMPLETION_QUEUE:
 			if (aioq->acq_cur_depth == aioq->acq_max_depth)
 			{
-				printf(" aio completion queue is full %d\n", aioq->acq_cur_depth);
+				//printf(" aio completion queue is full %d\n", aioq->acq_cur_depth);
 				return -1;
 			}
 			list_add_tail(&actx->actx_list, &aioq->acq_head);
@@ -252,8 +252,8 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		
 		actx = (struct nvfuse_aio_ctx *)list_entry(ptr, struct nvfuse_aio_ctx, actx_list);
 		
-		printf(" aio ready queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
-			(long)actx->actx_bytes, actx->actx_opcode);
+		//printf(" aio ready queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
+		//	(long)actx->actx_bytes, actx->actx_opcode);
 
 		if (actx->actx_opcode == READ)
 			bytes = nvfuse_readfile_aio(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);			
@@ -276,8 +276,8 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		actx = (struct nvfuse_aio_ctx *)list_entry(ptr, struct nvfuse_aio_ctx, actx_list);
 		INIT_LIST_HEAD(&actx->actx_bh_head);
 
-		printf(" aio submission queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
-			(long)actx->actx_bytes, actx->actx_opcode);
+		//printf(" aio submission queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
+		//	(long)actx->actx_bytes, actx->actx_opcode);
 				
 		res = nvfuse_gather_bh(&nvh->nvh_sb, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset, &actx->actx_bh_head, &actx->actx_bh_count);
 		if (res) {
@@ -349,13 +349,14 @@ s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_
 
 		nvfuse_aio_queue_dequeue(aioq, actx, actx->actx_status);
 		
-		if (!actx->actx_error) 
+		if (actx->actx_error) 
 		{
-			printf(" aio was done successfully with fid = %d offset = %ld\n", actx->actx_fid, (long)actx->actx_offset);
+			printf(" aio I/O error happened with fid = %d offset = %ld\n", actx->actx_fid, (long)actx->actx_offset);
+			
 		}
 		else
 		{
-			printf(" aio I/O error happened with fid = %d offset = %ld\n", actx->actx_fid, (long)actx->actx_offset);
+			//printf(" aio was done successfully with fid = %d offset = %ld\n", actx->actx_fid, (long)actx->actx_offset);
 		}
 				
 		actx->actx_cb_func(actx);		

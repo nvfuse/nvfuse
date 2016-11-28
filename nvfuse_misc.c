@@ -24,6 +24,7 @@
 #include "nvfuse_config.h"
 #include "nvfuse_api.h"
 #include "nvfuse_aio.h"
+#include "nvfuse_malloc.h"
 #include "time.h"
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
@@ -72,97 +73,127 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 
 void nvfuse_aio_test_callback(void *arg)
 {
-	free(arg);
+	struct nvfuse_aio_ctx *actx = (struct nvfuse_aio_ctx *)arg;
+	free(actx->actx_buf);
+	free(actx);
 }
 
-s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, u32 size, u32 is_read)
+s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read)
 {
 	struct nvfuse_aio_queue aioq;
 	struct nvfuse_aio_ctx *actx;	
 	s32 fd;
 	s8 *user_buf;
 	s32 ret;
+	s32 i;
+	s64 io_remaining;
+	s64 io_curr;
 
-	user_buf = malloc(size);
-
-	printf(" aiotest %s size = %d (%c) \n", str, size, is_read ? 'R' : 'W');
+	printf(" aiotest %s filesize = %ld io_size = %d qdpeth = %d (%c) \n", str, (long)file_size, io_size, qdepth, is_read ? 'R' : 'W');
 
 	fd = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
 
 	/* pre-allocation of data blocks*/
-	nvfuse_fallocate(nvh, str, 0, size);
+	nvfuse_fallocate(nvh, str, 0, file_size);
 
 	/* initialization of aio queue */
-	ret = nvfuse_aio_queue_init(&aioq, 128);
+	ret = nvfuse_aio_queue_init(&aioq, qdepth);
 	if (ret)
 	{
 		printf(" Error: aio queue init () with ret = %d\n ", ret);
 		return -1;
 	}
-
-	/* initialization of aio context */
-	actx = malloc(sizeof(struct nvfuse_aio_ctx));
-	memset(actx, 0x00, sizeof(struct nvfuse_aio_ctx));
-	actx->actx_fid = fd;	
-	actx->actx_opcode = is_read ? READ : WRITE;
-	actx->actx_buf = user_buf;
-	actx->actx_offset = 0;
-	actx->actx_bytes = size;
-	actx->actx_error = 0;
-	INIT_LIST_HEAD(&actx->actx_list);
-	actx->actx_cb_func = nvfuse_aio_test_callback;
-	actx->actx_sb = &nvh->nvh_sb;
-
-	/* enqueue actx to aio queue */
-	ret = nvfuse_aio_queue_enqueue(&aioq, actx, NVFUSE_READY_QUEUE);
-	if (ret)
+	
+	io_curr = 0;
+	io_remaining = file_size; 
+	
+	while (io_remaining > 0)
 	{
-		printf(" Error: Enqueue error\n");
-		return ret;
-	}
+		for (i = 0; i < qdepth; i++)
+		{
+			/* user data buffer allocation */
+			user_buf = nvfuse_malloc(io_size);
+			if (user_buf == NULL)
+			{
+				printf(" Error: malloc()\n");
+				return -1;
+			}
 
-	/* aio submission */
-	ret = nvfuse_aio_queue_submission(nvh, &aioq);
-	if (ret)
-	{
-		printf(" Error: queue submission \n");
-		return ret;
-	}
+			/* initialization of aio context */
+			actx = malloc(sizeof(struct nvfuse_aio_ctx));
+			memset(actx, 0x00, sizeof(struct nvfuse_aio_ctx));
+			actx->actx_fid = fd;
+			actx->actx_opcode = is_read ? READ : WRITE;
+			actx->actx_buf = user_buf;
+			actx->actx_offset = io_curr;
+			actx->actx_bytes = io_size;
+			actx->actx_error = 0;
+			INIT_LIST_HEAD(&actx->actx_list);
+			actx->actx_cb_func = nvfuse_aio_test_callback;
+			actx->actx_sb = &nvh->nvh_sb;
 
-	/* aio completion */
-	ret = nvfuse_aio_queue_completion(&nvh->nvh_sb, &aioq);
-	if (ret)
-	{
-		printf(" Error: queue completion \n");
-		return ret;
-	}
+			/* enqueue actx to aio queue */
+			ret = nvfuse_aio_queue_enqueue(&aioq, actx, NVFUSE_READY_QUEUE);
+			if (ret)
+			{
+				printf(" Error: Enqueue error\n");
+				return ret;
+			}
 
+			io_curr += io_size;
+			io_remaining -= io_size;
+		}
+		
+		/* aio submission */
+		ret = nvfuse_aio_queue_submission(nvh, &aioq);
+		if (ret)
+		{
+			printf(" Error: queue submission \n");
+			return ret;
+		}
+
+		/* aio completion */
+		ret = nvfuse_aio_queue_completion(&nvh->nvh_sb, &aioq);
+		if (ret)
+		{
+			printf(" Error: queue completion \n");
+			return ret;
+		}
+	}
+	
 	nvfuse_fsync(nvh, fd);
 	nvfuse_closefile(nvh, fd);
-
-	free(user_buf);
-
+	
 	return 0;
 }
 
 s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 {
+	char str[128];
+	struct timeval tv;
+	s64 file_size;
 	int i;
 	
 	for (i = 0; i < 1000; i++)
 	{
-		char str[128];
 		sprintf(str, "file%d", i);
-		nvfuse_aio_test_rw(nvh, str, 512 * 1024, WRITE);
+		file_size = (s64)4 * 1024 * 1024 * 1024, 4096;
+		gettimeofday(&tv, NULL);
+		nvfuse_aio_test_rw(nvh, str, file_size, 4096, 128, WRITE);		
+		printf(" nvfuse aio through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
+		nvfuse_rmfile_path(nvh, str);
 	}
 
 	for (i = 0; i < 1000; i++)
 	{
-		char str[128];
 		sprintf(str, "file%d", i);
-		nvfuse_aio_test_rw(nvh, str, 512 * 1024, READ);
+		file_size = (s64)4 * 1024 * 1024 * 1024, 4096;
+		gettimeofday(&tv, NULL);
+		nvfuse_aio_test_rw(nvh, str, file_size, 4096, 128, READ);
+		printf(" nvfuse aio through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
+		nvfuse_rmfile_path(nvh, str);
 	}
-	
+
 	return NVFUSE_SUCCESS;
 }
 
