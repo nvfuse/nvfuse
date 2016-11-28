@@ -1102,6 +1102,10 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	u32 size, read_bytes, offset = 0;
 	u32 found_entry;
 
+	if (par_ino == sb->sb_root_ino) {
+		printf(" root inode (%d) cannot be removed in nvfuse file system\n", sb->sb_root_ino);
+		return -1;
+	}
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
 
