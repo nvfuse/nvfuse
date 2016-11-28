@@ -1,5 +1,5 @@
-DPDK_DIR = /root/spdk/dpdk-16.07/x86_64-native-linuxapp-gcc/
-SPDK_ROOT_DIR = /root/spdk
+#DPDK_DIR = /root/spdk/dpdk-16.07/x86_64-native-linuxapp-gcc/
+#SPDK_ROOT_DIR = /root/spdk
 
 ifneq "$(wildcard $(SPDK_ROOT_DIR) )" ""
 ifneq "$(wildcard $(DPDK_DIR) )" ""
@@ -36,10 +36,10 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC)  -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC)  -pg -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 $(TARGET)	:	$(OBJS)
-	$(CC)  -g -o $(TARGET) $(OBJS) $(LIBS)  $(NVFUSE_LIBS) $(LDFLAGS) -D_GNU_SOURCE $(CFLAGS)
+	$(CC)  -pg -g -o $(TARGET) $(OBJS) $(LIBS)  $(NVFUSE_LIBS) $(LDFLAGS) -D_GNU_SOURCE $(CFLAGS)
 
 all:  $(TARGET) 
 

@@ -32,6 +32,8 @@ s32 nvfuse_type(struct nvfuse_handle *nvh, s8 *str);
 int parse_and_execute(char *input);
 void postmark_main();
 
+s32 nvfuse_aio_test(struct nvfuse_handle *nvh);
+
 struct nvfuse_handle *g_nvh;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
@@ -89,13 +91,13 @@ void mini_main(int argc, char *argv[]){
 #endif
 	
 #	if (EXAM_USE_RAMDISK == 1)
-	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
+	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
 #	elif (EXAM_USE_FILEDISK == 1)
-	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
+	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
 #	elif (EXAM_USE_UNIXIO == 1)
-	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
+	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
 #	elif (EXAM_USE_SPDK == 1)
-	g_nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
+	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
 #	endif
 	
 	printf("NVFUSE-CLI # ");
@@ -201,6 +203,8 @@ int parse_and_execute(char *input)
 				nvfuse_format(g_nvh);
 			} else if (!strcmp(arg[0], "test")) {
 				nvfuse_test(g_nvh);
+			} else if (!strcmp(arg[0], "aiotest")) {
+				nvfuse_aio_test(g_nvh);
 			} else if (!strcmp(arg[0], "sync")) {
 				nvfuse_sync(g_nvh);
 			} else if (!strcmp(arg[0], "help")) {

@@ -218,9 +218,11 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	next_id = (seg_id + 1) % sb->sb_segment_num;
 
 	while (next_id != seg_id) {
-		new_block = nvfuse_alloc_dbitmap(sb, next_id);
-		if (new_block)
-			break;
+		if (nvfuse_get_free_blocks(sb, next_id)) {
+		    new_block = nvfuse_alloc_dbitmap(sb, next_id);
+		    if (new_block)
+			    break;
+		}
 		next_id = (next_id + 1) % sb->sb_segment_num;
 	}
 	

@@ -23,9 +23,9 @@
 #include <sys/uio.h>
 #endif 
 
+#include "nvfuse_buffer_cache.h"
 #include "nvfuse_core.h"
 #include "nvfuse_io_manager.h"
-#include "nvfuse_buffer_cache.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_indirect.h"
 #include "nvfuse_bp_tree.h"
@@ -66,24 +66,6 @@ struct nvfuse_segment_summary *nvfuse_get_segment_summary(struct nvfuse_superblo
 	return sb->sb_ss + seg_id;
 }
 
-void nvfuse_init_ictx(struct nvfuse_inode_ctx *ictx)
-{
-	//memset(ictx, 0x00, sizeof(struct nvfuse_inode_ctx));
-	ictx->ictx_ino = 0;
-	ictx->ictx_inode = NULL;
-	ictx->ictx_bh = NULL;
-		
-	INIT_LIST_HEAD(&ictx->ictx_meta_bh_head);
-	INIT_LIST_HEAD(&ictx->ictx_data_bh_head);
-
-	ictx->ictx_meta_dirty_count = 0;
-	ictx->ictx_data_dirty_count = 0;
-
-	ictx->ictx_type = 0;
-	ictx->ictx_status = 0;
-	ictx->ictx_ref = 0;
-}
-
 struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino)
 {
 	struct nvfuse_inode_ctx *alloc_ictx;
@@ -116,9 +98,8 @@ struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct 
 
 	alloc_ictx->ictx_ino = ino;
 	alloc_ictx->ictx_inode = inode;
-	alloc_ictx->ictx_bh = bh;
-	assert(alloc_ictx->ictx_ref == 0);
-	alloc_ictx->ictx_ref = 1;
+	alloc_ictx->ictx_bh = bh;	
+	alloc_ictx->ictx_ref++;
 	
 	assert(inode->i_ino);
 	
@@ -151,7 +132,7 @@ void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx 
 	
 	ictx->ictx_bh = NULL;
 
-	assert(ictx->ictx_ref == 1);
+	//assert(ictx->ictx_ref == 1);
 		
 	nvfuse_release_ictx(sb, ictx, dirty);
 }
@@ -323,10 +304,13 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
 
 	ss->ss_free_blocks++;
 	sb->sb_free_blocks++;
+	sb->sb_no_of_used_blocks--;
 
 	assert(ss->ss_free_blocks <= ss->ss_max_blocks);
 	assert(sb->sb_free_blocks <= sb->sb_no_of_blocks);
-	nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
+	assert(sb->sb_no_of_used_blocks >= 0);
+
+	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
 
 void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
@@ -342,9 +326,31 @@ void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
 
 	ss->ss_free_blocks--;
 	sb->sb_free_blocks--;
+	sb->sb_no_of_used_blocks++;
 	assert(ss->ss_free_blocks >= 0);
 	assert(sb->sb_free_blocks >= 0);
-	nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
+	assert(sb->sb_no_of_used_blocks <= sb->sb_no_of_blocks);
+
+	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
+}
+
+u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id)
+{
+	struct nvfuse_segment_summary *ss = NULL;
+	struct nvfuse_buffer_head *ss_bh;
+	u32 free_blocks;
+
+	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
+	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+	assert(ss->ss_id == seg_id);
+
+	free_blocks = ss->ss_free_blocks;
+
+	assert(ss->ss_free_blocks >= 0);
+	assert(sb->sb_free_blocks >= 0);
+	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
+
+	return free_blocks;
 }
 
 inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
@@ -725,59 +731,6 @@ s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct io_job *jobq
 	return 0;
 }
 
-void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc)
-{
-	struct nvfuse_inode_ctx *ictx;
-	struct nvfuse_buffer_head *bh;
-	struct list_head *head, *ptr, *temp;
-
-	head = &bc->bc_bh_head;
-
-	if (list_empty(head))
-		return;
-
-	list_for_each_safe(ptr, temp, head) {
-		bh = (struct nvfuse_buffer_head *)list_entry(ptr, struct nvfuse_buffer_head, bh_bc_list);
-		ictx = bh->bh_ictx;
-
-		if (test_bit(&bh->bh_status, BUFFER_STATUS_META))
-		{
-			ictx->ictx_meta_dirty_count--;			
-			assert(ictx->ictx_meta_dirty_count >= 0);
-		}
-		else
-		{
-			ictx->ictx_data_dirty_count--;
-			assert(ictx->ictx_data_dirty_count >= 0);
-		}
-		
-		list_del(&bh->bh_bc_list);
-		list_del(&bh->bh_dirty_list);
-		
-		/* decrement count in buffer cache node */
-		bc->bc_bh_count--;
-		
-		/* removal of buffer head */
-		nvfuse_free(bh);
-		
-		if (ictx->ictx_bh == bh)
-			ictx->ictx_bh = NULL;
-
-		/* move inode context to clean list */
-		if (ictx->ictx_meta_dirty_count == 0 &&
-			ictx->ictx_data_dirty_count == 0)
-		{
-			assert(ictx->ictx_ino);
-
-			clear_bit(&ictx->ictx_status, BUFFER_STATUS_DIRTY);
-			set_bit(&ictx->ictx_status, BUFFER_STATUS_CLEAN);
-			nvfuse_move_ictx_type(sb, ictx, BUFFER_TYPE_CLEAN);
-		}
-	}
-	
-	assert(list_empty(head));
-}
-
 s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head, s32 num_blocks)
 {	
 	struct list_head *ptr, *temp;
@@ -827,6 +780,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 
 	nvfuse_wait_aio_completion(sb, jobs, num_blocks);
 
+	free(iocb);
 	free(jobs);
 #else
 	list_for_each_safe(ptr, temp, head) {
@@ -843,6 +797,9 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 
 		assert(bc->bc_dirty);
 		bc->bc_dirty = 0;
+		if (bc->bc_ref) {
+			printf("debug\n");
+		}
 		nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
 	}
 	

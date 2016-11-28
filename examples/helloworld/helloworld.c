@@ -38,22 +38,30 @@
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
-int main()
+int main(int argc, char *argv[])
 {
 	struct nvfuse_handle *nvh;	
 	int ret;
 	int fd;
 	int count;
 	char *buf;
+	char *devname; 
+
+	devname = argv[1];
+	if (argc < 2) {
+		printf(" please enter the device file (e.g., /dev/sdb)\n");
+		return -1;
+	}
+	printf(" device name = %s \n", devname);
 
 #	if (EXAM_USE_RAMDISK == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
 #	elif (EXAM_USE_FILEDISK == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
 #	elif (EXAM_USE_UNIXIO == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
 #	elif (EXAM_USE_SPDK == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
 #	endif
 
 	/* file open and create */

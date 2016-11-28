@@ -18,6 +18,7 @@
 #endif
 
 #include "nvfuse_types.h"
+
 #ifndef _NVFUSE_API_H
 #define _NVFUSE_API_H
 
@@ -31,7 +32,10 @@ struct dirent {
 #define DT_REG 2
 #endif
 
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount);
+s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
+s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count);
+
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s8 *devname, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount);
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount);
 
 s32 nvfuse_lookup(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx **file_ictx, struct nvfuse_dir_entry *file_entry,
@@ -44,6 +48,8 @@ s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags);
 s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid);
 
 s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
+s32 nvfuse_readfile_aio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
+
 s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 
 s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *str, inode_t *new_ino, mode_t mode, dev_t dev);
@@ -95,5 +101,8 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct timespec ts[2]);
 
 s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 to_entry, u32 from_entry);
+
+
+s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, off_t length);
 
 #endif

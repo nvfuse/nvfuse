@@ -64,7 +64,7 @@ struct io_event;
 #	define USE_MTDIO    0
 #endif 
 
-#define DISK_NAME "/dev/sdb"
+#define DISK_NAME "/dev/nvme0n1p1"
 
 #define DISK_FILE_NUM 2
 #define DISK_FILE_PATH "d:/DATA_DISK.DAT"
@@ -106,6 +106,7 @@ struct io_job{
     int req_type; // is read 
     char *buf;
     int complete;
+    void *tag;
 };
 
 

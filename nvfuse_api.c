@@ -36,7 +36,7 @@
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
 
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount)
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s8 *devname, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount)
 {
 	struct nvfuse_handle *nvh;
 	struct nvfuse_io_manager *io_manager;
@@ -72,7 +72,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s32 init
 #endif
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 		case IO_MANAGER_UNIXIO:
-			nvfuse_init_unixio(io_manager, "SSD", "/dev/sdb", AIO_MAX_QDEPTH);
+			nvfuse_init_unixio(io_manager, "SSD", devname, AIO_MAX_QDEPTH);
 			break;
 #	ifdef SPDK_ENABLED
 		case IO_MANAGER_SPDK:
@@ -503,15 +503,14 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 	return NVFUSE_SUCCESS;
 }
 
-s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset) 
+s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset, s32 sync_read)
 {
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_head *bh;
 	struct nvfuse_file_table *of;
-	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+
 	s32  i, offset, remain, rcount = 0;
-	s32 ra = 0;
 
 	of = &(sb->sb_file_table[fid]);
 	pthread_mutex_lock(&of->ft_lock);
@@ -526,10 +525,10 @@ s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, n
 #else
 	of->rwoffset = roffset;
 #endif
-	
+
 	while (count > 0 && of->rwoffset < inode->i_size) {
 
-		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, of->rwoffset >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_DATA);
+		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, of->rwoffset >> CLUSTER_SIZE_BITS, sync_read, NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
 			printf(" read error \n");
 			goto RES;
@@ -541,40 +540,52 @@ s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, n
 		if (remain > count)
 			remain = count;
 
-		memcpy(buffer + rcount, &bh->bh_buf[offset], remain);
+		if (sync_read)
+			memcpy(buffer + rcount, &bh->bh_buf[offset], remain);
 
 		rcount += remain;
 		of->rwoffset += remain;
 		count -= remain;
-		nvfuse_release_bh(sb, bh, 0, 0);
+		nvfuse_release_bh(sb, bh, 0, CLEAN);
 	}
 
+RES:;
 	nvfuse_release_inode(sb, ictx, CLEAN);
-	nvfuse_release_super(sb);
+	
 
 	pthread_mutex_unlock(&of->ft_lock);
-
-	if (ra) {
-		struct timeval start, end, result;
-
-		/* send prefetch signal*/
-		pthread_mutex_lock(&sb->sb_prefetch_lock);
-		sb->sb_prefetch_cur = fid;
-		pthread_cond_signal(&sb->sb_prefetch_cond);
-		pthread_mutex_unlock(&sb->sb_prefetch_lock);
-	}
-RES:
 
 	return rcount;
 }
 
-s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset) 
+s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset) 
+{
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	s32 rcount;
+	
+	rcount = nvfuse_readfile_core(sb, fid, buffer, count, roffset, READ);
+
+	nvfuse_release_super(sb);
+	return rcount;
+}
+
+s32 nvfuse_readfile_aio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset)
+{
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	s32 rcount;
+
+	rcount = nvfuse_readfile_core(sb, fid, buffer, count, roffset, 0 /* no sync read */);
+
+	nvfuse_release_super(sb);
+	return rcount;	
+}
+
+s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset)
 {
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
 	struct nvfuse_buffer_head *bh = NULL;
-	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	s32 offset = 0, remain = 0, wcount = 0;
 	lbno_t lblock = 0;
 	int ret;
@@ -618,7 +629,7 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 			bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
 
 		memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
-
+		
 		wcount += remain;
 		of->rwoffset += remain;
 		count -= remain;
@@ -628,7 +639,7 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 
 		inode->i_type = NVFUSE_TYPE_FILE;
 		inode->i_size = of->size;
-		
+
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
@@ -648,13 +659,85 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 		}
 	}
 	
-	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
-	
 	pthread_mutex_unlock(&of->ft_lock);
+
+	return wcount;
+}
+
+s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset) 
+{	
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	s32 wcount;
+
+	wcount = nvfuse_writefile_core(sb, fid, user_buf, count, woffset);
+	
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 	
 	nvfuse_release_super(sb);
 
 	return wcount;
+}
+
+s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset)
+{
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	s32 wcount;
+
+	wcount = nvfuse_writefile_core(sb, fid, user_buf, count, woffset);
+	
+	nvfuse_release_super(sb);
+
+	return wcount;
+}
+
+s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count)
+{
+	struct nvfuse_inode_ctx *ictx;
+	struct nvfuse_inode *inode;
+	struct nvfuse_file_table *of;
+	struct nvfuse_buffer_head *bh = NULL;
+	s32 offset = 0, remain = 0;
+	nvfuse_off_t curoffset;
+	lbno_t lblock = 0;
+	int ret;
+
+	of = &(sb->sb_file_table[fid]);
+	pthread_mutex_lock(&of->ft_lock);
+
+	curoffset = woffset;
+	
+	ictx = nvfuse_read_inode(sb, NULL, of->ino);
+	inode = ictx->ictx_inode;
+
+	while (count > 0) {
+		lblock = curoffset >> CLUSTER_SIZE_BITS;
+		offset = curoffset & (CLUSTER_SIZE - 1);
+		remain = CLUSTER_SIZE - offset;
+		
+		if (remain > count)
+			remain = count;
+					
+		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
+		if (bh == NULL)
+		{
+			printf(" Error: get_bh()\n");
+			return -1;
+		}
+		curoffset += remain;
+		count -= remain;
+		(*aio_bh_count)++;
+
+#if 1
+		list_add(&bh->bh_aio_list, aio_bh_head);
+#else
+		nvfuse_release_bh(sb, bh, 0, CLEAN);
+#endif		
+	}
+	
+	nvfuse_release_inode(sb, ictx, CLEAN);
+	pthread_mutex_unlock(&of->ft_lock);
+
+	return 0;
 }
 
 /* ported from fuse_ext2 project */
@@ -1843,9 +1926,9 @@ s32 nvfuse_statvfs(struct nvfuse_handle *nvh, const char *path, struct statvfs *
 
     sb = nvfuse_read_super(nvh);
 
-    buf->f_blocks = (fsblkcnt_t)sb->sb_no_of_blocks;   /* size of fs in f_frsize units */
-    buf->f_bfree = (fsblkcnt_t)sb->sb_no_of_blocks  - sb->sb_no_of_used_blocks;    /* # free blocks */
-    buf->f_bavail = (fsblkcnt_t)sb->sb_no_of_blocks  - sb->sb_no_of_used_blocks;/* # free blocks for non-root */
+    buf->f_blocks = (fsblkcnt_t)sb->sb_no_of_blocks;	/* size of fs in f_frsize units */
+    buf->f_bfree = (fsblkcnt_t)sb->sb_free_blocks;		/* # free blocks */
+    buf->f_bavail = (fsblkcnt_t)sb->sb_free_blocks;		/* # free blocks for non-root */
     buf->f_files = sb->sb_max_inode_num - sb->sb_free_inodes;    /* # inodes */
     buf->f_ffree = sb->sb_free_inodes;    /* # free inodes */
     buf->f_favail = sb->sb_free_inodes;   /* # free inodes for non-root */
@@ -2139,32 +2222,43 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, o
 	char filename[FNAME_SIZE];
 	int res;
 	u32 curr_block;
-	
+	u32 max_block; 
 	res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
 	if (res < 0)
 		return res;
 
-	if (dir_entry.d_ino == 0) {
+	if (dir_entry.d_ino == 0) 
+	{
 		printf("invalid path\n");
 		res = -1;
 		goto RET;
-	} else {
+	} 
+	else 
+	{
 		sb = nvfuse_read_super(nvh);
 		if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 			res = -1;
 			goto RET;
 		}
 
-		for (curr_block = start;curr_block < start+length; curr_block)
+		if (ictx->ictx_inode->i_size < (start + length))
 		{
-			res = nvfuse_get_block(sb, ictx, curr_block, NULL, 1 /*create*/);
-			if (res < 0) {
-				printf(" Error: nvfuse_get_block()\n");
-				res = -1;
-				goto RET;
+			max_block = (start + length) / CLUSTER_SIZE + ((start + length) % CLUSTER_SIZE ? 1 : 0);
+			for (curr_block = start / CLUSTER_SIZE; curr_block < max_block; curr_block++)
+			{
+				res = nvfuse_get_block(sb, ictx, curr_block, NULL, 1 /*create*/);
+				if (res < 0) 
+				{
+					printf(" Error: nvfuse_get_block()\n");
+					res = -1;
+					goto RET;
+				}
 			}
-		}
 
+			inode = ictx->ictx_inode;
+			inode->i_size = inode->i_size < length ? length : inode->i_size;
+		}
+		
 		nvfuse_release_inode(sb, ictx, DIRTY);
 		nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 		nvfuse_release_super(sb);

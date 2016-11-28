@@ -133,6 +133,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\nvfuse_aio.c" />
     <ClCompile Include="..\nvfuse_core.c" />
     <ClCompile Include="..\nvfuse_api.c" />
     <ClCompile Include="..\nvfuse_bp_tree.c" />
@@ -146,8 +147,10 @@
     <ClCompile Include="..\nvfuse_mkfs.c" />
     <ClCompile Include="..\nvfuse_ramdisk_io.c" />
     <ClCompile Include="..\nvfuse_spdk.c" />
+    <ClCompile Include="..\rbtree.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\include\nvfuse_aio.h" />
     <ClInclude Include="..\include\nvfuse_dirhash.h" />
     <ClInclude Include="..\include\imark.h" />
     <ClInclude Include="..\include\list.h" />
@@ -162,6 +165,7 @@
     <ClInclude Include="..\include\nvfuse_io_manager.h" />
     <ClInclude Include="..\include\nvfuse_malloc.h" />
     <ClInclude Include="..\include\nvfuse_types.h" />
+    <ClInclude Include="..\include\rbtree.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

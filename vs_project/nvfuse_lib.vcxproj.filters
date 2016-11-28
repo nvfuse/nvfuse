@@ -50,6 +50,12 @@
     <ClCompile Include="..\nvfuse_mkfs.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\nvfuse_aio.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\rbtree.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\list.h">
@@ -92,6 +98,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\include\imark.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\nvfuse_aio.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\rbtree.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

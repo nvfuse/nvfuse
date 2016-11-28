@@ -1106,11 +1106,7 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 			//printf("performing %2d percents\n",(i*10)/percent);
 			fflush(stdout);
 		}
-
-		//if(i % 2000 == 0)
-		//	Sleep(2000);
-		//printf("\r\t %f ", (float)nvfuse_sb->sb_no_of_used_blocks/(float)nvfuse_sb->sb_no_of_blocks);
-		//sync();
+		
 	}
 	//Sleep(15000);
 

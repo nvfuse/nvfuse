@@ -18,6 +18,7 @@
 #include "nvfuse_io_manager.h"
 #include "nvfuse_bp_tree.h"
 #include "list.h"
+#include "rbtree.h"
 
 #include <pthread.h>
 
@@ -152,16 +153,16 @@
 
 struct nvfuse_superblock_common {
 	u32 sb_signature; //RDONLY	
-	u32	sb_no_of_sectors;//RDONLY	
-	u32	sb_no_of_blocks;//RDONLY	
-	u32	sb_no_of_used_blocks;
+	s64	sb_no_of_sectors;//RDONLY	
+	s64	sb_no_of_blocks;//RDONLY	
+	s64	sb_no_of_used_blocks;
 
 	u32 sb_no_of_inodes_per_seg;
 	u32 sb_no_of_blocks_per_seg;
 
 	u32	sb_root_ino;/* RDONLY */
-	u32 sb_free_inodes;
-	u32 sb_free_blocks;
+	s32 sb_free_inodes;
+	s64 sb_free_blocks;
 
 	s32	sb_segment_num; /*RDONLY*/
 	s32	sb_free_segment_num;
@@ -169,9 +170,9 @@ struct nvfuse_superblock_common {
 	u32	sb_umount;/* SYNC TIME*/
 	s32 sb_mount_cnt;
 
-	u32	sb_max_file_num;
-	u32	sb_max_dir_num;
-	u32	sb_max_inode_num;
+	s32	sb_max_file_num;
+	s32	sb_max_dir_num;
+	s32	sb_max_inode_num;
 
 	/* Check Point Time */
 	u32	sb_last_update_sec; /* SYNC TIME */
@@ -182,16 +183,16 @@ struct nvfuse_superblock_common {
 struct nvfuse_superblock{
 	struct { /* Must be identical to nvfuse_super_common */
 		u32 sb_signature; //RDONLY	
-		u64	sb_no_of_sectors;//RDONLY	
-		u64	sb_no_of_blocks;//RDONLY	
-		u64	sb_no_of_used_blocks;
+		s64	sb_no_of_sectors;//RDONLY	
+		s64	sb_no_of_blocks;//RDONLY	
+		s64	sb_no_of_used_blocks;
 
 		u32 sb_no_of_inodes_per_seg;
 		u32 sb_no_of_blocks_per_seg;
 
 		u32	sb_root_ino;/* RDONLY */
-		u32 sb_free_inodes;
-		u64 sb_free_blocks;
+		s32 sb_free_inodes;
+		s64 sb_free_blocks;
 
 		s32	sb_segment_num; /*RDONLY*/
 		s32	sb_free_segment_num;
@@ -199,9 +200,9 @@ struct nvfuse_superblock{
 		u32	sb_umount;/* SYNC TIME*/
 		s32 sb_mount_cnt;
 
-		u32	sb_max_file_num;
-		u32	sb_max_dir_num;
-		u32	sb_max_inode_num; 
+		s32	sb_max_file_num;
+		s32	sb_max_dir_num;
+		s32	sb_max_inode_num; 
 		
 		/* Check Point Time */
 		u32	sb_last_update_sec; /* SYNC TIME */
@@ -350,7 +351,12 @@ struct nvfuse_inode_ctx{
 
 	struct list_head ictx_meta_bh_head;
 	struct list_head ictx_data_bh_head;	
-	
+
+#ifdef USE_RBNODE
+    struct rb_root ictx_meta_bh_rbroot;	
+    struct rb_root ictx_data_bh_rbroot;
+#endif
+
 	s32 ictx_meta_dirty_count;
 	s32 ictx_data_dirty_count;
 
@@ -448,6 +454,7 @@ void nvfuse_free_blocks(struct nvfuse_superblock *sb, u32 block_to_delete, u32 c
 s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb);
 s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position);
 s32 nvfuse_format(struct nvfuse_handle *nvh);
+u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id);
 
 void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force);
 
@@ -462,7 +469,7 @@ void nvfuse_lock_init();
 void nvfuse_lock_exit();
 
 s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir);
-void nvfuse_init_ictx(struct nvfuse_inode_ctx *ictx);
-void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc);
+
+s32 nvfuse_make_jobs(struct io_job **jobs, int numjobs);
 
 #endif /* NVFUSE_HEADER_H*/

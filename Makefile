@@ -38,7 +38,8 @@ nvfuse_core.o nvfuse_unix_io.o nvfuse_gettimeofday.o \
 nvfuse_bp_tree.o nvfuse_dirhash.o \
 nvfuse_misc.o nvfuse_mkfs.o nvfuse_malloc.o nvfuse_indirect.o \
 nvfuse_spdk.o \
-nvfuse_api.o
+nvfuse_api.o nvfuse_aio.o \
+rbtree.o
 
 LDFLAGS := -lm -lpthread -laio -lrt
 CFLAGS := $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE

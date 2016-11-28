@@ -53,6 +53,7 @@
 
 /* nvfuse handle */
 struct nvfuse_handle *nvh;
+s8 *gdevname;
 
 #define INIT_IOM	1
 #define MOUNT		1
@@ -60,18 +61,18 @@ struct nvfuse_handle *nvh;
 #define UMOUNT		1
 
 /* initialization of NVFUSE library */
-int nvfuse_init(int format)
+int nvfuse_init(int format, s8 *devname)
 {
 	int ret = 0;
 
 #	if (EXAM_USE_RAMDISK == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_RAMDISK, format, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, format, MOUNT);
 #	elif (EXAM_USE_FILEDISK == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_FILEDISK, format, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, format, MOUNT);
 #	elif (EXAM_USE_UNIXIO == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_UNIXIO, format, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, format, MOUNT);
 #	elif (EXAM_USE_SPDK == 1)
-	nvh = nvfuse_create_handle(NULL, INIT_IOM, IO_MANAGER_SPDK, format, MOUNT);
+	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, format, MOUNT);
 #	endif
 	
 	if (nvh == NULL)
@@ -588,7 +589,7 @@ void *xmp_init(struct fuse_conn_info *conn)
 	int ret;
 	int format = 1;
 
-	ret = nvfuse_init(format);
+	ret = nvfuse_init(format, gdevname);
 	if (ret < 0) {
 		printf(" Error: nvfuse_init()\n");
 		return NULL;
@@ -658,13 +659,17 @@ int main(int argc, char *argv[])
 {
 	int ret;
 
-	if (argc < 2) {
+	if (argc < 3) {
 		printf("\n");
 		printf("Usage: \n");
-		printf("	#./fuse_example /mnt_point\n");
+		printf("	#./fuse_example /dev/nvme0n1 /mnt_point\n");
 		printf("\n");
 		return -1;
 	}
+
+	gdevname = argv[1];
+	printf(" device name = %s \n", gdevname);
+	printf(" mount point = %s \n", argv[2]);
 
 	printf(" FUSE_USE_VERSION = %d \n", FUSE_USE_VERSION);
 

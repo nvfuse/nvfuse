@@ -13,6 +13,7 @@
 * more details.
 */
 
+#include "nvfuse_config.h"
 #include "nvfuse_core.h"
 #include "list.h"
 
@@ -45,14 +46,20 @@
 /* buffer head to track dirty buffer for each inode */
 struct nvfuse_buffer_head {
 	struct list_head bh_dirty_list; /* metadata buffer list for specific inode */	
+#ifdef USE_RBNODE
+    struct rb_node bh_dirty_rbnode;
+#endif
+
 	struct list_head bh_bc_list;	/* bc_list for linked buffer list*/
 	
+	struct list_head bh_aio_list;  /* aio_list */
+
 	struct nvfuse_inode_ctx *bh_ictx; /* inode context pointer */
 
 	struct nvfuse_buffer_cache *bh_bc; /* pointer to actual buffer head */
 	s32 bh_status; /* status (e.g., clean, dirty, meta) */
 	s32 bh_seq;
-	s8 *bh_buf;
+	s8 *bh_buf;	
 };
 
 /* buffer cache allocated to each physical block */
@@ -63,7 +70,7 @@ struct nvfuse_buffer_cache {
 	s32 bc_bh_count; 
 
 	s32 bc_list_type;				/* buffer status (e.g., clean, dirty, unused) */
-	u64 bc_bno;					/* buffer number (type | inode | block number)*/
+	s64 bc_bno;					/* buffer number (type | inode | block number)*/
 	lbno_t bc_lbno;				/* logical block number */
 	inode_t bc_ino;				/* inode number */
 	pbno_t bc_pno;				/* physical block no*/
@@ -128,4 +135,7 @@ void nvfuse_clear_bh_status(struct nvfuse_buffer_head *bh, s32 status);
 void nvfuse_insert_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 void nvfuse_move_ictx_type(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 desired_type);
 
+void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc);
+
+void nvfuse_init_ictx(struct nvfuse_inode_ctx *ictx);
 #endif
