@@ -25,6 +25,7 @@
 #include "nvfuse_api.h"
 #include "nvfuse_aio.h"
 #include "nvfuse_malloc.h"
+#include "nvfuse_gettimeofday.h"
 #include "time.h"
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
@@ -52,7 +53,13 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 
 	if (fd!=-1)
 	{
+#if (NVFUSE_OS == NVFUSE_OS_WINDOWS)
+		size = _atoi64(ssize);
+#else
 		size = atoi(ssize);
+#endif
+
+		/*ret = nvfuse_fallocate(nvh, str, 0, size);*/
 
 		if(size  < 1) size = CLUSTER_SIZE;
 
@@ -92,7 +99,11 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	printf(" aiotest %s filesize = %ld io_size = %d qdpeth = %d (%c) \n", str, (long)file_size, io_size, qdepth, is_read ? 'R' : 'W');
 
 	fd = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
-
+	if (fd < 0)
+	{
+		printf(" Error: file open or create \n");
+		return -1;
+	}
 	/* pre-allocation of data blocks*/
 	nvfuse_fallocate(nvh, str, 0, file_size);
 
@@ -120,7 +131,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			}
 
 			/* initialization of aio context */
-			actx = malloc(sizeof(struct nvfuse_aio_ctx));
+			actx = nvfuse_malloc(sizeof(struct nvfuse_aio_ctx));
 			memset(actx, 0x00, sizeof(struct nvfuse_aio_ctx));
 			actx->actx_fid = fd;
 			actx->actx_opcode = is_read ? READ : WRITE;
@@ -142,6 +153,8 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 
 			io_curr += io_size;
 			io_remaining -= io_size;
+			if (io_remaining <= 0)
+				break;
 		}
 		
 		/* aio submission */
@@ -172,26 +185,48 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 	char str[128];
 	struct timeval tv;
 	s64 file_size;
-	int i;
+	s32 i;
+	s32 res;
 	
 	for (i = 0; i < 1000; i++)
 	{
 		sprintf(str, "file%d", i);
-		file_size = (s64)4 * 1024 * 1024 * 1024, 4096;
+		file_size = (s64)4 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		nvfuse_aio_test_rw(nvh, str, file_size, 4096, 128, WRITE);		
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE);
+		if (res < 0)
+		{
+			printf(" Error: aio write test \n");
+			break;
+		}
+
 		printf(" nvfuse aio through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
-		nvfuse_rmfile_path(nvh, str);
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			break;
+		}
 	}
 
 	for (i = 0; i < 1000; i++)
 	{
 		sprintf(str, "file%d", i);
-		file_size = (s64)4 * 1024 * 1024 * 1024, 4096;
+		file_size = (s64)4 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		nvfuse_aio_test_rw(nvh, str, file_size, 4096, 128, READ);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ);
+		if (res < 0)
+		{
+			printf(" Error: aio write test \n");
+			break;
+		}
 		printf(" nvfuse aio through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
-		nvfuse_rmfile_path(nvh, str);
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			break;
+		}
 	}
 
 	return NVFUSE_SUCCESS;

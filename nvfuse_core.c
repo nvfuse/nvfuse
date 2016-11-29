@@ -742,6 +742,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 	struct io_job *jobs;
 	struct iocb **iocb;
 	s32 count = 0;	
+
 	res = nvfuse_make_jobs(&jobs, num_blocks);
 	if (res < 0) {
 		return res;
@@ -1982,31 +1983,37 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 	s32 flushing_count = 0;
 	s32 res;
 
-	dirty_count = nvfuse_get_dirty_count(sb);
-	
-	/* check dirty flush with force option */
-	if(force != DIRTY_FLUSH_FORCE && dirty_count < NVFUSE_SYNC_DIRTY_COUNT)
-		goto RES;
-	
-	/* no more dirty data */
-	if (dirty_count == 0)
-		goto RES; 
-
-	dirty_head = &sb->sb_bm->bm_list[BUFFER_TYPE_DIRTY];
-	flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
-
-	list_for_each_safe(ptr, temp, dirty_head) 
+	while ((dirty_count = nvfuse_get_dirty_count(sb)) == 0)
 	{
-		bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
-		assert(bc->bc_dirty);
-		list_move(&bc->bc_list, flushing_head);
-		flushing_count++;
+	
+		/* check dirty flush with force option */
+		if(force != DIRTY_FLUSH_FORCE && dirty_count < NVFUSE_SYNC_DIRTY_COUNT)
+			goto RES;
+		
+		/* no more dirty data */
+		if (dirty_count == 0)
+			goto RES; 
+
+		dirty_head = &sb->sb_bm->bm_list[BUFFER_TYPE_DIRTY];
+		flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
+
+		list_for_each_safe(ptr, temp, dirty_head) 
+		{
+			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+			assert(bc->bc_dirty);
+			list_move(&bc->bc_list, flushing_head);
+			flushing_count++;
+			if (flushing_count >= AIO_MAX_QDEPTH)
+				break;
+		}
+
+		res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
+		if (res)
+			break;
 	}
 
-	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
-
 	if (sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY])
-		printf(" inode dirty count = %d \n", sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY]);
+		printf(" Warning: inode dirty count = %d \n", sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY]);
 RES:;	
 
 	return;

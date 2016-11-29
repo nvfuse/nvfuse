@@ -2114,7 +2114,7 @@ s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd)
 	return 0;
 }
 
-s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
+s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
 {
 	struct list_head *dirty_head, *flushing_head;
 	struct list_head *temp, *ptr;
@@ -2157,15 +2157,30 @@ s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ict
 
 		list_move(&bc->bc_list, flushing_head);
 		flushing_count++;
+		if (flushing_count >= AIO_MAX_QDEPTH)
+			break;
 	}
-
-	assert(ictx->ictx_data_dirty_count + ictx->ictx_meta_dirty_count == flushing_count);
 
 	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
 
 RES:;
 
-	return 0;
+	return res;
+}
+
+s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
+{
+	s32 res;
+
+	/* ictx doesn't keep dirty data */
+	while (ictx->ictx_data_dirty_count || 
+	       ictx->ictx_meta_dirty_count)
+	{
+
+		res = _nvfuse_fsync_ictx(sb, ictx);
+		if (res)
+			break;
+	}
 }
 
 s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
@@ -2179,27 +2194,29 @@ s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 	s32 res;
 
 	/* ictx doesn't keep dirty data */
-	if (!ictx->ictx_data_dirty_count)
-		goto RES;
-
-	/* dirty list for file data */
-	dirty_head = &ictx->ictx_data_bh_head;
-	flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
-
-	list_for_each_safe(ptr, temp, dirty_head)
+	while (ictx->ictx_data_dirty_count)
 	{
-		bh = (struct nvfuse_buffer_head *)list_entry(ptr, struct nvfuse_buffer_head, bh_dirty_list);
-		assert(test_bit(&bh->bh_status, BUFFER_STATUS_DIRTY));
+		/* dirty list for file data */
+		dirty_head = &ictx->ictx_data_bh_head;
+		flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
 
-		bc = bh->bh_bc;
+		list_for_each_safe(ptr, temp, dirty_head)
+		{
+			bh = (struct nvfuse_buffer_head *)list_entry(ptr, struct nvfuse_buffer_head, bh_dirty_list);
+			assert(test_bit(&bh->bh_status, BUFFER_STATUS_DIRTY));
 
-		list_move(&bc->bc_list, flushing_head);
-		flushing_count++;
+			bc = bh->bh_bc;
+
+			list_move(&bc->bc_list, flushing_head);
+			flushing_count++;
+			if (flushing_count >= AIO_MAX_QDEPTH)
+				break;
+		}
+
+		res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
+		if (res)
+			break;
 	}
-
-	assert(ictx->ictx_data_dirty_count == flushing_count);
-
-	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
 
 RES:;
 
@@ -2227,6 +2244,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, o
 	int res;
 	u32 curr_block;
 	u32 max_block; 
+
 	res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
 	if (res < 0)
 		return res;
@@ -2239,6 +2257,9 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, o
 	} 
 	else 
 	{
+
+		/*printf(" falloc size = %lu \n", length);*/
+
 		sb = nvfuse_read_super(nvh);
 		if(nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0){
 			res = -1;
