@@ -89,7 +89,7 @@
 #define NVFUSE_MAX_RA_SIZE (32*CLUSTER_SIZE)
 
 /* MKFS uses zeroing to initialize inode table */
-#define NVFUSE_USE_MKFS_INODE_ZEROING
+//#define NVFUSE_USE_MKFS_INODE_ZEROING
 
 /* Directory Indexing */
 #define NVFUSE_USE_DIR_INDEXING 1

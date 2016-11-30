@@ -2000,6 +2000,7 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 	{
 		dirty_head = &sb->sb_bm->bm_list[BUFFER_TYPE_DIRTY];
 		flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
+		flushing_count = 0;
 
 		list_for_each_safe(ptr, temp, dirty_head) 
 		{

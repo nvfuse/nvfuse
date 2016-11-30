@@ -33,6 +33,7 @@ int parse_and_execute(char *input);
 void postmark_main();
 
 s32 nvfuse_aio_test(struct nvfuse_handle *nvh);
+s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh);
 
 struct nvfuse_handle *g_nvh;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
@@ -205,6 +206,8 @@ int parse_and_execute(char *input)
 				nvfuse_test(g_nvh);
 			} else if (!strcmp(arg[0], "aiotest")) {
 				nvfuse_aio_test(g_nvh);
+			} else if (!strcmp(arg[0], "fallocate")) {
+				nvfuse_fallocate_test(g_nvh);
 			} else if (!strcmp(arg[0], "sync")) {
 				nvfuse_sync(g_nvh);
 			} else if (!strcmp(arg[0], "help")) {

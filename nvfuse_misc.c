@@ -95,6 +95,8 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	s32 i;
 	s64 io_remaining;
 	s64 io_curr;
+	s32 last_progress = 0;
+	s32 curr_progress = 0;
 
 	printf(" aiotest %s filesize = %ld io_size = %d qdpeth = %d (%c) \n", str, (long)file_size, io_size, qdepth, is_read ? 'R' : 'W');
 
@@ -104,8 +106,11 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		printf(" Error: file open or create \n");
 		return -1;
 	}
+
+	printf(" start fallocate %s size %lu \n", str, file_size);
 	/* pre-allocation of data blocks*/
 	nvfuse_fallocate(nvh, str, 0, file_size);
+	printf(" finish fallocate %s size %lu \n", str, file_size);
 
 	/* initialization of aio queue */
 	ret = nvfuse_aio_queue_init(&aioq, qdepth);
@@ -157,6 +162,15 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 				break;
 		}
 		
+		/* progress bar */
+		curr_progress = (io_curr * 100 / file_size);
+		if (curr_progress % 10 == 0 && curr_progress != last_progress)
+		{
+			printf(".");
+			fflush(stdout);
+			last_progress = curr_progress;
+		}
+
 		/* aio submission */
 		ret = nvfuse_aio_queue_submission(nvh, &aioq);
 		if (ret)
@@ -191,7 +205,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 	for (i = 0; i < 1000; i++)
 	{
 		sprintf(str, "file%d", i);
-		file_size = (s64)4 * 1024 * 1024 * 1024;
+		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
 		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE);
 		if (res < 0)
@@ -212,7 +226,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 	for (i = 0; i < 1000; i++)
 	{
 		sprintf(str, "file%d", i);
-		file_size = (s64)4 * 1024 * 1024 * 1024;
+		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
 		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ);
 		if (res < 0)
@@ -221,6 +235,47 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 			break;
 		}
 		printf(" nvfuse aio through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			break;
+		}
+	}
+
+	return NVFUSE_SUCCESS;
+}
+
+s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh)
+{
+	char str[128];
+	struct timeval tv;
+	s64 file_size;
+	s32 i;
+	s32 res;
+	s32 fid;
+	
+	for (i = 0; i < 1; i++)
+	{
+		sprintf(str, "file%d", i);
+		file_size = (s64)8 * 1024 * 1024 * 1024;
+
+		gettimeofday(&tv, NULL);
+
+		fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
+		if (fid < 0)
+		{
+			printf(" Error: file open or create \n");
+			return -1;
+		}
+		nvfuse_closefile(nvh, fid);
+
+		printf(" start fallocate %s size %lu \n", str, file_size);
+		/* pre-allocation of data blocks*/
+		nvfuse_fallocate(nvh, str, 0, file_size);
+		printf(" finish fallocate %s size %lu \n", str, file_size);
+
+		printf(" nvfuse fallocate through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0)
 		{

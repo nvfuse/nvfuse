@@ -2143,7 +2143,12 @@ s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 
 		list_move(&bc->bc_list, flushing_head);
 		flushing_count++;
+		if (flushing_count >= AIO_MAX_QDEPTH)
+			break;
 	}
+
+	if (flushing_count >= AIO_MAX_QDEPTH)
+		goto SYNC_DIRTY;
 
 	/* dirty list for meta data */
 	dirty_head = &ictx->ictx_meta_bh_head;
@@ -2162,6 +2167,7 @@ s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 			break;
 	}
 
+SYNC_DIRTY:;
 	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
 
 RES:;
@@ -2202,6 +2208,7 @@ s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 		/* dirty list for file data */
 		dirty_head = &ictx->ictx_data_bh_head;
 		flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
+		flushing_count = 0;
 
 		list_for_each_safe(ptr, temp, dirty_head)
 		{
@@ -2260,7 +2267,6 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, o
 	} 
 	else 
 	{
-
 		/*printf(" falloc size = %lu \n", length);*/
 
 		sb = nvfuse_read_super(nvh);
