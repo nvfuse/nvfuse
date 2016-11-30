@@ -117,7 +117,7 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	master->m_sb = sb;
 	master->m_alloc_block = 1; /* allocation of root node*/
 
-	nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, NULL, 1);
+	nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, 1);
 	bh = nvfuse_get_new_bh(sb, ictx, inode->i_ino, inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
 	nvfuse_release_bh(sb, bh, INSERT_HEAD, DIRTY);
 	inode->i_size += CLUSTER_SIZE;
@@ -1436,7 +1436,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 		inode = ictx->ictx_inode;
 
 		new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
-		nvfuse_get_block(master->m_sb, ictx, new_bno, NULL, 1);
+		nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, 1);
 		bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);
 		
 		node = (index_node_t *)bh->bh_buf;

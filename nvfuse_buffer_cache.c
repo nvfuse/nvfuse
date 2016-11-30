@@ -27,6 +27,9 @@
 void nvfuse_move_buffer_type(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc, s32 desired_type, s32 tail){
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;		
 	s32 res;
+	
+	if (bc->bc_list_type == desired_type)
+		return;
 
 	list_del(&bc->bc_list);
 	bm->bm_list_count[bc->bc_list_type]--;
@@ -41,6 +44,7 @@ void nvfuse_move_buffer_type(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 
 	bm->bm_list_count[bc->bc_list_type]++;
 
+#if 0
 	hlist_del(&bc->bc_hash);
 	if (desired_type == BUFFER_TYPE_UNUSED) {
 		hlist_add_head(&bc->bc_hash, &bm->bm_hash[HASH_NUM]);
@@ -51,6 +55,7 @@ void nvfuse_move_buffer_type(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 		hlist_add_head(&bc->bc_hash, &bm->bm_hash[bc->bc_bno % HASH_NUM]);
 		bm->bm_hash_count[bc->bc_bno % HASH_NUM]++;
 	}
+#endif
 }
 
 void nvfuse_init_buffer_head(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bh){

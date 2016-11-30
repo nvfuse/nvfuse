@@ -103,6 +103,6 @@ s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct tim
 s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 to_entry, u32 from_entry);
 
 
-s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, off_t start, off_t length);
+s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64 length);
 
 #endif

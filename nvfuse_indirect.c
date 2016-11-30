@@ -229,20 +229,45 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	return new_block;
 }
 
-u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *blocks, u32 num_blocks, s32 *error)
+u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *blocks, u32 num_indirect_blocks, u32 num_blocks, s32 *error)
 {
 	u32 new_block = 0;
 	u32 cnt = 0;
+	u32 total_blocks;
 
-	while (num_blocks--) {
+	total_blocks = num_indirect_blocks + num_blocks; 
+
+	while (total_blocks--) 
+	{
 		new_block = nvfuse_alloc_free_block(sb, inode);
 		if (!new_block) {
 			*error = 1;
 			break;
 		}
-
+#if 1
 		*blocks = new_block;
-		blocks++;
+		blocks++;		
+#else
+		if (cnt == 0 || num_indirect_blocks)
+		{
+			*blocks = new_block;
+			blocks++;
+			if (cnt)
+			{
+				num_indirect_blocks--;
+			}
+			else
+			{ 
+				num_blocks--;
+			}
+		}
+		else
+		{ 
+			*blocks = new_block;
+			blocks++;
+			num_blocks--;
+		}
+#endif		
 		cnt++;
 	}
 
@@ -323,10 +348,10 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 	int err = 0;
 	struct nvfuse_buffer_head *bh;
 	int num;
-	u32 new_blocks[4];
+	u32 new_blocks[4] = { 0, };
 	u32 current_block;
 
-	num = nvfuse_alloc_free_blocks(sb, inode, new_blocks, indirect_blks + *blks, &err);	
+	num = nvfuse_alloc_free_blocks(sb, inode, new_blocks, indirect_blks, *blks, &err);
 	if (err)
 		return err;
 
@@ -378,6 +403,7 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 		//if (S_ISDIR(inode->i_mode) && IS_DIRSYNC(inode))
 		//	sync_dirty_buffer(bh);
 	}
+
 	*blks = num;
 	return err;
 
@@ -455,7 +481,7 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 * return = 0, if plain lookup failed.
 * return < 0, error case.
 */
-s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 *pblock, u32 create)
+s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 maxblocks, u32 *pblock, u32 create)
 {
 	u32 offsets[INDIRECT_BLOCKS_LEVEL];
 	Indirect chain[INDIRECT_BLOCKS_LEVEL];
@@ -465,8 +491,7 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 	u32 new_block;
 	u32 indirect_blks;
 	u32 first_block = 0;
-	int count = 0;
-	u32 maxblocks = 1;
+	int count = 0;	 
 	int blocks_to_boundary = 0;
 		
 	depth = nvfuse_block_to_path(lblock, offsets, &blocks_to_boundary);

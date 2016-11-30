@@ -1929,7 +1929,7 @@ u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, 
 	
 	assert(ictx->ictx_ino == ino);		
 
-	ret = nvfuse_get_block(sb, ictx, offset, &value, 0);
+	ret = nvfuse_get_block(sb, ictx, offset, 1/* num block */, &value, 0);
 	if (ret) 
 	{
 		printf(" Warning: block is not allocated.");
