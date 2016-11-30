@@ -383,9 +383,11 @@ RETRY:;
 	
 	bh = nvfuse_get_bh(sb, ictx, IFILE_INO, search_block, READ, NVFUSE_TYPE_META);
 	ip = (struct nvfuse_inode *)bh->bh_buf;
-
-	for(j = 0;j < IFILE_ENTRY_NUM;j++){
-		if(ip[search_entry].i_ino == 0 && (search_entry + search_block * IFILE_ENTRY_NUM) >= NUM_RESV_INO){
+#ifdef NVFUSE_USE_MKFS_INODE_ZEROING
+	for (j = 0; j < IFILE_ENTRY_NUM; j++) 
+	{
+		if (ip[search_entry].i_ino == 0 && (search_entry + search_block * IFILE_ENTRY_NUM) >= NUM_RESV_INO)
+		{
 			alloc_ino = search_entry + search_block * IFILE_ENTRY_NUM;		
 			goto RES;
 		}			
@@ -396,7 +398,9 @@ RETRY:;
 	printf(" Warning: it runs out of free inodes = %d \n", sb->sb_free_inodes);
 	printf(".");
 	while (1);
-
+#else
+	alloc_ino = search_entry + search_block * IFILE_ENTRY_NUM;	
+#endif
 RES:;
 	
 	nvfuse_dec_free_inodes(sb, alloc_ino);
@@ -1983,17 +1987,17 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 	s32 flushing_count = 0;
 	s32 res;
 
-	while ((dirty_count = nvfuse_get_dirty_count(sb)) == 0)
-	{
-	
-		/* check dirty flush with force option */
-		if(force != DIRTY_FLUSH_FORCE && dirty_count < NVFUSE_SYNC_DIRTY_COUNT)
-			goto RES;
-		
-		/* no more dirty data */
-		if (dirty_count == 0)
-			goto RES; 
+	dirty_count = nvfuse_get_dirty_count(sb);
+	/* check dirty flush with force option */
+	if (force != DIRTY_FLUSH_FORCE && dirty_count < NVFUSE_SYNC_DIRTY_COUNT)
+		goto RES;
 
+	/* no more dirty data */
+	if (dirty_count == 0)
+		goto RES;
+
+	while ((dirty_count = nvfuse_get_dirty_count(sb)) != 0)
+	{
 		dirty_head = &sb->sb_bm->bm_list[BUFFER_TYPE_DIRTY];
 		flushing_head = &sb->sb_bm->bm_list[BUFFER_TYPE_FLUSHING];
 

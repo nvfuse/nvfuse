@@ -662,12 +662,10 @@ struct nvfuse_buffer_head *nvfuse_find_bh_in_ictx(struct nvfuse_superblock *sb,
 	if (bh)
 	{
 		//printf(" found bh in ictx through rbtree \n");
-		assert(bh->bh_bc->bc_ino == ino);
+		assert(bh->bh_bc->bc_ino == ino && bh->bh_bc->bc_lbno == lbno);
 		return bh;
 	}
-#endif
-
-#if 0
+#else
 	dirty_head = &ictx->ictx_data_bh_head;
 	list_for_each_safe(ptr, temp, dirty_head) 
 	{
@@ -689,12 +687,10 @@ struct nvfuse_buffer_head *nvfuse_find_bh_in_ictx(struct nvfuse_superblock *sb,
 	if (bh)
 	{
 		//printf(" found bh in ictx through rbtree \n");
-		assert(bh->bh_bc->bc_ino == ino);
+		assert(bh->bh_bc->bc_ino == ino && bh->bh_bc->bc_lbno == lbno);
 		return bh;
 	}
-#endif
-
-#if 0
+#else
 	dirty_head = &ictx->ictx_meta_bh_head;
 	list_for_each_safe(ptr, temp, dirty_head)
 	{

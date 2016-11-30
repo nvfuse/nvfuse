@@ -88,6 +88,8 @@
 #define NVFUSE_MIN_RA_SIZE (4*CLUSTER_SIZE)
 #define NVFUSE_MAX_RA_SIZE (32*CLUSTER_SIZE)
 
+/* MKFS uses zeroing to initialize inode table */
+#define NVFUSE_USE_MKFS_INODE_ZEROING
 
 /* Directory Indexing */
 #define NVFUSE_USE_DIR_INDEXING 1
@@ -101,6 +103,7 @@
 	#define NVFUSE_DEBUG printf
 	//#define NVFUSE_DEBUG
 #endif 
+
 /* NAND INFORMATIOIN*/
 #define SPARE_SIZE 64
 #define ERASE_SIZE (256*1024)
@@ -109,12 +112,8 @@
 #define NAND_READ_DELAY 80
 #define NAND_ERASE_DELAY (2*1000)
 
-
 #define NVFUSE_SEGMENT_SIZE_BITS 22
 #define NVFUSE_SEGMENT_GROUP_NUM 1
-
-#define NVFUSE_USE_DOUBLE_SS
-//#define NVFUSE_WOLF_SSR
 
 #define NVFUSE_USE_MINISH
 

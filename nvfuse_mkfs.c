@@ -335,7 +335,8 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfu
 		}
 		nvfuse_write_cluster(buf, ss->ss_dbitmap_start, io_manager);
 
-
+		/* inode can be allocated through ibitmap */
+#ifdef NVFUSE_USE_MKFS_INODE_ZEROING
 		if (seg_id == 0) 
 		{
 			zeroing_blocks = ss->ss_itable_size;
@@ -356,6 +357,7 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfu
 		{
 			free(zeroing_buf);
 		}
+#endif
 
 #if 0
 		for (clu = ss->ss_dtable_start; 

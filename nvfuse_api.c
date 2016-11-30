@@ -1102,10 +1102,6 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	u32 size, read_bytes, offset = 0;
 	u32 found_entry;
 
-	if (par_ino == sb->sb_root_ino) {
-		printf(" root inode (%d) cannot be removed in nvfuse file system\n", sb->sb_root_ino);
-		return -1;
-	}
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
 
@@ -1151,6 +1147,11 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 		printf(" dir (%s) is not found this directory\n", filename);
 		nvfuse_release_bh(sb, dir_bh, 0/*tail*/, CLEAN);
 		return NVFUSE_ERROR;
+	}
+
+	if (inode->i_ino == sb->sb_root_ino) {
+		printf(" root inode (%d) cannot be removed in nvfuse file system\n", sb->sb_root_ino);
+		return -1;
 	}
 
 	if (inode->i_type == NVFUSE_TYPE_FILE) {
@@ -2181,6 +2182,8 @@ s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ict
 		if (res)
 			break;
 	}
+
+	return 0;
 }
 
 s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
