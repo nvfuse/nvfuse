@@ -107,10 +107,10 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		return -1;
 	}
 
-	printf(" start fallocate %s size %lu \n", str, file_size);
+	printf(" start fallocate %s size %lu \n", str, (long)file_size);
 	/* pre-allocation of data blocks*/
 	nvfuse_fallocate(nvh, str, 0, file_size);
-	printf(" finish fallocate %s size %lu \n", str, file_size);
+	printf(" finish fallocate %s size %lu \n", str, (long)file_size);
 
 	/* initialization of aio queue */
 	ret = nvfuse_aio_queue_init(&aioq, qdepth);
@@ -255,12 +255,22 @@ s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh)
 	s32 res;
 	s32 fid;
 	
-	for (i = 0; i < 1; i++)
+	for (i = 0; i < 3; i++)
 	{
 		sprintf(str, "file%d", i);
-		file_size = (s64)8 * 1024 * 1024 * 1024;
-
-		gettimeofday(&tv, NULL);
+		switch (i)
+		{
+		case 0:
+			file_size = (s64)16 * 1024;
+			break;
+		case 1:
+			file_size = (s64)16 * 1024 * 1024;
+			break;
+		case 2:
+			file_size = (s64)16 * 1024 * 1024 * 1024;
+			break;
+		}
+				
 
 		fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
 		if (fid < 0)
@@ -270,18 +280,23 @@ s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh)
 		}
 		nvfuse_closefile(nvh, fid);
 
-		printf(" start fallocate %s size %lu \n", str, file_size);
+		gettimeofday(&tv, NULL);
+		printf("\n TEST (Fallocate and Deallocate) %d.\n", i);
+		printf(" start fallocate %s size %lu \n", str, (long)file_size);
 		/* pre-allocation of data blocks*/
 		nvfuse_fallocate(nvh, str, 0, file_size);
-		printf(" finish fallocate %s size %lu \n", str, file_size);
+		printf(" finish fallocate %s size %lu \n", str, (long)file_size);				
+		printf(" nvfuse fallocate throughput %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
 
-		printf(" nvfuse fallocate through %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
+		gettimeofday(&tv, NULL);
+		printf(" start rmfile %s size %lu \n", str, (long)file_size);
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0)
 		{
 			printf(" Error: rmfile = %s\n", str);
 			break;
 		}
+		printf(" nvfuse rmfile throughput %.3fMB/s\n", (double)file_size / (1024 * 1024) / time_since_now(&tv));
 	}
 
 	return NVFUSE_SUCCESS;

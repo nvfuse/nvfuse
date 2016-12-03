@@ -73,7 +73,7 @@ struct io_event;
 #if (USE_RAMDISK == 1)
 	#define NO_OF_SECTORS	(2*2*1024*1024) // 64M	
 #else
-#	define NO_OF_SECTORS	((long long)16*2*1024*1024) // 512M
+#	define NO_OF_SECTORS	((long long)32*2*1024*1024) // 512M
 #endif
 #else
 #	define NO_OF_SECTORS	(16*1024*1024) // 512M

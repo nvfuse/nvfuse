@@ -121,12 +121,16 @@ int nvfuse_block_to_path(u32 block, u32 offsets[4], u32 *boundary) {
 		offsets[n++] = block & (ptrs - 1);
 		final = ptrs;
 	}
-	else {
+	else if (((block -= double_blocks) >> (ptrs_bits * 2)) < ptrs) {
 		offsets[n++] = TINDIRECT_BLOCKS;
 		offsets[n++] = block >> (ptrs_bits * 2);
 		offsets[n++] = (block >> ptrs_bits) & (ptrs - 1);
 		offsets[n++] = block & (ptrs - 1);
 		final = ptrs;
+	}
+	else {
+		printf(" block is too big!\n");
+		assert(0);
 	}
 
 	if (boundary)
@@ -206,69 +210,64 @@ no_block:
 	return p;
 }
 
-u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode)
+u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *alloc_blks, u32 num_blocks)
 {
 	u32 new_block = 0;
 	s32 ret = 0;
 	u32 seg_id;
-	u32 next_id;
-
+	u32 next_id;	
+	u32 cnt = 0;	
+	
 	seg_id = inode->i_ino / sb->sb_no_of_inodes_per_seg;
 	seg_id = (seg_id + sb->sb_segment_num - 1) % sb->sb_segment_num;
 	next_id = (seg_id + 1) % sb->sb_segment_num;
 
 	while (next_id != seg_id) {
-		if (nvfuse_get_free_blocks(sb, next_id)) {
-		    new_block = nvfuse_alloc_dbitmap(sb, next_id);
-		    if (new_block)
-			    break;
+		if (nvfuse_get_free_blocks(sb, next_id)) 
+		{
+		    ret = nvfuse_alloc_dbitmap(sb, next_id, alloc_blks + cnt, num_blocks);
+			num_blocks -= ret;
+			cnt += ret;
+
+			if (!num_blocks)
+			{				
+				break;
+			}			
 		}
 		next_id = (next_id + 1) % sb->sb_segment_num;
 	}
 	
-	return new_block;
+	return cnt;
 }
 
-u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *blocks, u32 num_indirect_blocks, u32 num_blocks, s32 *error)
+u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *blocks, u32 num_indirect_blocks, u32 num_blocks, u32 *direct_map, s32 *error)
 {
-	u32 new_block = 0;
+	u32 new_blocks = 0;
 	u32 cnt = 0;
 	u32 total_blocks;
 
-	total_blocks = num_indirect_blocks + num_blocks; 
+	total_blocks = num_indirect_blocks + 1; 
 
-	while (total_blocks--) 
+	if (total_blocks)
+	{		
+		new_blocks = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
+		if (new_blocks != total_blocks) {
+			printf(" Warning: it runs out of free blocks.");
+			return -1;
+		}
+		cnt += new_blocks;
+	}
+
+	total_blocks =  num_blocks - 1;
+	if (total_blocks)
 	{
-		new_block = nvfuse_alloc_free_block(sb, inode);
-		if (!new_block) {
-			*error = 1;
-			break;
-		}
-#if 1
-		*blocks = new_block;
-		blocks++;		
-#else
-		if (cnt == 0 || num_indirect_blocks)
-		{
-			*blocks = new_block;
-			blocks++;
-			if (cnt)
-			{
-				num_indirect_blocks--;
-			}
-			else
-			{ 
-				num_blocks--;
-			}
-		}
-		else
-		{ 
-			*blocks = new_block;
-			blocks++;
-			num_blocks--;
-		}
-#endif		
-		cnt++;
+		new_blocks = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
+		if (new_blocks != total_blocks) {
+			printf(" Warning: it runs out of free blocks.");
+			return -1;			
+		}	
+		
+		cnt += new_blocks;
 	}
 
 	return cnt;
@@ -340,7 +339,7 @@ nvfuse_blks_to_allocate(Indirect * branch, int k, unsigned long blks,
 */
 
 static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, struct nvfuse_inode *inode,
-	int indirect_blks, int *blks, u32 goal,
+	int indirect_blks, int *blks, u32 *direct_map,
 	int *offsets, Indirect *branch)
 {
 	int blocksize = CLUSTER_SIZE;
@@ -351,7 +350,7 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 	u32 new_blocks[4] = { 0, };
 	u32 current_block;
 
-	num = nvfuse_alloc_free_blocks(sb, inode, new_blocks, indirect_blks, *blks, &err);
+	num = nvfuse_alloc_free_blocks(sb, inode, new_blocks, indirect_blks, *blks, direct_map, &err);
 	if (err)
 		return err;
 
@@ -377,6 +376,9 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 		//lock_buffer(bh);
 		memset(bh->bh_buf, 0, blocksize);
 		branch[n].p = (u32 *)bh->bh_buf + offsets[n];
+
+		assert(!offsets[n]);
+		
 		branch[n].key = new_blocks[n];
 		*branch[n].p = branch[n].key;
 		if (n == indirect_blks) {
@@ -386,8 +388,12 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 			* the chain to point to the new allocated
 			* data blocks numbers
 			*/
+			*(branch[n].p + 0) = current_block;
 			for (i = 1; i < num; i++)
-				*(branch[n].p + i) = ++current_block;
+			{
+				*(branch[n].p + i) = *direct_map;
+				direct_map++;
+			}
 		}
 		
 		nvfuse_mark_dirty_bh(sb, bh);
@@ -430,7 +436,7 @@ failed:
 * chain to new block and return 0.
 */
 static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
-	Indirect *where, int num, int blks)
+	Indirect *where, u32 *direct_map, int num, int blks)
 {
 	int i;
 	u32 current_block;
@@ -445,9 +451,12 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 	* direct blocks blocks
 	*/
 	if (num == 0 && blks > 1) {
-		current_block = where->key + 1;
+		//current_block = where->key + 1;
 		for (i = 1; i < blks; i++)
-			*(where->p + i) = current_block++;
+		{
+			*(where->p + i) = *direct_map;
+			direct_map++;
+		}
 	}
 
 	/* We are done with atomic stuff, now do the rest of housekeeping */
@@ -481,7 +490,7 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 * return = 0, if plain lookup failed.
 * return < 0, error case.
 */
-s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 maxblocks, u32 *pblock, u32 create)
+s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 maxblocks, u32 *num_alloc_blocks, u32 *pblock, u32 create)
 {
 	u32 offsets[INDIRECT_BLOCKS_LEVEL];
 	Indirect chain[INDIRECT_BLOCKS_LEVEL];
@@ -493,7 +502,13 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 	u32 first_block = 0;
 	int count = 0;	 
 	int blocks_to_boundary = 0;
-		
+
+	if (pblock)
+		*pblock = 0;
+
+	if (num_alloc_blocks)
+		*num_alloc_blocks = 0;
+
 	depth = nvfuse_block_to_path(lblock, offsets, &blocks_to_boundary);
 	partial = nvfuse_get_branch(sb, ictx, ictx->ictx_inode, depth, offsets, chain, &err);
 	if (!partial) {
@@ -527,21 +542,39 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 	}
 
 	if (!create || err == -EIO)
+	{	
 		goto cleanup;
+	}
 
 	/* the number of blocks need to allocate for [d,t]indirect blocks */
 	indirect_blks = (chain + depth) - partial - 1;
 
 	count = nvfuse_blks_to_allocate(partial, indirect_blks, maxblocks, blocks_to_boundary);
+	{
+		u32 *direct_map;
 
-	err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, 0, offsets + (partial - chain), partial);
+		direct_map = malloc(sizeof(u32) * count);
+		assert(direct_map != NULL);
+		memset(direct_map, 0x00, sizeof(u32) * count);
+		
+		//if (indirect_blks == 2)
+		//{
+		//	printf("debug");
+		//}
+		err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, direct_map, offsets + (partial - chain), partial);
 
-	if (err) {
-		goto cleanup;
+		if (err) {
+			goto cleanup;
+		}
+
+		/* attach indirect block to inode */
+		nvfuse_splice_branch(sb, ictx, partial, direct_map, indirect_blks, count);
+
+		free(direct_map);
 	}
 
-	/* attach indirect block to inode */
-	nvfuse_splice_branch(sb, ictx, partial, indirect_blks, count);
+	if (num_alloc_blocks)
+		*num_alloc_blocks = count;
 
 got_it:
 	if (pblock)
@@ -553,6 +586,7 @@ cleanup:
 		nvfuse_release_bh(sb, partial->bh, 0, CLEAN);
 		partial--;
 	}
+	
 	return 0;
 
 failed:
@@ -712,7 +746,7 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 {
 	struct nvfuse_buffer_head *bh;
 	unsigned long nr;
-
+	
 	if (depth--) {
 		int addr_per_block = PTRS_PER_BLOCK;
 		for (; p < q; p++) {
@@ -721,7 +755,7 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 				continue;
 			*p = 0;
 			
-			bh = nvfuse_get_bh(sb, NULL, BLOCK_IO_INO, nr, READ, NVFUSE_TYPE_META);
+			bh = nvfuse_get_bh(sb, ictx, BLOCK_IO_INO, nr, READ, NVFUSE_TYPE_META);
 			/*
 			* A read failure? Report error and clear slot
 			* (should be rare).
@@ -737,6 +771,7 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 				depth);
 			
 			nvfuse_release_bh(sb, bh, 0, DIRTY);
+			//nvfuse_forget_bh(sb, bh);
 			nvfuse_free_blocks(sb, nr, 1);			
 			nvfuse_mark_inode_dirty(ictx);
 		}

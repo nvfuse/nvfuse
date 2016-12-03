@@ -614,7 +614,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 
 		if (count && inode->i_size <= of->rwoffset)
 		{
-			ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, 1);
+			ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
 			if (ret)
 			{
 				printf(" data block allocation fails.");
@@ -851,7 +851,7 @@ retry:
 	if (!flag) // allocate new direcct block 
 	{
 		nvfuse_release_bh(sb, dir_bh, 0, 0);
-		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, 1);
+		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
 		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, INSERT_HEAD, DIRTY);
 		dir_inode->i_size += CLUSTER_SIZE;
@@ -1321,7 +1321,7 @@ retry:
 	if (!flag) {
 		nvfuse_release_bh(sb, dir_bh, 0, CLEAN);
 		//new dentiry allocation		
-		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, 1);
+		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
 		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, 0, dir_bh->bh_bc->bc_dirty);
 		dir_inode->i_size += CLUSTER_SIZE;		
@@ -1361,7 +1361,7 @@ find:
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
-	ret = nvfuse_get_block(sb, new_ictx, new_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, 1);
+	ret = nvfuse_get_block(sb, new_ictx, new_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
 	if (ret)
 	{
 		printf(" data block allocation fails.");
@@ -2242,6 +2242,51 @@ s32 nvfuse_sync(struct nvfuse_handle *nvh) {
 	return 0;
 }
 
+s32 nvfuse_fallocate_verify(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 start, u32 max_block)
+{
+	u32 curr_block;
+	u32 *bitmap;
+	u32 i, j;
+	u32 collision_cnt = 0;
+	s32 res;
+
+	bitmap = malloc(sb->sb_no_of_blocks / 8 + 1);
+	assert(bitmap);
+	memset(bitmap, 0x00, sb->sb_no_of_blocks / 8 + 1);
+
+	for (curr_block = start / CLUSTER_SIZE; curr_block < max_block; curr_block++)
+	{
+		u32 pblock;
+				
+		res = nvfuse_get_block(sb, ictx, curr_block, 1, NULL, &pblock, 0 /*create*/);
+		if (res < 0)
+		{
+			printf(" Error: nvfuse_get_block()\n");
+			res = -1;
+			goto RET;
+		}
+
+		if (!pblock)
+		{
+			printf(" Warning: Invalid block number = %d\n", pblock);
+		}
+		
+		if (!test_bit(bitmap, pblock))
+		{			
+			set_bit(bitmap, pblock);
+		}
+		else
+		{
+			printf("collision currblock = %d, pblock = %d\n", curr_block, pblock);
+			collision_cnt++;
+		}
+	}
+
+RET:;
+	free(bitmap);		
+	return 0;
+}
+
 
 s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64 length)
 {
@@ -2254,6 +2299,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 	int res;
 	u32 curr_block;
 	u32 max_block; 
+	u32 remain_block;	
 
 	res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
 	if (res < 0)
@@ -2276,30 +2322,30 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 
 		if (ictx->ictx_inode->i_size < (start + length))
 		{
-#if 1
-			max_block = (start + length) / CLUSTER_SIZE + ((start + length) % CLUSTER_SIZE ? 1 : 0);
-			for (curr_block = start / CLUSTER_SIZE; curr_block < max_block; curr_block++)
+			curr_block = start / CLUSTER_SIZE;
+			max_block = (length / CLUSTER_SIZE) + ((length % CLUSTER_SIZE) ? 1 : 0);			
+			remain_block = max_block;
+			
+			/*printf(" free no of blocks = %ld\n", (long)sb->sb_free_blocks);*/
+
+			while (remain_block)
 			{
-				res = nvfuse_get_block(sb, ictx, curr_block, 1, NULL, 1 /*create*/);
-				if (res < 0) 
+				u32 num_alloc_blks = 0;				
+								
+				res = nvfuse_get_block(sb, ictx, curr_block, remain_block, &num_alloc_blks, NULL, 1 /*create*/);				
+				if (res < 0)
 				{
 					printf(" Error: nvfuse_get_block()\n");
 					res = -1;
 					goto RET;
-				}
-			}
-#else
-			curr_block = start / CLUSTER_SIZE;
-			max_block = (length / CLUSTER_SIZE) + ((length % CLUSTER_SIZE) ? 1 : 0);
-
-			res = nvfuse_get_block(sb, ictx, curr_block, max_block, NULL, 1 /*create*/);
-			if (res < 0)
-			{
-				printf(" Error: nvfuse_get_block()\n");
-				res = -1;
-				goto RET;
-			}
-#endif 
+				}			
+								
+				curr_block += num_alloc_blks;
+				remain_block -= num_alloc_blks;
+			}			
+#if 0
+			nvfuse_fallocate_verify(sb, ictx, start / CLUSTER_SIZE, max_block);
+#endif
 
 			inode = ictx->ictx_inode;
 			inode->i_size = inode->i_size < length ? length : inode->i_size;

@@ -94,6 +94,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 	void *ss_buf;
 	void *buf;
 	u32 ino = 0;
+	u32 blkno = 0;
 
 	ss_buf = nvfuse_malloc(CLUSTER_SIZE);
 	if (ss_buf == NULL)
@@ -114,7 +115,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 
 	// reserved and root inode bitmap allocation
 	nvfuse_read_cluster(buf, ss->ss_ibitmap_start, io_manager);
-	for(ino = 0; ino < NUM_RESV_INO; ino++)
+	for (ino = 0; ino < NUM_RESV_INO; ino++)
 	{
 		ext2fs_set_bit(ino, buf);
 		ss->ss_free_inodes--;
@@ -126,6 +127,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 	// data block for root directory allocation
 	nvfuse_read_cluster(buf, ss->ss_dbitmap_start, io_manager);
 	//printf(" data block for root dir = %d \n", (int)ss->ss_dtable_start);
+
 	ext2fs_set_bit(ss->ss_dtable_start % seg_size, buf);
 	ss->ss_free_blocks--;
 	sb_disk->sb_free_blocks--;
@@ -252,7 +254,6 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 		sb_disk->sb_free_inodes += ss->ss_free_inodes;
 		sb_disk->sb_free_blocks += ss->ss_free_blocks;
 
-
 		nvfuse_write_cluster(ss, ss->ss_summary_start, io_manager);
 
 #if 1
@@ -274,7 +275,6 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 		printf("\n");
 #endif
 	}
-
 
 	nvfuse_free(ss_buf);
 	nvfuse_free(buf);

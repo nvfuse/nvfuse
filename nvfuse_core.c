@@ -141,7 +141,7 @@ s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_ino
 {
 	struct nvfuse_inode *inode;
 	inode_t ino;
-	
+	u32 seg_id;
 	ino = ictx->ictx_ino;
 	inode = ictx->ictx_inode;	
 	inode->i_deleted = 1;
@@ -150,7 +150,9 @@ s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_ino
 
 	nvfuse_release_inode(sb, ictx, DIRTY);
 	nvfuse_inc_free_inodes(sb, ino);
-
+	
+	seg_id = ino / sb->sb_no_of_inodes_per_seg;
+	nvfuse_release_ibitmap(sb, seg_id, ino);
 	return 0;
 }
 
@@ -270,8 +272,7 @@ void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 	sb->sb_free_inodes++;
 	assert(ss->ss_free_inodes <= ss->ss_max_inodes);
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
-
-	nvfuse_release_ibitmap(sb, seg_id, ino);
+	
 }
 
 void nvfuse_dec_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
@@ -398,14 +399,20 @@ RETRY:;
 	printf(" Warning: it runs out of free inodes = %d \n", sb->sb_free_inodes);
 	printf(".");
 	while (1);
+
+RES:;
+
 #else
 	alloc_ino = search_entry + search_block * IFILE_ENTRY_NUM;	
 #endif
-RES:;
-	
+		
 	nvfuse_dec_free_inodes(sb, alloc_ino);
 
 	ip += search_entry;
+	
+	/* initialization of inode entry */
+	memset(ip, 0x00, INODE_ENTRY_SIZE);
+
 	ip->i_ino = alloc_ino;
 	ip->i_deleted = 0; 
 	ip->i_version++;		
@@ -1612,7 +1619,7 @@ s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, u32 
 
 
 
-u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id)
+u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_blks, u32 num_blocks)
 {
 	struct nvfuse_segment_summary *ss;
 	struct nvfuse_buffer_head *ss_bh, *bh;
@@ -1620,6 +1627,7 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id)
 	u32 cnt = 0;
 	void *buf;
 	u32 flag = 0;
+	u32 alloc_cnt = 0;
 
 	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
 	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
@@ -1631,22 +1639,36 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id)
 
 	while (cnt++ < sb->sb_no_of_blocks_per_seg)
 	{
+		if (!free_block) {
+			free_block = ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg;
+			cnt += (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg - 1);
+		}
+
 		if (!ext2fs_test_bit(free_block, buf))
 		{
 			//printf(" free block %d found \n", free_block);
 			ss->ss_next_block = free_block; // keep track of hit information to quickly lookup free blocks.
 			ext2fs_set_bit(free_block, buf); // right approach?
 			flag = 1;
-			break;
+						
+			*alloc_blks = ss->ss_seg_start + free_block;
+			alloc_blks++;
+			num_blocks--;
+			alloc_cnt++;
+			if (num_blocks == 0)
+				break;
 		}
 		free_block = (free_block + 1) % sb->sb_no_of_blocks_per_seg;
 	}
 	
 	if (flag) {
+		int i;
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
-		nvfuse_dec_free_blocks(sb, ss->ss_seg_start + free_block);
-		return ss->ss_seg_start + free_block;
+		for (i = 0; i < alloc_cnt; i++)
+			nvfuse_dec_free_blocks(sb, ss->ss_seg_start + free_block);
+
+		return alloc_cnt;
 	}
 
 	nvfuse_release_bh(sb, bh, 0, CLEAN);
@@ -1929,7 +1951,7 @@ u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, 
 	
 	assert(ictx->ictx_ino == ino);		
 
-	ret = nvfuse_get_block(sb, ictx, offset, 1/* num block */, &value, 0);
+	ret = nvfuse_get_block(sb, ictx, offset, 1/* num block */, NULL, &value, 0);
 	if (ret) 
 	{
 		printf(" Warning: block is not allocated.");

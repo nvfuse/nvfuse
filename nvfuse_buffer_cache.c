@@ -536,6 +536,28 @@ s32 nvfuse_insert_dirty_bh_to_ictx(struct nvfuse_buffer_head *bh, struct nvfuse_
 	return 0;
 }
 
+s32 nvfuse_forget_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh)
+{
+	struct nvfuse_buffer_cache *bc;
+
+	bc = bh->bh_bc;
+	bc->bc_ref--;
+	nvfuse_remove_bh_in_bc(sb, bc);
+	
+	bc->bc_dirty = 0;
+	bc->bc_load = 0;
+
+	if (bc->bc_ref) {
+		printf("debug\n");
+	}
+
+	nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
+
+	nvfuse_free_buffer_head(bh);
+
+	return 0;
+}
+
 s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 tail, s32 dirty)
 {
 	struct nvfuse_buffer_cache *bc;
@@ -954,26 +976,19 @@ s32 nvfuse_release_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *i
 
 	assert(ictx->ictx_ref >= 0);
 	/* dirty means that a given inode has dirty pages to be written to underlying storage */
-	if (dirty || test_bit(&ictx->ictx_status, BUFFER_STATUS_DIRTY) 
-		//||
-		//ictx->ictx_data_dirty_count || ictx->ictx_meta_dirty_count
-		)
+	if (dirty || test_bit(&ictx->ictx_status, BUFFER_STATUS_DIRTY))
 	{		
 		if (!ictx->ictx_data_dirty_count && !ictx->ictx_meta_dirty_count)
-			printf(" warning: ictx doesn't have dirty data. \n");
+		{
+			printf(" Warning: ictx doesn't have dirty data. \n");
+		}
 
 		set_bit(&ictx->ictx_status, BUFFER_STATUS_DIRTY);		
 		nvfuse_move_ictx_type(sb, ictx, BUFFER_TYPE_DIRTY);
 	}
 	else
 	{
-		if (ictx->ictx_data_dirty_count || ictx->ictx_meta_dirty_count)
-		{
-			printf(" debug \n");
-			assert(0);
-		}
-
-		//assert(ictx->ictx_data_dirty_count == 0 && ictx->ictx_meta_dirty_count == 0);
+		assert(!ictx->ictx_data_dirty_count && !ictx->ictx_meta_dirty_count);		
 		nvfuse_move_ictx_type(sb, ictx, BUFFER_TYPE_CLEAN);	
 	}
 
