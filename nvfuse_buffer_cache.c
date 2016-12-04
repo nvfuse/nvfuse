@@ -1051,7 +1051,7 @@ void nvfuse_free_ictx_cache(struct nvfuse_superblock *sb)
 
 	/* dealloc buffer cache */
 	for (type = BUFFER_TYPE_UNUSED; type < BUFFER_TYPE_NUM; type++) {
-		head = &sb->sb_bm->bm_list[type];
+		head = &sb->sb_ictxc->ictxc_list[type];
 		list_for_each_safe(ptr, temp, head) {
 			ictx = (struct nvfuse_inode_ctx *)list_entry(ptr, struct nvfuse_inode_ctx, ictx_cache_list);
 			list_del(&ictx->ictx_cache_list);
