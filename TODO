@@ -26,3 +26,9 @@ B+tree
 	+ B+-tree optimization that split sequential index
 	+ B+-tree shrink free space
 	+ B+-tree block allocation/deallocation
+	
+NVMe Features
+	+ Data Set Management (DSM)
+	+ End to End Data Protection
+	+ Write Zeroes
+	+ NVM Format (Secure Erase)	
