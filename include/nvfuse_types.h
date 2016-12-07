@@ -107,6 +107,10 @@
 	#define O_SYNC			(__O_SYNC | O_DSYNC)
 	#endif
 
+	#ifndef O_DIRECT
+	#define O_DIRECT     0200000
+	#endif
+
 #	endif  
 	
 typedef u64	nvfuse_off_t;

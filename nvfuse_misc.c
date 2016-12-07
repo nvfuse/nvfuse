@@ -85,7 +85,7 @@ void nvfuse_aio_test_callback(void *arg)
 	free(actx);
 }
 
-s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read)
+s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read, u32 is_direct)
 {
 	struct nvfuse_aio_queue aioq;
 	struct nvfuse_aio_ctx *actx;	
@@ -97,10 +97,15 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	s64 io_curr;
 	s32 last_progress = 0;
 	s32 curr_progress = 0;
+	s32 flags;
 
-	printf(" aiotest %s filesize = %ld io_size = %d qdpeth = %d (%c) \n", str, (long)file_size, io_size, qdepth, is_read ? 'R' : 'W');
+	printf(" aiotest %s filesize = %0.3fMB io_size = %d qdpeth = %d (%c) direct (%d)\n", str, (double)file_size/(1024*1024), io_size, qdepth, is_read ? 'R' : 'W', is_direct);
 
-	fd = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
+	flags = O_RDWR | O_CREAT;
+	if (is_direct)
+		flags |= O_DIRECT;
+
+	fd = nvfuse_openfile_path(nvh, str, flags, 0);
 	if (fd < 0)
 	{
 		printf(" Error: file open or create \n");
@@ -194,7 +199,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	return 0;
 }
 
-s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
+s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 {
 	char str[128];
 	struct timeval tv;
@@ -202,12 +207,12 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 	s32 i;
 	s32 res;
 	
-	for (i = 0; i < 1000; i++)
+	for (i = 0; i < 1; i++)
 	{
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
@@ -223,12 +228,12 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh)
 		}
 	}
 
-	for (i = 0; i < 1000; i++)
+	for (i = 0; i < 1; i++)
 	{
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");

@@ -784,7 +784,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 	while(count < num_blocks)
 	{
 		nvfuse_aio_prep(jobs + count, sb->io_manager);
-		count ++;
+		count++;
 	}
 
 	nvfuse_aio_submit(iocb, num_blocks, sb->io_manager);
@@ -1462,6 +1462,18 @@ s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino, s8 *filename, mode_
 	nvfuse_release_super(sb);
 
 	return NVFUSE_SUCCESS;
+}
+
+s32 nvfuse_is_directio(struct nvfuse_superblock *sb, s32 fid)
+{	
+	struct nvfuse_file_table *ft;
+
+	ft = sb->sb_file_table + fid;
+		
+	if (ft->flags & O_DIRECT)
+		return 1;	
+
+	return 0;
 }
 
 s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get){

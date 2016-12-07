@@ -126,7 +126,7 @@ s32 nvfuse_aio_queue_move(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *
 	return 0;
 }
 
-void nvfuse_aio_gen_dev_cpls(void *arg)
+void nvfuse_aio_gen_dev_cpls_buffered(void *arg)
 {
 	struct list_head *head, *ptr, *temp;
 	struct nvfuse_buffer_head *bh;
@@ -168,7 +168,19 @@ void nvfuse_aio_gen_dev_cpls(void *arg)
 	nvfuse_aio_queue_move(actx->actx_queue, actx, NVFUSE_COMPLETION_QUEUE);
 }
 
-s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx)
+void nvfuse_aio_gen_dev_cpls_directio(void *arg)
+{
+	struct list_head *head, *ptr, *temp;	
+	struct nvfuse_aio_ctx *actx;
+
+	/* casting */
+	actx = (struct nvfuse_aio_ctx *)arg;
+		
+	/* move actx to comletion queue*/
+	nvfuse_aio_queue_move(actx->actx_queue, actx, NVFUSE_COMPLETION_QUEUE);
+}
+
+s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx)
 {
 	struct list_head *head, *ptr, *temp;
 	struct nvfuse_buffer_head *bh;
@@ -215,8 +227,7 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx 
 			nvfuse_write_cluster(bc->bc_buf, bc->bc_pno, sb->io_manager);
 #endif
 	}
-
-
+	
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
 	count = 0;
 	while(count < actx->actx_bh_count)
@@ -232,7 +243,76 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx 
 	actx->tag2 = (void *)iocb;
 
 #elif (NVFUSE_OS == NVFUSE_OS_WINDOWS)
-	nvfuse_aio_gen_dev_cpls((void *)actx);
+	nvfuse_aio_gen_dev_cpls_buffered((void *)actx);
+#endif
+
+	return 0;
+}
+
+s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx)
+{
+	struct list_head *head, *ptr, *temp;
+	struct nvfuse_buffer_head *bh;
+	struct nvfuse_buffer_cache *bc;
+	u64 start, length;
+	s32 count = 0;
+#if (NVFUSE_OS == NVFUSE_OS_LINUX)
+	struct io_job *jobs;
+	struct iocb **iocb;	
+	s32 res;
+
+	res = nvfuse_make_jobs(&jobs, actx->actx_bh_count);
+	if (res < 0) {
+		return res;
+	}
+
+	iocb = (struct iocb **)malloc(sizeof(struct iocb *) * actx->actx_bh_count);
+	if (!iocb) {
+		printf(" Malloc error: struct iocb\n");
+		return -1;
+	}
+#endif
+	length = actx->actx_offset + actx->actx_bytes;
+	for (start = actx->actx_offset; start < length; start += CLUSTER_SIZE)
+	{
+#if (NVFUSE_OS == NVFUSE_OS_LINUX)
+		(*(jobs + count)).offset = (long)start;
+		(*(jobs + count)).bytes = (size_t)CLUSTER_SIZE;
+		(*(jobs + count)).ret = 0;
+		(*(jobs + count)).req_type = (actx->actx_opcode == READ) ? READ : WRITE;
+		(*(jobs + count)).buf = actx->actx_buf + count * CLUSTER_SIZE;
+		(*(jobs + count)).complete = 0;
+		(*(jobs + count)).tag = (void *)actx;
+
+		iocb[count] = &((*(jobs + count)).iocb);
+		
+#else		
+		if (actx->actx_opcode == READ)
+			nvfuse_read_cluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, start / CLUSTER_SIZE, sb->io_manager);
+		else
+			nvfuse_write_cluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, start / CLUSTER_SIZE, sb->io_manager);
+#endif
+		count++;
+	}
+	
+	assert(count == actx->actx_bh_count);
+
+#if (NVFUSE_OS == NVFUSE_OS_LINUX)
+	count = 0;
+	while (count < actx->actx_bh_count)
+	{
+		nvfuse_aio_prep(jobs + count, sb->io_manager);
+		count++;
+	}
+
+	nvfuse_aio_submit(iocb, actx->actx_bh_count, sb->io_manager);
+	sb->io_manager->queue_cur_count += actx->actx_bh_count;
+
+	actx->tag1 = (void *)jobs;
+	actx->tag2 = (void *)iocb;
+
+#elif (NVFUSE_OS == NVFUSE_OS_WINDOWS)
+	nvfuse_aio_gen_dev_cpls_directio((void *)actx);
 #endif
 
 	return 0;
@@ -254,20 +334,32 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		
 		//printf(" aio ready queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
 		//	(long)actx->actx_bytes, actx->actx_opcode);
-
-		if (actx->actx_opcode == READ)
-			bytes = nvfuse_readfile_aio(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);			
+		if (nvfuse_is_directio(&nvh->nvh_sb, actx->actx_fid))
+		{
+			if (actx->actx_opcode == READ)
+			{
+				bytes = nvfuse_readfile_aio_directio(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);
+			}
+			else
+			{
+				bytes = nvfuse_writefile_directio_prepare(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);
+			}
+		}
 		else
-			bytes = nvfuse_writefile_buffered_aio(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);			
-		
-		
-		if (bytes == actx->actx_bytes)		
+		{
+			if (actx->actx_opcode == READ)
+				bytes = nvfuse_readfile_aio(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);
+			else
+				bytes = nvfuse_writefile_buffered_aio(nvh, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset);
+		}
+
+		if (bytes == actx->actx_bytes)
 			nvfuse_aio_queue_move(aioq, actx, NVFUSE_SUBMISSION_QUEUE);
 		else
 		{
 			printf(" submission error\n ");
 			return -1;
-		}		
+		}
 	}
 	
 	/* collect buffer */
@@ -278,16 +370,23 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 
 		//printf(" aio submission queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
 		//	(long)actx->actx_bytes, actx->actx_opcode);
-				
-		res = nvfuse_gather_bh(&nvh->nvh_sb, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset, &actx->actx_bh_head, &actx->actx_bh_count);
-		if (res) {
-			return -1;
-		}
 
-		nvfuse_aio_gen_dev_reqs(&nvh->nvh_sb, actx);		
+		/* buffered AIO requests with buffer head */
+		if (!nvfuse_is_directio(&nvh->nvh_sb, actx->actx_fid))
+		{
+			res = nvfuse_gather_bh(&nvh->nvh_sb, actx->actx_fid, actx->actx_buf, actx->actx_bytes, actx->actx_offset, &actx->actx_bh_head, &actx->actx_bh_count);
+			if (res) {
+				return -1;
+			}
+			nvfuse_aio_gen_dev_reqs_buffered(&nvh->nvh_sb, actx);
+		}
+		else
+		{/* direct i/o without buffer head */
+			actx->actx_bh_count = actx->actx_bytes > CLUSTER_SIZE_BITS;
+			nvfuse_aio_gen_dev_reqs_directio(&nvh->nvh_sb, actx);
+		}	
 	}
 	
-
 	return 0;
 }
 
@@ -315,9 +414,16 @@ s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb)
 			actx->actx_error = -1;
 		}
 
-		if (actx->actx_bh_count==0) 
+		if (actx->actx_bh_count == 0)
 		{
-			nvfuse_aio_gen_dev_cpls(actx);
+			if (!nvfuse_is_directio(sb, actx->actx_fid))
+			{
+				nvfuse_aio_gen_dev_cpls_buffered(actx);
+			}
+			else
+			{
+				nvfuse_aio_gen_dev_cpls_directio(actx);
+			}
 			free(actx->tag1); // free job 
 			free(actx->tag2); // free iocb 
 		}

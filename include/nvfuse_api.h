@@ -102,7 +102,10 @@ s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct tim
 
 s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 to_entry, u32 from_entry);
 
-
 s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64 length);
+s32 nvfuse_writefile_directio_prepare(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
+s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
+s32 nvfuse_readfile_aio_directio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
+s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset, s32 sync_read);
 
 #endif

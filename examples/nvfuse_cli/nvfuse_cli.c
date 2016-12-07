@@ -32,7 +32,7 @@ s32 nvfuse_type(struct nvfuse_handle *nvh, s8 *str);
 int parse_and_execute(char *input);
 void postmark_main();
 
-s32 nvfuse_aio_test(struct nvfuse_handle *nvh);
+s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct);
 s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh);
 
 struct nvfuse_handle *g_nvh;
@@ -205,7 +205,8 @@ int parse_and_execute(char *input)
 			} else if (!strcmp(arg[0], "test")) {
 				nvfuse_test(g_nvh);
 			} else if (!strcmp(arg[0], "aiotest")) {
-				nvfuse_aio_test(g_nvh);
+				nvfuse_aio_test(g_nvh, 1 /*direct*/);
+				nvfuse_aio_test(g_nvh, 0 /*buffered*/);
 			} else if (!strcmp(arg[0], "fallocate")) {
 				nvfuse_fallocate_test(g_nvh);
 			} else if (!strcmp(arg[0], "sync")) {

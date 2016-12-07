@@ -558,6 +558,58 @@ RES:;
 	return rcount;
 }
 
+s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset, s32 sync_read)
+{
+	struct nvfuse_inode_ctx *ictx;
+	struct nvfuse_inode *inode;
+	struct nvfuse_file_table *of;
+	s32 offset = 0, remain = 0, rcount = 0;
+	lbno_t lblock = 0;
+	int ret;
+
+	of = &(sb->sb_file_table[fid]);
+	pthread_mutex_lock(&of->ft_lock);
+
+#if NVFUSE_OS == NVFUSE_OS_WINDOWS 
+	if (roffset) {
+		of->rwoffset = roffset;
+	}
+#else
+	of->rwoffset = roffset;
+#endif
+
+	if (count % CLUSTER_SIZE)
+	{
+		printf(" Error: count is not aligned to 4KB.");
+		rcount = 0;
+		goto RET;
+	}
+
+	ictx = nvfuse_read_inode(sb, NULL, of->ino);
+	inode = ictx->ictx_inode;
+	if (inode->i_size < roffset + count)
+	{
+		rcount = 0;
+		goto RET;
+	}
+	else
+	{
+		rcount = count;		
+	}
+		
+	of->rwoffset += count;
+	rcount = count;
+
+	if (of->rwoffset > of->size)
+		of->size = of->rwoffset;
+
+RET:;
+	nvfuse_release_inode(sb, ictx, CLEAN);
+	pthread_mutex_unlock(&of->ft_lock);
+
+	return rcount;
+}
+
 s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset) 
 {
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
@@ -579,6 +631,18 @@ s32 nvfuse_readfile_aio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 coun
 	nvfuse_release_super(sb);
 	return rcount;	
 }
+
+s32 nvfuse_readfile_aio_directio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset)
+{
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	s32 rcount;
+
+	rcount = nvfuse_readfile_directio_core(sb, fid, buffer, count, roffset, 0 /* no sync read */);
+
+	nvfuse_release_super(sb);
+	return rcount;
+}
+
 
 s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset)
 {
@@ -664,6 +728,66 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 	return wcount;
 }
 
+s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset)
+{
+	struct nvfuse_inode_ctx *ictx;
+	struct nvfuse_inode *inode;
+	struct nvfuse_file_table *of;	
+	s32 offset = 0, remain = 0, wcount = 0;
+	lbno_t lblock = 0;
+	int ret;
+
+	of = &(sb->sb_file_table[fid]);
+	pthread_mutex_lock(&of->ft_lock);
+
+#if NVFUSE_OS == NVFUSE_OS_WINDOWS 
+	if (woffset) {
+		of->rwoffset = woffset;
+	}
+#else
+	of->rwoffset = woffset;
+#endif
+
+	if (count % CLUSTER_SIZE)
+	{
+		printf(" Error: count is not aligned to 4KB.");
+		wcount = 0;
+		goto RET;
+	}
+
+	ictx = nvfuse_read_inode(sb, NULL, of->ino);
+	inode = ictx->ictx_inode;
+	if (count && inode->i_size <= of->rwoffset)
+	{
+		u32 num_alloc = count >> CLUSTER_SIZE_BITS;
+		ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, num_alloc/* num block */, NULL, NULL, 1);
+		if (ret)
+		{
+			printf(" data block allocation fails.");
+			return NVFUSE_ERROR;
+		}
+		
+		inode->i_size += count;
+		nvfuse_release_inode(sb, ictx, DIRTY);
+	}
+	else
+	{
+		nvfuse_release_inode(sb, ictx, CLEAN);
+	}
+	
+	of->rwoffset += count;
+	wcount = count;
+
+	if (of->rwoffset > of->size)
+		of->size = of->rwoffset;
+	
+RET:;
+
+	pthread_mutex_unlock(&of->ft_lock);
+
+	return wcount;
+}
+
 s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset) 
 {	
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
@@ -689,6 +813,19 @@ s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *
 
 	return wcount;
 }
+
+s32 nvfuse_writefile_directio_prepare(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset)
+{
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	s32 wcount;
+
+	wcount = nvfuse_writefile_directio_core(sb, fid, user_buf, count, woffset);
+
+	nvfuse_release_super(sb);
+
+	return wcount;
+}
+
 
 s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count)
 {
@@ -727,11 +864,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 		count -= remain;
 		(*aio_bh_count)++;
 
-#if 1
-		list_add(&bh->bh_aio_list, aio_bh_head);
-#else
-		nvfuse_release_bh(sb, bh, 0, CLEAN);
-#endif		
+		list_add(&bh->bh_aio_list, aio_bh_head);	
 	}
 	
 	nvfuse_release_inode(sb, ictx, CLEAN);
@@ -2349,10 +2482,16 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 
 			inode = ictx->ictx_inode;
 			inode->i_size = inode->i_size < length ? length : inode->i_size;
+			
+			nvfuse_release_inode(sb, ictx, DIRTY);
+			nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+		} 
+		else
+		{
+			nvfuse_release_inode(sb, ictx, CLEAN);
+			nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 		}
-		
-		nvfuse_release_inode(sb, ictx, DIRTY);
-		nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+				
 		nvfuse_release_super(sb);
 	}
 RET:;

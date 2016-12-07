@@ -473,5 +473,6 @@ s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir);
 s32 nvfuse_make_jobs(struct io_job **jobs, int numjobs);
 
 void nvfuse_release_ibitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 ino);
+s32 nvfuse_is_directio(struct nvfuse_superblock *sb, s32 fid);
 
 #endif /* NVFUSE_HEADER_H*/
