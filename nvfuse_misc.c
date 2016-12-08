@@ -81,7 +81,6 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 void nvfuse_aio_test_callback(void *arg)
 {
 	struct nvfuse_aio_ctx *actx = (struct nvfuse_aio_ctx *)arg;
-	free(actx->actx_buf);
 	free(actx);
 }
 
@@ -127,25 +126,26 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	
 	io_curr = 0;
 	io_remaining = file_size; 
-	
+
+	/* user data buffer allocation */
+	user_buf = nvfuse_alloc_aligned_buffer(io_size * qdepth);
+	if (user_buf == NULL)
+	{
+	    printf(" Error: malloc()\n");
+	    return -1;
+	}
+
 	while (io_remaining > 0)
 	{
+
 		for (i = 0; i < qdepth; i++)
 		{
-			/* user data buffer allocation */
-			user_buf = nvfuse_malloc(io_size);
-			if (user_buf == NULL)
-			{
-				printf(" Error: malloc()\n");
-				return -1;
-			}
-
 			/* initialization of aio context */
 			actx = nvfuse_malloc(sizeof(struct nvfuse_aio_ctx));
 			memset(actx, 0x00, sizeof(struct nvfuse_aio_ctx));
 			actx->actx_fid = fd;
 			actx->actx_opcode = is_read ? READ : WRITE;
-			actx->actx_buf = user_buf;
+			actx->actx_buf = user_buf + io_size * i;
 			actx->actx_offset = io_curr;
 			actx->actx_bytes = io_size;
 			actx->actx_error = 0;
@@ -176,6 +176,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			last_progress = curr_progress;
 		}
 
+		//printf(" submission \n");
 		/* aio submission */
 		ret = nvfuse_aio_queue_submission(nvh, &aioq);
 		if (ret)
@@ -184,6 +185,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			return ret;
 		}
 
+		//printf(" completion\n");
 		/* aio completion */
 		ret = nvfuse_aio_queue_completion(&nvh->nvh_sb, &aioq);
 		if (ret)
@@ -193,6 +195,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		}
 	}
 	
+	nvfuse_free_aligned_buffer(user_buf);
 	nvfuse_fsync(nvh, fd);
 	nvfuse_closefile(nvh, fd);
 	
@@ -247,6 +250,8 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 			break;
 		}
 	}
+
+	exit(0);
 
 	return NVFUSE_SUCCESS;
 }

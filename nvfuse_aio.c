@@ -361,7 +361,9 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 			return -1;
 		}
 	}
-	
+
+	nvfuse_aio_resetnextsjob(nvh->nvh_sb.io_manager);
+
 	/* collect buffer */
 	head = &aioq->asq_head;
 	list_for_each_safe(ptr, temp, head) {

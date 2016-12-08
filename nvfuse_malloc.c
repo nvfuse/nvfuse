@@ -32,7 +32,7 @@ static u64 memalloc_allocated_size = 0;
 #endif
 
 /* allocate a alignment-bytes aligned buffer */
-void *allocate_aligned_buffer(size_t size)
+void *nvfuse_alloc_aligned_buffer(size_t size)
 {
 	void *p;
 #ifndef USE_RTE_MEMALLOC
@@ -55,10 +55,10 @@ void *allocate_aligned_buffer(size_t size)
 void *nvfuse_malloc(size_t size) {
 	memalloc_allocated_size ++;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
-	if (size % CLUSTER_SIZE == 0 && size > 0)
-	{
-		return (void *)allocate_aligned_buffer(size);
-	}
+//	if (size % CLUSTER_SIZE == 0 && size > 0)
+//	{
+//		return (void *)allocate_aligned_buffer(size);
+//	}
 #endif 
 
 	return malloc((size_t)size);
@@ -69,8 +69,16 @@ void nvfuse_free(void *ptr){
 	memalloc_allocated_size--;
 	free(ptr);
 }
+
+void nvfuse_free_aligned_buffer(void *ptr){
+	free(ptr);
+}
 #else
 void nvfuse_free(void *ptr){
+	memalloc_allocated_size--;
+	free(ptr);
+}
+void nvfuse_free_aligned_buffer(void *ptr){
 	rte_free(ptr);
 }
 #endif

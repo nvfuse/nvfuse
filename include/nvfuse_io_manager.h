@@ -88,7 +88,7 @@ struct io_event;
 #define DISK_SIZE ((unsigned long long)SECTOR_SIZE * NO_OF_SECTORS)
 
 /* Maximum Number of Queue Depth */
-#define AIO_MAX_QDEPTH  128
+#define AIO_MAX_QDEPTH  512
 
 #define AIO_RETRY_COUNT         5
 #define AIO_MAX_TIMEOUT_SEC     10   // 5 sec
@@ -153,6 +153,7 @@ struct nvfuse_io_manager {
     int (*aio_complete)(struct nvfuse_io_manager *);
     struct io_job *(*aio_getnextcjob)(struct nvfuse_io_manager *);
     void (*aio_resetnextcjob)(struct nvfuse_io_manager *);
+    void (*aio_resetnextsjob)(struct nvfuse_io_manager *);
     int (*aio_cancel)(struct nvfuse_io_manager *, struct io_job *);
 };
 
@@ -163,6 +164,7 @@ struct nvfuse_io_manager {
 #define nvfuse_aio_prep(b, io_manager) io_manager->aio_prep(io_manager, b)
 
 #define nvfuse_aio_submit(b, n, io_manager) io_manager->aio_submit(io_manager, b, n);
+#define nvfuse_aio_resetnextsjob(io_manager) io_manager->aio_resetnextsjob(io_manager);
 #define nvfuse_aio_resetnextcjob(io_manager) io_manager->aio_resetnextcjob(io_manager);
 #define nvfuse_aio_complete(io_manager) io_manager->aio_complete(io_manager);
 #define nvfuse_aio_getnextcjob(io_manager) io_manager->aio_getnextcjob(io_manager);

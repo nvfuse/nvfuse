@@ -372,7 +372,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb){
 		}
 
 		bc->bc_sb = sb;
-		bc->bc_buf = (s8 *)nvfuse_malloc(CLUSTER_SIZE);
+		bc->bc_buf = (s8 *)nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 		if (bc->bc_buf == NULL) {
 			printf(" nvfuse_malloc error \n");
 			return -1;
@@ -405,7 +405,7 @@ void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb)
 			bh = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
 			assert(!bh->bc_dirty);
 			list_del(&bh->bc_list);
-			nvfuse_free(bh->bc_buf);
+			nvfuse_free_aligned_buffer(bh->bc_buf);
 			nvfuse_free(bh);
 			removed_count++;
 		}

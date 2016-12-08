@@ -13,8 +13,8 @@
 # more details.
 #
 
-#DPDK_DIR = /root/spdk/dpdk-16.07/x86_64-native-linuxapp-gcc/
-#SPDK_ROOT_DIR = /root/spdk
+DPDK_DIR = /root/spdk/dpdk-16.07/x86_64-native-linuxapp-gcc/
+SPDK_ROOT_DIR = /root/spdk
 
 ifneq "$(wildcard $(SPDK_ROOT_DIR) )" ""
 ifneq "$(wildcard $(DPDK_DIR) )" ""

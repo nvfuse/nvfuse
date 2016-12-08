@@ -40,7 +40,7 @@
 #ifdef LIST_HEAD
 #undef LIST_HEAD
 #endif
-#include "list.h"
+//#include "list.h"
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #include <libaio.h>
@@ -235,14 +235,6 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
     int i;
     int ret = 0;
 
-    for (i = 0; i < AIO_MAX_QDEPTH; i++)
-    {
-	io_manager->io_job_subq[i] = NULL;
-	io_manager->cjob[i] = NULL;
-    }
-    io_manager->io_job_subq_count = 0;
-    io_manager->num_cjob = 0;
-
     for(i = 0;i < qcnt;i++){
 	struct iocb *iocb = ioq[i];
 	job  = (struct io_job *)container_of(iocb, struct io_job, iocb);
@@ -266,12 +258,12 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
             exit(1);
         }
 
-	io_manager->io_job_subq[i] = job;
+	io_manager->io_job_subq[io_manager->io_job_subq_count] = job;
 	io_manager->io_job_subq_count ++;
-
     }
 
-    //printf(" tid = %d submit = %d ret = %d \n", th_p->tid, qcnt, ret);
+    //printf(" spdk: %d jobs submitted total count = %d\n", qcnt, io_manager->io_job_subq_count);
+
     return qcnt;
 }
 
@@ -296,6 +288,7 @@ static int spdk_complete(struct nvfuse_io_manager *io_manager)
                 cc++;
 
             job_id++;
+	    //printf(" job id = %d \n", job_id);
         }
     }
 
@@ -306,6 +299,8 @@ static int spdk_complete(struct nvfuse_io_manager *io_manager)
         io_manager->cjob[job_id] = job;
         io_manager->num_cjob++;
         io_manager->io_job_subq_count--;
+
+	io_manager->io_job_subq[job_id] = NULL;
     }
 
     return cc;
@@ -317,8 +312,27 @@ static struct io_job *spdk_getnextcjob(struct nvfuse_io_manager *io_manager)
     return io_manager->cjob[io_manager->cur_cjob++];
 }
 
+static void spdk_resetnextsjob(struct nvfuse_io_manager *io_manager)
+{
+    int i;
+
+    for (i = 0; i < AIO_MAX_QDEPTH; i++)
+    {
+	io_manager->io_job_subq[i] = NULL;
+    }
+
+    io_manager->io_job_subq_count = 0;
+}
+
 static void spdk_resetnextcjob(struct nvfuse_io_manager *io_manager)
 {
+    int i;
+
+    for (i = 0; i < AIO_MAX_QDEPTH; i++)
+    {
+	io_manager->cjob[i] = NULL;
+    }
+
     io_manager->num_cjob = 0;
     io_manager->cur_cjob = 0;
 }
@@ -529,6 +543,7 @@ int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char 
     io_manager->aio_submit = spdk_submit;
     io_manager->aio_complete = spdk_complete;
     io_manager->aio_getnextcjob = spdk_getnextcjob;
+    io_manager->aio_resetnextsjob = spdk_resetnextsjob;
     io_manager->aio_resetnextcjob = spdk_resetnextcjob;
     io_manager->aio_cancel = spdk_cancel;
 

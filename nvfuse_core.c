@@ -967,7 +967,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 	memset(sb->sb_ss, 0x00, sizeof(struct nvfuse_segment_summary) * sb->sb_segment_num);
 
-	buf = nvfuse_malloc(CLUSTER_SIZE);
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL)
 	{
 		printf(" malloc error \n");
@@ -982,7 +982,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		memcpy(sb->sb_ss + i, buf, sizeof(struct nvfuse_segment_summary));
 		//printf("seg %d ibitmap start = %d \n", i, g_nvfuse_sb->sb_ss[i].ss_ibitmap_start);
 	}
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 
 	/* create b+tree index for root directory at first mount after formattming */
 	if (sb->sb_mount_cnt == 0)
@@ -1177,7 +1177,7 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 	num_seg = NVFUSE_SEG_NUM(num_clu, NVFUSE_SEGMENT_SIZE_BITS-CLUSTER_SIZE_BITS);
 	num_clu = num_seg << (NVFUSE_SEGMENT_SIZE_BITS-CLUSTER_SIZE_BITS);// (NVFUSE_SEGMENT_SIZE/NVFUSE_CLUSTER_SIZE);
 
-	buf = (s8 *)nvfuse_malloc(CLUSTER_SIZE);
+	buf = (s8 *)nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if(buf == NULL)	{
 		printf(" nvfuse_malloc error \n");
 	}
@@ -1205,7 +1205,7 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 	printf(" no of free inodes = %d \n", cur_sb->sb_free_inodes);
 	printf(" no of free blocks = %ld \n", (unsigned long)cur_sb->sb_free_blocks);
 
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 	return res;
 }
 
