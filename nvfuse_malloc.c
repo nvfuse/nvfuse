@@ -48,21 +48,22 @@ void *nvfuse_alloc_aligned_buffer(size_t size)
 		exit(1);
 	}
 #endif
+	memalloc_allocated_size++;
 	return p;
 }
-#endif 
-
-void *nvfuse_malloc(size_t size) {
-	memalloc_allocated_size ++;
-#if NVFUSE_OS == NVFUSE_OS_LINUX
-//	if (size % CLUSTER_SIZE == 0 && size > 0)
-//	{
-//		return (void *)allocate_aligned_buffer(size);
-//	}
-#endif 
-
+#else
+void *nvfuse_alloc_aligned_buffer(size_t size)
+{
+	memalloc_allocated_size++;
 	return malloc((size_t)size);
 }
+void *nvfuse_malloc(size_t size) {
+	memalloc_allocated_size++;
+	return malloc((size_t)size);
+}
+#endif 
+
+
 
 #ifndef USE_RTE_MEMALLOC
 void nvfuse_free(void *ptr){
@@ -71,6 +72,7 @@ void nvfuse_free(void *ptr){
 }
 
 void nvfuse_free_aligned_buffer(void *ptr){
+	memalloc_allocated_size--;
 	free(ptr);
 }
 #else
@@ -79,6 +81,7 @@ void nvfuse_free(void *ptr){
 	free(ptr);
 }
 void nvfuse_free_aligned_buffer(void *ptr){
+	memalloc_allocated_size--;
 	rte_free(ptr);
 }
 #endif
