@@ -5,5 +5,15 @@ compiler:
   - clang
 
 sudo: false
+ 
+addons:
+  apt:
+    packages:      
+      - libaio-dev
+      - libfuse-dev
 
-script: ./unittest.sh
+before_install:
+  - make
+  - chmod +x unittest.sh
+
+#script: ./unittest.sh
