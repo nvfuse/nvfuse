@@ -15,4 +15,4 @@ before_install:
   - make
   - chmod +x unittest.sh
 
-#script: ./unittest.sh
+script: ./unittest.sh
