@@ -414,6 +414,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	return res;
 }
 
+#if 0
 static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
 			size_t size, off_t offset, struct fuse_file_info *fi)
 {
@@ -436,6 +437,7 @@ static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
 
 	return 0;
 }
+#endif
 
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
@@ -451,6 +453,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	return res;
 }
 
+#if 0
 static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
 		     off_t offset, struct fuse_file_info *fi)
 {
@@ -465,6 +468,7 @@ static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
 
 	return fuse_buf_copy(&dst, buf, FUSE_BUF_SPLICE_NONBLOCK);
 }
+#endif
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
 {
