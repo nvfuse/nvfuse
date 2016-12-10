@@ -96,7 +96,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 	u32 ino = 0;
 	u32 blkno = 0;
 
-	ss_buf = nvfuse_malloc(CLUSTER_SIZE);
+	ss_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (ss_buf == NULL)
 	{
 		printf(" Malloc error \n");
@@ -106,7 +106,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 	nvfuse_read_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, io_manager);
 	ss = (struct nvfuse_segment_summary *)ss_buf;
 
-	buf = nvfuse_malloc(CLUSTER_SIZE);
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL)
 	{
 		printf(" Malloc error \n");
@@ -177,8 +177,8 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 
 	nvfuse_write_cluster(buf, ss->ss_dtable_start, io_manager);
 	nvfuse_write_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, io_manager);
-	nvfuse_free(buf);
-	nvfuse_free(ss_buf);
+	nvfuse_free_aligned_buffer(buf);
+	nvfuse_free_aligned_buffer(ss_buf);
 
 	return 0;
 }
@@ -226,13 +226,13 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 	u32 clu;
 	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 
-	ss_buf = nvfuse_malloc(CLUSTER_SIZE);
+	ss_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (ss_buf == NULL)
 	{
 		printf(" malloc error \n");
 		return -1;
 	}
-	buf = nvfuse_malloc(CLUSTER_SIZE);
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL)
 	{
 		printf(" malloc error \n");
@@ -276,8 +276,8 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 #endif
 	}
 
-	nvfuse_free(ss_buf);
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(ss_buf);
+	nvfuse_free_aligned_buffer(buf);
 
 	return 0;
 
@@ -298,14 +298,14 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfu
 	u32 clu;
 	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 
-	ss_buf = nvfuse_malloc(CLUSTER_SIZE);
+	ss_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (ss_buf == NULL)
 	{
 		printf(" malloc error \n");
 		return -1;
 	}
 
-	buf = nvfuse_malloc(CLUSTER_SIZE);
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (ss_buf == NULL)
 	{
 		printf(" malloc error \n");
@@ -340,7 +340,7 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfu
 		if (seg_id == 0) 
 		{
 			zeroing_blocks = ss->ss_itable_size;
-			zeroing_buf = nvfuse_malloc(zeroing_blocks * CLUSTER_SIZE);
+			zeroing_buf = nvfuse_alloc_aligned_buffer(zeroing_blocks * CLUSTER_SIZE);
 			if (zeroing_buf == NULL)
 			{
 				printf(" malloc error \n");
@@ -355,7 +355,7 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfu
 
 		if (seg_id + 1 == num_segs)
 		{
-			free(zeroing_buf);
+			nvfuse_free_aligned_buffer(zeroing_buf);
 		}
 #endif
 
@@ -369,8 +369,8 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh, struct nvfu
 #endif
 	}
 
-	nvfuse_free(ss_buf);
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(ss_buf);
+	nvfuse_free_aligned_buffer(buf);
 
 	return 0;
 }
@@ -455,7 +455,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 		printf(" check inode size = %d \n", (int)sizeof(struct nvfuse_inode)); 
 		return -1;
 	}
-	buf = nvfuse_malloc(CLUSTER_SIZE);
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL) {
 		printf(" nvfuse_malloc error \n");
 		return -1;
@@ -562,7 +562,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	printf("-------------------------------------------------------------------\n");
 	fflush(stdout);
 
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 
 	return NVFUSE_SUCCESS;
 }

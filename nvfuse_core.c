@@ -967,7 +967,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 	memset(sb->sb_ss, 0x00, sizeof(struct nvfuse_segment_summary) * sb->sb_segment_num);
 
-	buf = nvfuse_malloc(CLUSTER_SIZE);
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL)
 	{
 		printf(" malloc error \n");
@@ -982,7 +982,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		memcpy(sb->sb_ss + i, buf, sizeof(struct nvfuse_segment_summary));
 		//printf("seg %d ibitmap start = %d \n", i, g_nvfuse_sb->sb_ss[i].ss_ibitmap_start);
 	}
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 
 	/* create b+tree index for root directory at first mount after formattming */
 	if (sb->sb_mount_cnt == 0)
@@ -1017,10 +1017,17 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 {
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	s32 i;
-	s8 buf[CLUSTER_SIZE];
+	s8 *buf;
 	
 	if(!nvh->nvh_mounted)
 		return -1;
+
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
+	if (buf == NULL)
+	{
+	    printf(" Error: alloc aligned buffer \n");
+	    return -1;
+	}
 
 	gettimeofday(&sb->sb_time_end, NULL);
 	timeval_subtract(&sb->sb_time_total, &sb->sb_time_end, &sb->sb_time_start);
@@ -1054,6 +1061,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	nvfuse_lock_exit();
 
 	nvh->nvh_mounted = 0;
+
+	nvfuse_free_aligned_buffer(buf);
 
 	return 0;
 }
@@ -1177,7 +1186,7 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 	num_seg = NVFUSE_SEG_NUM(num_clu, NVFUSE_SEGMENT_SIZE_BITS-CLUSTER_SIZE_BITS);
 	num_clu = num_seg << (NVFUSE_SEGMENT_SIZE_BITS-CLUSTER_SIZE_BITS);// (NVFUSE_SEGMENT_SIZE/NVFUSE_CLUSTER_SIZE);
 
-	buf = (s8 *)nvfuse_malloc(CLUSTER_SIZE);
+	buf = (s8 *)nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if(buf == NULL)	{
 		printf(" nvfuse_malloc error \n");
 	}
@@ -1205,7 +1214,7 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 	printf(" no of free inodes = %d \n", cur_sb->sb_free_inodes);
 	printf(" no of free blocks = %ld \n", (unsigned long)cur_sb->sb_free_blocks);
 
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 	return res;
 }
 
@@ -2001,10 +2010,9 @@ s32 fat_filename(const s8 *path, s8 *dest)
 	return 0;
 }
 
-__inline static u32 *nvfuse_dir_hash(s8 *filename, u32 *hash)
+void nvfuse_dir_hash(s8 *filename, u32 *hash)
 {
-	ext2fs_dirhash(1,filename,strlen(filename), 0, hash, 0);
-	return hash;
+	ext2fs_dirhash(1, filename, strlen(filename), 0, hash, 0);
 }
 
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager)

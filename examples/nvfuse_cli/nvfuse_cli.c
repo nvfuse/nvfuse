@@ -30,17 +30,19 @@
 
 s32 nvfuse_type(struct nvfuse_handle *nvh, s8 *str);
 int parse_and_execute(char *input);
-void postmark_main();
+void postmark_main(void);
 
 s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct);
 s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh);
+int get_token(char **outptr);
+void help(void);
 
 struct nvfuse_handle *g_nvh;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	0
-#define EXAM_USE_UNIXIO		1
-#define EXAM_USE_SPDK		0
+#define EXAM_USE_UNIXIO		0
+#define EXAM_USE_SPDK		1
 #else
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	1
@@ -67,16 +69,14 @@ struct nvfuse_handle *g_nvh;
 
 
 #ifndef __USE_FUSE__
-void main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
 #else
-void mini_main(int argc, char *argv[]){
+int mini_main(int argc, char *argv[]){
 #endif 
 
 	char linebuf[256];
-	char *buf;
 	int ret;
 	char *devname = NULL;
-	struct nvfuse_io_manager *io_manager;
 
 	printf("\n");
 	printf(" Caution!: all data stored in your divice is removed permanently. \n");
@@ -86,7 +86,7 @@ void mini_main(int argc, char *argv[]){
 	devname = argv[1];
 	if (argc < 2) {
 		printf(" please enter the device file (e.g., /dev/sdb)\n");
-		return;
+		return -1;
 	}
 	printf(" device name = %s \n", devname);
 #endif
@@ -112,6 +112,8 @@ void mini_main(int argc, char *argv[]){
 	}
 	
 	nvfuse_destroy_handle(g_nvh, DEINIT_IOM, UMOUNT);
+
+	return 0;
 }
 
 int get_token(char **outptr)
@@ -134,7 +136,7 @@ int get_token(char **outptr)
 	return(type);
 }
 
-void help()
+void help(void)
 {
 	printf("---------------------------------\n");
 	printf("  - quit \n");

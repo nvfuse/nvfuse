@@ -323,7 +323,7 @@ void bp_init_pair(key_pair_t *node, int num);
 int bp_dealloc_bitmap(master_node_t *master, index_node_t *p);
 void bp_write_master(master_node_t *master);
 void bp_init_root(master_node_t *master);
-master_node_t *bp_init_master();
+master_node_t *bp_init_master(void);
 
 int key_compare(void *k1, void *k2,void *start, int num,int mid);
 key_pair_t *bp_alloc_pair(int num);

@@ -203,10 +203,29 @@ static struct io_job *libaio_getnextcjob(struct nvfuse_io_manager *io_manager)
 	return io_manager->cjob[io_manager->cur_cjob++];
 }
 
+static void libaio_resetnextsjob(struct nvfuse_io_manager *io_manager)
+{
+    int i;
+
+    for (i = 0; i < AIO_MAX_QDEPTH; i++)
+    {
+	io_manager->io_job_subq[i] = NULL;
+    }
+
+    io_manager->io_job_subq_count = 0;
+}
+
 static void libaio_resetnextcjob(struct nvfuse_io_manager *io_manager)
 {
-	io_manager->num_cjob = 0;
-	io_manager->cur_cjob = 0;
+    int i;
+
+    for (i = 0; i < AIO_MAX_QDEPTH; i++)
+    {
+	io_manager->cjob[i] = NULL;
+    }
+
+    io_manager->num_cjob = 0;
+    io_manager->cur_cjob = 0;
 }
 
 static int libaio_cancel(struct nvfuse_io_manager *io_manager, struct io_job *job)
@@ -254,6 +273,7 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->aio_submit = libaio_submit;
 	io_manager->aio_complete = libaio_complete;
 	io_manager->aio_getnextcjob = libaio_getnextcjob;
+	io_manager->aio_resetnextsjob = libaio_resetnextsjob;
 	io_manager->aio_resetnextcjob = libaio_resetnextcjob;
 	io_manager->aio_cancel = libaio_cancel;
 }

@@ -23,8 +23,8 @@
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	0
-#define EXAM_USE_UNIXIO		1
-#define EXAM_USE_SPDK		0
+#define EXAM_USE_UNIXIO		0
+#define EXAM_USE_SPDK		1
 #else
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	1
@@ -72,7 +72,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* 4KB memory allocation */
-	buf = nvfuse_malloc(4096);
+	buf = nvfuse_alloc_aligned_buffer(4096);
 	if (buf == NULL) {
 		printf(" Error: malloc() \n");
 		goto RET;
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 	printf(" Read Buf: %s", buf);
 
 	/* release memory */
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 		
 	/* close file */
 	nvfuse_closefile(nvh, fd);

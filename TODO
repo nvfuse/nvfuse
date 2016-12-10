@@ -10,7 +10,6 @@ File System Performance
 	+ Request based I/O
 	+ Directory Shrink
 	+ Fast FS format using multiple I/O requests
-	+ NVMe SPDK Driver Optimization
 
 Consistency
 	+ Fast File System Checker
@@ -32,3 +31,14 @@ NVMe Features
 	+ End to End Data Protection
 	+ Write Zeroes
 	+ NVM Format (Secure Erase)	
+
+SPDK Driver
+	+ Virtual to physical memory remapping
+	+ Non-consecutive memory to PRP lists
+	+ Optimization of completion time
+
+Test Script
+	+ creating maximum number of files and directories
+	+ creating maximum size of file (e.g., approximately 4TB)
+	+ Generating AIO workloads with measurements of bandwidth, iops, and latency
+	+ Sync workloads with measurements of bandwdith, iops and latency	

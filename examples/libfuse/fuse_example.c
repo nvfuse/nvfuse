@@ -60,6 +60,12 @@ s8 *gdevname;
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
+/* Declarations */
+int nvfuse_init(int format, s8 *devname);
+int nvfuse_deinit(void);
+void *xmp_init(struct fuse_conn_info *conn);
+void xmp_destroy(void *data);
+
 /* initialization of NVFUSE library */
 int nvfuse_init(int format, s8 *devname)
 {
@@ -77,15 +83,16 @@ int nvfuse_init(int format, s8 *devname)
 	
 	if (nvh == NULL)
 		ret = -1;
-RET:;
+
 	return ret;
 }
 
 /* de-initialization of NVFUSE library */
-int nvfuse_deinit()
+int nvfuse_deinit(void)
 {
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 	printf(" Finalizing ... \n"); 
+	return 0;
 }
 
 

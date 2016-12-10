@@ -15,7 +15,9 @@
 
 #ifndef _NVFUSE_MEMALLOC_H_
 #define _NVFUSE_MEMALLOC_H_
-void *allocate_aligned_buffer(size_t size);
 void *nvfuse_malloc(size_t size);
 void nvfuse_free(void *ptr);
+
+void *nvfuse_alloc_aligned_buffer(size_t size);
+void nvfuse_free_aligned_buffer(void *ptr);
 #endif
