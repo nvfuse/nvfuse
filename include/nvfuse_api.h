@@ -91,6 +91,7 @@ s32 nvfuse_sync(struct nvfuse_handle *nvh);
 
 s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 
 inode_t nvfuse_get_cwd_ino(struct nvfuse_handle *nvh);
 inode_t nvfuse_get_root_ino(struct nvfuse_handle *nvh);
@@ -102,10 +103,16 @@ s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct tim
 
 s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 to_entry, u32 from_entry);
 
-s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64 length);
+s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, u64 length);
+s32 nvfuse_fallocate_verify(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 start, u32 max_block);
 s32 nvfuse_writefile_directio_prepare(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 s32 nvfuse_readfile_aio_directio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset);
 s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset, s32 sync_read);
+
+s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_t size);
+s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
+s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset, s32 sync_read);
+s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filename, struct nvfuse_dir_entry *direntry);
 
 #endif

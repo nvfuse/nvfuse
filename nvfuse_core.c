@@ -1017,10 +1017,17 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 {
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	s32 i;
-	s8 buf[CLUSTER_SIZE];
+	s8 *buf;
 	
 	if(!nvh->nvh_mounted)
 		return -1;
+
+	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
+	if (buf == NULL)
+	{
+	    printf(" Error: alloc aligned buffer \n");
+	    return -1;
+	}
 
 	gettimeofday(&sb->sb_time_end, NULL);
 	timeval_subtract(&sb->sb_time_total, &sb->sb_time_end, &sb->sb_time_start);
@@ -1054,6 +1061,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	nvfuse_lock_exit();
 
 	nvh->nvh_mounted = 0;
+
+	nvfuse_free_aligned_buffer(buf);
 
 	return 0;
 }
@@ -2001,10 +2010,9 @@ s32 fat_filename(const s8 *path, s8 *dest)
 	return 0;
 }
 
-__inline static u32 *nvfuse_dir_hash(s8 *filename, u32 *hash)
+void nvfuse_dir_hash(s8 *filename, u32 *hash)
 {
-	ext2fs_dirhash(1,filename,strlen(filename), 0, hash, 0);
-	return hash;
+	ext2fs_dirhash(1, filename, strlen(filename), 0, hash, 0);
 }
 
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager)

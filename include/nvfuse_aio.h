@@ -70,4 +70,10 @@ s32 nvfuse_aio_queue_move(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *
 s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq);
 s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq);
 
+void nvfuse_aio_gen_dev_cpls_buffered(void *arg);
+void nvfuse_aio_gen_dev_cpls_directio(void *arg);
+s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx);
+s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx);
+s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb);
+
 #endif

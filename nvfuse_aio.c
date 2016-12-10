@@ -170,7 +170,6 @@ void nvfuse_aio_gen_dev_cpls_buffered(void *arg)
 
 void nvfuse_aio_gen_dev_cpls_directio(void *arg)
 {
-	struct list_head *head, *ptr, *temp;	
 	struct nvfuse_aio_ctx *actx;
 
 	/* casting */
@@ -251,9 +250,6 @@ s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse
 
 s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx)
 {
-	struct list_head *head, *ptr, *temp;
-	struct nvfuse_buffer_head *bh;
-	struct nvfuse_buffer_cache *bc;
 	u64 start, length;
 	s32 count = 0;
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
@@ -438,8 +434,6 @@ s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_
 {
 	struct list_head *head, *ptr, *temp;
 	struct nvfuse_aio_ctx *actx;
-	u32 bytes;
-	s32 res;
 
 	while (sb->io_manager->queue_cur_count) 
 	{

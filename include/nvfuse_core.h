@@ -389,7 +389,7 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t 
 s32 error_msg(s8 *str);
 s32 fat_dirname(const s8 *path, s8 *dest);
 s32 fat_filename(const s8 *path, s8 *dest);
-__inline static u32 *nvfuse_dir_hash(s8 *filename, u32 *hash);
+void nvfuse_dir_hash(s8 *filename, u32 *hash);
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager);
 
 struct nvfuse_superblock * nvfuse_read_super(struct nvfuse_handle *nvh);
@@ -440,7 +440,7 @@ s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *b
 
 s32  nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str,s8 *ssize);
 s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str);
-void nvfuse_test();
+void nvfuse_test(struct nvfuse_handle *nvh);
 s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str);
 bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno,bkey_t *key,u32 type);
 s32 nvfuse_mount(struct nvfuse_handle *nvh);
@@ -465,8 +465,8 @@ extern pthread_mutex_t mutex_lock;
 #define nvfuse_lock()	
 #define nvfuse_unlock() 
 
-void nvfuse_lock_init();
-void nvfuse_lock_exit();
+void nvfuse_lock_init(void);
+void nvfuse_lock_exit(void);
 
 s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir);
 

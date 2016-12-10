@@ -1,29 +1,29 @@
-DPDK_DIR = /root/spdk/dpdk-16.07/x86_64-native-linuxapp-gcc/
-SPDK_ROOT_DIR = /root/spdk
-
-ifneq "$(wildcard $(SPDK_ROOT_DIR) )" ""
-ifneq "$(wildcard $(DPDK_DIR) )" ""
-
-include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
-SPDK_LIBS += $(SPDK_ROOT_DIR)/lib/nvme/libspdk_nvme.a \
-	     $(SPDK_ROOT_DIR)/lib/util/libspdk_util.a \
-	     $(SPDK_ROOT_DIR)/lib/memory/libspdk_memory.a \
-	     $(SPDK_ROOT_DIR)/lib/log/libspdk_log.a \
-
-LIBS += $(SPDK_LIBS) $(PCIACCESS_LIB) $(DPDK_LIB)
-SPDK_CFLAGS := $(DPDK_INC) -I$(SPDK_ROOT_DIR)/include -DSPDK_ENABLED
-
-endif
-endif
+#
+#	NVFUSE (NVMe based File System in Userspace)
+#	Copyright (C) 2016 Yongseok Oh <yongseok.oh@sk.com>
+#	First Writing: 30/10/2016
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms and conditions of the GNU General Public License,
+# version 2, as published by the Free Software Foundation.
+#
+# This program is distributed in the hope it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+# more details.
+#
 
 NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
+include $(NVFUSE_ROOT_DIR)/spdk_config.mk
+
 TARGET = fuse_example
 SRCS   = fuse_example.o
 
-LDFLAGS := -lfuse -lm -lpthread -laio -lrt
-CFLAGS := $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -I/usr/include/fuse
+LDFLAGS += -lfuse -lm -lpthread -laio -lrt
+CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -I/usr/include/fuse
+CFLAGS += -w
 
 OBJS=$(SRCS:.c=.o)
 
@@ -39,7 +39,7 @@ CC=gcc
 	$(CC)  -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 $(TARGET)	:	$(OBJS)
-	$(CC)  -g -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS) -D_GNU_SOURCE $(CFLAGS)
+	$(CC)  -g -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
 
 all:  $(TARGET) 
 

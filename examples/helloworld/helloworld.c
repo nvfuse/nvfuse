@@ -72,7 +72,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* 4KB memory allocation */
-	buf = nvfuse_malloc(4096);
+	buf = nvfuse_alloc_aligned_buffer(4096);
 	if (buf == NULL) {
 		printf(" Error: malloc() \n");
 		goto RET;
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 	printf(" Read Buf: %s", buf);
 
 	/* release memory */
-	nvfuse_free(buf);
+	nvfuse_free_aligned_buffer(buf);
 		
 	/* close file */
 	nvfuse_closefile(nvh, fd);

@@ -112,7 +112,7 @@ struct nvfuse_ictx_manager {
 int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb);
 void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb);
 
-struct nvfuse_buffer_cache *nvfuse_alloc_bc();
+struct nvfuse_buffer_cache *nvfuse_alloc_bc(void);
 struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 read, s32 is_meta);
 struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key, lbno_t lblock);
 struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb,u64 key);
@@ -134,8 +134,16 @@ void nvfuse_set_bh_status(struct nvfuse_buffer_head *bh, s32 status);
 void nvfuse_clear_bh_status(struct nvfuse_buffer_head *bh, s32 status);
 void nvfuse_insert_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 void nvfuse_move_ictx_type(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 desired_type);
+s32 nvfuse_insert_dirty_bh_to_ictx(struct nvfuse_buffer_head *bh, struct nvfuse_inode_ctx *ictx);
 
+s32 nvfuse_forget_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh);
 void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc);
 
 void nvfuse_init_ictx(struct nvfuse_inode_ctx *ictx);
+struct nvfuse_inode_ctx *nvfuse_ictx_hash_lookup(struct nvfuse_ictx_manager *ictxc, inode_t ino);
+struct nvfuse_inode_ctx *nvfuse_replcae_ictx(struct nvfuse_superblock *sb);
+
+int nvfuse_rbnode_insert(struct rb_root *root, struct nvfuse_buffer_head *bh);
+struct nvfuse_buffer_head *nvfuse_rbnode_search(struct rb_root *root, u64 bno);
+
 #endif

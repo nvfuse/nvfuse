@@ -102,7 +102,7 @@ struct io_job{
     long offset; // in bytes
     long discard_range[2]; //discard
     size_t bytes; // requested bytes
-    int ret; //return value of pread or pwrite
+    size_t ret; //return value of pread or pwrite
     int req_type; // is read 
     char *buf;
     int complete;

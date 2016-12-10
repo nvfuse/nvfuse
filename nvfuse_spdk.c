@@ -19,27 +19,21 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
-#include <ctype.h>
-#include <libaio.h>
-#include <sys/ipc.h>
-#include <mqueue.h>
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 
-
 #include <rte_config.h>
-#include <rte_mempool.h>
-#include <rte_malloc.h>
+#include <rte_eal.h>
 
 #include "spdk/nvme.h"
-#include "spdk/pci.h"
+#include "spdk/env.h"
 
 #include "nvfuse_core.h"
 #include "nvfuse_config.h"
 #include "nvfuse_io_manager.h"
-#ifdef LIST_HEAD
-#undef LIST_HEAD
-#endif
+//#ifdef LIST_HEAD
+//#undef LIST_HEAD
+//#endif
 //#include "list.h"
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
@@ -66,10 +60,13 @@ static struct ns_entry *g_namespaces = NULL;
 
 static char *ealargs[] = {
 	"hello_world",
-	"-c 0x4",
+	"-c 0x1",
 	"-n 4",
 	"--proc-type=auto",
 };
+
+int spdk_close(struct nvfuse_io_manager *io_manager);
+int spdk_cleanup(struct nvfuse_io_manager *io_manager);
 
 static void
 register_ns(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
@@ -109,6 +106,7 @@ register_ns(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
 	       spdk_nvme_ns_get_size(ns) / 1000000000);
 }
 
+#if 0
 static bool
 probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts *opts)
 {
@@ -136,7 +134,22 @@ probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts 
 
 	return true;
 }
+#else
+static bool
+probe_cb(void *cb_ctx, const struct spdk_nvme_probe_info *probe_info,
+	 struct spdk_nvme_ctrlr_opts *opts)
+{
+	printf("Attaching to %04x:%02x:%02x.%02x\n",
+	       probe_info->pci_addr.domain,
+	       probe_info->pci_addr.bus,
+	       probe_info->pci_addr.dev,
+	       probe_info->pci_addr.func);
 
+	return true;
+}
+#endif
+
+#if 0
 static void
 attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctrlr,
 	  const struct spdk_nvme_ctrlr_opts *opts)
@@ -177,6 +190,50 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 		register_ns(ctrlr, spdk_nvme_ctrlr_get_ns(ctrlr, nsid));
 	}
 }
+#else
+static void
+attach_cb(void *cb_ctx, const struct spdk_nvme_probe_info *probe_info,
+	  struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
+{
+	int nsid, num_ns;
+	struct ctrlr_entry *entry;
+	const struct spdk_nvme_ctrlr_data *cdata = spdk_nvme_ctrlr_get_data(ctrlr);
+
+	entry = malloc(sizeof(struct ctrlr_entry));
+	if (entry == NULL) {
+		perror("ctrlr_entry malloc");
+		exit(1);
+	}
+
+	printf("Attached to %04x:%02x:%02x.%02x\n",
+	       probe_info->pci_addr.domain,
+	       probe_info->pci_addr.bus,
+	       probe_info->pci_addr.dev,
+	       probe_info->pci_addr.func);
+
+	snprintf(entry->name, sizeof(entry->name), "%-20.20s (%-20.20s)", cdata->mn, cdata->sn);
+
+	entry->ctrlr = ctrlr;
+	entry->next = g_controllers;
+	g_controllers = entry;
+
+	/*
+	 * Each controller has one of more namespaces.  An NVMe namespace is basically
+	 *  equivalent to a SCSI LUN.  The controller's IDENTIFY data tells us how
+	 *  many namespaces exist on the controller.  For Intel(R) P3X00 controllers,
+	 *  it will just be one namespace.
+	 *
+	 * Note that in NVMe, namespace IDs start at 1, not 0.
+	 */
+	num_ns = spdk_nvme_ctrlr_get_num_ns(ctrlr);
+	printf("Using controller %s with %d namespaces.\n", entry->name, num_ns);
+	for (nsid = 1; nsid <= num_ns; nsid++) {
+		register_ns(ctrlr, spdk_nvme_ctrlr_get_ns(ctrlr, nsid));
+	}
+}
+
+
+#endif
 
 static int spdk_init(struct nvfuse_io_manager *io_manager)
 {
@@ -201,6 +258,7 @@ static int spdk_init(struct nvfuse_io_manager *io_manager)
     return rc;
 }
 
+#if 0
 int spdk_cleanup(struct nvfuse_io_manager *io_manager)
 {
     /*
@@ -213,6 +271,29 @@ int spdk_cleanup(struct nvfuse_io_manager *io_manager)
 
     return 0;
 }
+#else
+int spdk_cleanup(struct nvfuse_io_manager *io_manager)
+{
+	struct ns_entry *ns_entry = g_namespaces;
+	struct ctrlr_entry *ctrlr_entry = g_controllers;
+
+	while (ns_entry) {
+		struct ns_entry *next = ns_entry->next;
+		free(ns_entry);
+		ns_entry = next;
+	}
+
+	while (ctrlr_entry) {
+		struct ctrlr_entry *next = ctrlr_entry->next;
+
+		spdk_nvme_detach(ctrlr_entry->ctrlr);
+		free(ctrlr_entry);
+		ctrlr_entry = next;
+	}
+
+	return 0;
+}
+#endif
 
 static int spdk_prep(struct nvfuse_io_manager *io_manager, struct io_job *job)
 {
@@ -269,7 +350,6 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
 
 static int spdk_complete(struct nvfuse_io_manager *io_manager)
 {
-    struct timespec time_out = {AIO_MAX_TIMEOUT_SEC, AIO_MAX_TIMEOUT_NSEC}; // {sec, nano}
     struct io_job *cur_job;
     int max_nr = io_manager->queue_cur_count;
     int cc = 0; // completion count
@@ -343,6 +423,7 @@ struct spdk_job {
     int		is_completed;
 };
 
+#if 0
 static void
 read_complete(void *arg, const struct spdk_nvme_cpl *completion)
 {
@@ -356,6 +437,7 @@ read_complete(void *arg, const struct spdk_nvme_cpl *completion)
 	 */
 	job->is_completed = 1;
 }
+#endif
 
 static void
 write_complete(void *arg, const struct spdk_nvme_cpl *completion)
@@ -477,7 +559,6 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
     }
 
     printf("Initializing NVMe Controllers\n");
-
     /*
      * Start the SPDK NVMe enumeration process.  probe_cb will be called
      *  for each NVMe controller found, giving our application a choice on

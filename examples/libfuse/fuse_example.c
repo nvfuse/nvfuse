@@ -60,6 +60,12 @@ s8 *gdevname;
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
+/* Declarations */
+int nvfuse_init(int format, s8 *devname);
+int nvfuse_deinit(void);
+void *xmp_init(struct fuse_conn_info *conn);
+void xmp_destroy(void *data);
+
 /* initialization of NVFUSE library */
 int nvfuse_init(int format, s8 *devname)
 {
@@ -77,15 +83,16 @@ int nvfuse_init(int format, s8 *devname)
 	
 	if (nvh == NULL)
 		ret = -1;
-RET:;
+
 	return ret;
 }
 
 /* de-initialization of NVFUSE library */
-int nvfuse_deinit()
+int nvfuse_deinit(void)
 {
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 	printf(" Finalizing ... \n"); 
+	return 0;
 }
 
 
@@ -414,6 +421,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	return res;
 }
 
+#if 0
 static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
 			size_t size, off_t offset, struct fuse_file_info *fi)
 {
@@ -436,6 +444,7 @@ static int xmp_read_buf(const char *path, struct fuse_bufvec **bufp,
 
 	return 0;
 }
+#endif
 
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
@@ -451,6 +460,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 	return res;
 }
 
+#if 0
 static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
 		     off_t offset, struct fuse_file_info *fi)
 {
@@ -465,6 +475,7 @@ static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
 
 	return fuse_buf_copy(&dst, buf, FUSE_BUF_SPLICE_NONBLOCK);
 }
+#endif
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
 {

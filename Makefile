@@ -13,24 +13,7 @@
 # more details.
 #
 
-DPDK_DIR = /root/spdk/dpdk-16.07/x86_64-native-linuxapp-gcc/
-SPDK_ROOT_DIR = /root/spdk
-
-ifneq "$(wildcard $(SPDK_ROOT_DIR) )" ""
-ifneq "$(wildcard $(DPDK_DIR) )" ""
-
-include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
-SPDK_LIBS += $(SPDK_ROOT_DIR)/lib/nvme/libspdk_nvme.a \
-	     $(SPDK_ROOT_DIR)/lib/util/libspdk_util.a \
-	     $(SPDK_ROOT_DIR)/lib/memory/libspdk_memory.a \
-	     $(SPDK_ROOT_DIR)/lib/log/libspdk_log.a \
-
-LIBS += $(SPDK_LIBS) $(PCIACCESS_LIB) $(DPDK_LIB)
-SPDK_CFLAGS := $(DPDK_INC) -I$(SPDK_ROOT_DIR)/include -DSPDK_ENABLED
-
-endif
-endif
-
+include spdk_config.mk
 
 LIB_NVFUSE = nvfuse.a
 SRCS   = nvfuse_buffer_cache.o \
@@ -41,8 +24,10 @@ nvfuse_spdk.o \
 nvfuse_api.o nvfuse_aio.o \
 rbtree.o
 
-LDFLAGS := -lm -lpthread -laio -lrt
-CFLAGS := $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+LDFLAGS += -lm -lpthread -laio -lrt
+CFLAGS = $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+#CFLAGS = -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+CFLAGS += -m64
 
 OBJS=$(SRCS:.c=.o)
 
@@ -55,7 +40,7 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC)  -pg -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse
 
