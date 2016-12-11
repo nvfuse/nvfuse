@@ -42,7 +42,7 @@ CC=gcc
 	@$(RM) $@
 	$(CC) -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
-all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse
+all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test
 
 $(LIB_NVFUSE)	:	$(OBJS)
 	$(AR) rcv $@ $(OBJS)
@@ -55,11 +55,16 @@ nvfuse_cli:
 
 libfuse:
 	make -C examples/libfuse
+
+regression_test:
+	make -C examples/regression_test
+
 clean:
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
 	make -C examples/helloworld/ clean
 	make -C examples/nvfuse_cli/ clean
 	make -C examples/libfuse/ clean
+	make -C examples/regression_test/ clean
 
 distclean:
 	rm -f Makefile.bak *.o *.a *~ .depend $(LIB_NVFUSE)

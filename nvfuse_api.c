@@ -2432,6 +2432,11 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, u64
 								
 				curr_block += num_alloc_blks;
 				remain_block -= num_alloc_blks;
+				if (num_alloc_blks == 0)
+				{
+					printf(" No more free block in NVFUSE \n");
+					break;
+				}
 			}			
 #if 0
 			nvfuse_fallocate_verify(sb, ictx, start / CLUSTER_SIZE, max_block);
