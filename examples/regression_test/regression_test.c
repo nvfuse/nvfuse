@@ -41,8 +41,12 @@
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
+#define NUM_ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
+
 #define MB (1024*1024)
 #define GB (1024*1024*1024)
+
+//#define QUICK_TEST
 
 int rt_create_files(struct nvfuse_handle *nvh)
 {
@@ -60,6 +64,9 @@ int rt_create_files(struct nvfuse_handle *nvh)
 	}
 
 	max_inodes = stat.f_ffree; /* # of free inodes */
+#ifdef QUICK_TEST
+	max_inodes = 100;
+#endif
 
 	/* create null files */
 	printf(" Start: creating null files (%d).\n", max_inodes);
@@ -128,6 +135,9 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 	}
 
 	max_inodes = stat.f_ffree; /* # of free inodes */
+#ifdef QUICK_TEST
+	max_inodes = 100;
+#endif
 
 	/* create null directories */
 	printf(" Start: creating null directories (%d).\n", max_inodes);
@@ -199,6 +209,9 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	sprintf(str, "file_allocate_test");
 
 	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
+#ifdef QUICK_TEST
+	file_size = 100 * MB;
+#endif
 
 	fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
 	if (fid < 0)
@@ -209,7 +222,7 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	nvfuse_closefile(nvh, fid);
 
 	gettimeofday(&tv, NULL);
-	printf("\n Start: (Fallocate and Deallocate file %s size %luMB \n", str, (long)file_size/MB);
+	printf("\n Start: Fallocate and Deallocate (file %s size %luMB). \n", str, (long)file_size/MB);
 	/* pre-allocation of data blocks*/
 	nvfuse_fallocate(nvh, str, 0, file_size);
 
@@ -226,7 +239,7 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	printf(" requested size %dMB.\n", (long)file_size/MB);
 	printf(" allocated size %dMB.\n", (long)file_allocated_size/MB); 
 
-	printf(" nvfuse fallocate throughput %.3fMB/s (%0.3fs)\n", (double)file_allocated_size/MB/time_since_now(&tv), time_since_now(&tv));
+	printf(" nvfuse fallocate throughput %.3fMB/s (%0.3fs).\n", (double)file_allocated_size/MB/time_since_now(&tv), time_since_now(&tv));
 
 	gettimeofday(&tv, NULL);
 	printf(" Start: rmfile %s size %luMB \n", str, (long)file_allocated_size/MB);
@@ -238,20 +251,160 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	}
 	printf(" nvfuse rmfile throughput %.3fMB/s\n", (double)file_allocated_size/MB/time_since_now(&tv));
 
-	printf("\n Finish: (Fallocate and Deallocate).\n");
+	printf("\n Finish: Fallocate and Deallocate.\n");
+
+	return NVFUSE_SUCCESS;
+}
+
+int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
+{
+	struct statvfs statvfs_buf;
+	char str[FNAME_SIZE];
+	struct timeval tv;
+	s64 file_size;
+	s32 res;
+	s32 direct = 1;
+
+	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
+	{
+		printf(" statfs error \n");
+		return -1;
+	}
+
+	sprintf(str, "file_allocate_test");
+
+	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
+#ifdef QUICK_TEST
+	file_size = 100 * MB;
+#endif
+
+	gettimeofday(&tv, NULL);
+
+	/* write phase */
+	{
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct);
+		if (res < 0)
+		{
+			printf(" Error: aio write test \n");
+			return -1;
+		}
+		printf(" nvfuse aio write through %.3fMB/s\n", (double)file_size/MB/time_since_now(&tv));
+
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			return -1;
+		}
+	}
+
+	/* read phase */
+	{
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct);
+		if (res < 0)
+		{
+			printf(" Error: aio read test \n");
+			return -1;
+		}
+		printf(" nvfuse aio read through %.3fMB/s\n", (double)file_size/MB/time_since_now(&tv));
+
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			return -1;
+		}
+	}
 
 	return NVFUSE_SUCCESS;
 
 }
 
+int rt_create_4KB_files(struct nvfuse_handle *nvh)
+{
+	struct statvfs statvfs_buf;
+	char str[FNAME_SIZE];
+	s32 res;
+	s32 nr;
+	int i;
+
+	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
+	{
+		printf(" statfs error \n");
+		return -1;
+	}
+
+	nr = statvfs_buf.f_bfree / 2;
+#ifdef QUICK_TEST
+	nr = 100;
+#endif
+
+	printf(" # of files = %d \n", nr);
+
+	/* create files*/
+	for (i = 0; i < nr; i++)
+	{
+		sprintf(str, "file%d", i);
+		res = nvfuse_mkfile(nvh, str, "4096");			
+		if (res < 0)
+		{
+			printf(" mkfile error = %s\n", str);
+			return -1;
+		}
+	}		
+
+	/* lookup files */
+	for (i = 0; i < nr; i++)
+	{
+		struct stat st_buf;
+		int res;
+
+		sprintf(str, "file%d", i);
+		res = nvfuse_getattr(nvh, str, &st_buf);
+		if (res)
+		{
+			printf(" No such file %s\n", str);
+			return -1;
+		}
+	}
+
+	/* delete files */
+	for (i = 0; i < nr; i++)
+	{
+		sprintf(str, "file%d", i);
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" rmfile error = %s \n", str);
+			return -1;
+		}
+	}
+
+	return NVFUSE_SUCCESS;
+
+}
+struct regression_test_ctx
+{
+	s32 (*function)(struct nvfuse_handle *nvh);
+	s8 test_name[128];
+	s32 pass_criteria; /* compare return code */
+	s32 pass_criteria_ignore; /* no compare */
+} 
+rt_ctx[] = 
+{
+	{ rt_create_files, "Creating Max Number of Files.", 0, 0},
+	{ rt_create_dirs, "Creating Max Number of Directories.", 0, 0},
+	{ rt_create_max_sized_file, "Creating Maximum Sized Single File.", 0, 0},
+	{ rt_create_max_sized_file_aio, "Creating Maximum Sized Single File with AIO Read and Write.", 0, 0},
+	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0},
+};
+
 int main(int argc, char *argv[])
 {
 	struct nvfuse_handle *nvh;	
-	int ret;
-	int fd;
-	int count;
-	char *buf;
+	struct regression_test_ctx *cur_rt_ctx;
 	char *devname; 
+	int ret = 0;
 
 	devname = argv[1];
 	if (argc < 2) {
@@ -272,36 +425,27 @@ int main(int argc, char *argv[])
 
 	printf("\n");
 
-	/* Test 1. */
-	printf(" Regression Test 1: Creating Max Number of Files in NVFUSE.\n");
-	ret = rt_create_files(nvh);
-	if (ret < 0)
-	{
-		printf(" Failed Regression Test 1\n");
-		return -1;
-	}
-	printf(" Regression Test 1: passed successfully.\n\n");
+	cur_rt_ctx = rt_ctx;
 
-	/* Test 2. */
-	printf(" Regression Test 2: Creating Max Number of Directories in NVFUSE.\n");
-	ret = rt_create_dirs(nvh);
-	if (ret < 0)
+	/* Test Case Handler with Regression Test Context Array */
+	while (cur_rt_ctx < rt_ctx + NUM_ELEMENTS(rt_ctx))
 	{
-		printf(" Failed Regression Test 2\n");
-		return -1;
-	}
-	printf(" Regression Test 2: passed successfully.\n\n");
+		s32 index = cur_rt_ctx - rt_ctx + 1;
+		printf(" Regression Test %d: %s\n", index, cur_rt_ctx->test_name);
+		ret = cur_rt_ctx->function(nvh);
+		if (!cur_rt_ctx->pass_criteria && 
+			ret != cur_rt_ctx->pass_criteria)
+		{
+			printf(" Failed Regression Test %d.\n", index);
+			goto RET;
+		}
 
-	/* Test 3. */
-	printf(" Regression Test 3: Creating Max Sized Single File in NVFUSE.\n");
-	ret = rt_create_max_sized_file(nvh);
-	if (ret < 0)
-	{
-		printf(" Failed Regression Test 3\n");
-		return -1;
+		printf(" Regression Test %d: passed successfully.\n\n", index);
+		cur_rt_ctx++;
 	}
-	printf(" Regression Test 3: passed successfully.\n");
 
 RET:;
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
+
+	return ret;
 }
