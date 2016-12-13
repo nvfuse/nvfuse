@@ -446,7 +446,7 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 	u32 num_block, trun_num_block;
 	u32 deleted_bno;	
 	s32 res;
-	bkey_t key;
+	u64 key;
 
 	inode = ictx->ictx_inode;
 
@@ -465,7 +465,7 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 
 	for(offset = num_block-1; offset >= trun_num_block; offset--)
 	{
-		nvfuse_make_key(inode->i_ino, offset, &key, NVFUSE_BP_TYPE_DATA);
+		nvfuse_make_pbno_key(inode->i_ino, offset, &key, NVFUSE_BP_TYPE_DATA);
 		bc = (struct nvfuse_buffer_cache *)nvfuse_hash_lookup(sb->sb_bm, key);
 		if(bc)
 		{
@@ -532,9 +532,10 @@ s32 ext2fs_test_bit(u32 nr, const void * addr)
 	return (mask & *ADDR);
 }
 
-s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, u32 offset){
-	bkey_t key = 0;	
-	u32 dir_hash;
+s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, u32 offset)
+{
+	bkey_t *key;
+	u32 dir_hash[2];
 	u32 collision = ~0; 	
 	u32 cur_offset;
 	
@@ -548,9 +549,11 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	collision >>= NVFUSE_BP_COLLISION_BITS;
 	offset &= collision;
 
-	nvfuse_dir_hash(filename, &dir_hash);	
-	nvfuse_make_key(inode->i_ino, dir_hash, &key, NVFUSE_BP_TYPE_DIR);
-	if (B_INSERT(master, &key, &offset, &cur_offset, 0) < 0) {
+	key = B_KEY_ALLOC();
+
+	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);	
+	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	if (B_INSERT(master, key, &offset, &cur_offset, 0) < 0) {
 		u32 c = cur_offset >> (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);		
 		c++;
 
@@ -561,16 +564,19 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		cur_offset = 0;
 		cur_offset = c | cur_offset;
 		//collision
-		B_UPDATE(master, &key, &cur_offset);
+		B_UPDATE(master, key, &cur_offset);
 	}
 	bp_write_master(master);
 	bp_deinit_master(master);
+
+	B_KEY_FREE(key);
+
 	return 0;
 }
 
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset){
-	bkey_t key = 0;
-	u32 dir_hash;		
+	bkey_t *key;
+	u32 dir_hash[2];	
 	u32 collision = ~0; 	
 	u32 c;	
 	int res = 0;
@@ -587,10 +593,12 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		return 0;
 	}
 
+	key = B_KEY_ALLOC();
+
 	collision >>= NVFUSE_BP_COLLISION_BITS;
-	nvfuse_dir_hash(filename, &dir_hash);	
-	nvfuse_make_key(inode->i_ino, dir_hash, &key, NVFUSE_BP_TYPE_DIR);
-	if (bp_find_key(master, &key, offset) < 0) {
+	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
+	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	if (bp_find_key(master, key, offset) < 0) {
 		res = -1;
 		goto RES;
 	}
@@ -603,14 +611,16 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		*offset &= collision;
 RES:;
 
+	B_KEY_FREE(key);
+
 	bp_deinit_master(master);
 	return res;
 }
 
 
 s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset) {
-	bkey_t key = 0;
-	u32 dir_hash;
+	bkey_t *key;
+	u32 dir_hash[2];
 	u32 collision = ~0;
 	u32 c;
 	int res = 0;
@@ -627,10 +637,12 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 		return 0;
 	}
 
+	key = B_KEY_ALLOC();
+
 	collision >>= NVFUSE_BP_COLLISION_BITS;
-	nvfuse_dir_hash(filename, &dir_hash);
-	nvfuse_make_key(inode->i_ino, dir_hash, &key, NVFUSE_BP_TYPE_DIR);
-	if (bp_find_key(master, &key, offset) < 0) {
+	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
+	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	if (bp_find_key(master, key, offset) < 0) {
 		res = -1;
 		goto RES;
 	}
@@ -643,13 +655,15 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 		*offset &= collision;
 RES:;
 
+	B_KEY_FREE(key);
+
 	bp_deinit_master(master);
 	return res;
 }
 
 s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename){
-	u32 dir_hash;	
-	bkey_t key = 0;	
+	u32 dir_hash[2];
+	bkey_t *key;
 	bitem_t offset = 0;
 	u32 collision = ~0; 	
 	u32 c;
@@ -660,27 +674,33 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	master->m_sb = sb;
 	bp_read_master(master);
 
-	collision >>= NVFUSE_BP_COLLISION_BITS;
-	nvfuse_dir_hash(filename, &dir_hash);	
-	nvfuse_make_key(inode->i_ino, dir_hash, &key, NVFUSE_BP_TYPE_DIR);	
-	if(bp_find_key(master, &key, &offset) < 0){
-		printf(" del error = %x\n", dir_hash);
+	collision >>= NVFUSE_BP_COLLISION_BITS;	
+	
+	key = B_KEY_ALLOC();
+	
+	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
+	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+
+	if(bp_find_key(master, key, &offset) < 0){
+		printf(" find key %lu \n", *key);
 		return -1;
 	}
 		
 	c = offset;
 	c >>= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
 	if(c == 0)
-		B_REMOVE(master, &key);	
+		B_REMOVE(master, key);	
 	else{
 		c--;
 		c <<= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
 		offset &= collision;
 		offset = c | offset;
 		//collision
-		B_UPDATE(master, &key, &offset);
+		B_UPDATE(master, key, &offset);
 	}
 	
+	B_KEY_FREE(key);
+
 	bp_write_master(master);
 	bp_deinit_master(master);
 	return 0;
@@ -1926,8 +1946,7 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 
 u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t offset)
 {
-	struct nvfuse_inode *inode;
-	bkey_t key = 0;
+	struct nvfuse_inode *inode;	
 	bitem_t value = 0;
 	int ret;
 
@@ -2010,9 +2029,9 @@ s32 fat_filename(const s8 *path, s8 *dest)
 	return 0;
 }
 
-void nvfuse_dir_hash(s8 *filename, u32 *hash)
+void nvfuse_dir_hash(s8 *filename, u32 *hash1, u32 *hash2)
 {
-	ext2fs_dirhash(1, filename, strlen(filename), 0, hash, 0);
+	ext2fs_dirhash(1, filename, strlen(filename), 0, hash1, hash2);
 }
 
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager)

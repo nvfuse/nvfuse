@@ -41,7 +41,7 @@ char  *ntable;
 int	ntable_size;
 //int ntable_ptr = 0;
 
-bkey_t *workload;
+u32 *workload;
 
 unsigned int del_ptr = 0;
 unsigned int cret_ptr = 0;
@@ -243,7 +243,7 @@ int check_configuration()
 	return 0;
 }
 
-bkey_t find_free_rec() 
+u64 find_free_rec() 
 {	
 	unsigned long rand_num;
 
@@ -257,7 +257,7 @@ bkey_t find_free_rec()
 	}
 }
 
-bkey_t find_used_rec() 
+u64 find_used_rec() 
 {
 	unsigned long rand_num;
 
@@ -281,17 +281,17 @@ void generate_workload()
 {
 	int i;
 	
-	printf(" workload table size = %fMB\n", (float)(num_index * sizeof(bkey_t)<<1)/(float)(1024*1024));
-	workload = malloc(num_index * sizeof(bkey_t) << 1);
+	printf(" workload table size = %fMB\n", (float)(num_index * BP_KEY_SIZE << 1)/(float)(1024*1024));
+	workload = malloc(num_index * BP_KEY_SIZE << 1);
 	if(workload == NULL)
 	{
 		printf(" malloc error");
 		return;
 	}
-	memset(workload, 0x00, num_index * sizeof(bkey_t)<<1);
+	memset(workload, 0x00, num_index * BP_KEY_SIZE << 1);
 
-	for(i = 0;i < (num_index<<1);i++)
-	{
+	for(i = 0; i < (num_index<<1); i++)
+	{		
 		if(rand_workload)
 			workload[i] = find_free_rec();
 		else
@@ -307,14 +307,14 @@ void free_workload()
 	free(workload);
 }
 
-bkey_t create_workload()
+u32 create_workload()
 {
 	if(cret_ptr == (num_index << 1))
 		cret_ptr = 0;
 	return workload[cret_ptr++];
 }
 
-bkey_t delete_workload()
+u32 delete_workload()
 {
 	if(del_ptr == (num_index << 1))
 		del_ptr = 0;
@@ -322,7 +322,7 @@ bkey_t delete_workload()
 }
 
 
-bkey_t read_workload()
+u32 read_workload()
 {
 	
 	if(read_ptr == cret_ptr)
@@ -331,7 +331,7 @@ bkey_t read_workload()
 	return workload[read_ptr++];
 }
 
-bkey_t update_workload()
+u32 update_workload()
 {
 	if(update_ptr == cret_ptr)
 		update_ptr = 0;
@@ -372,7 +372,7 @@ int make_index(master_node_t *master){
 	
 	//make index 
 	for(i = 0;i < num_index;i++){
-		int rand_num;
+		u32 rand_num;
 			
 		rand_num = create_workload();		
 		B_KEY_MAKE(key, rand_num);
@@ -400,7 +400,7 @@ static void transactions(master_node_t *master)
 	bkey_t *key;
 	int ret;
 	key_pair_t *pair;
-	bkey_t rand_num;
+	u32 rand_num;
 
 	key = B_KEY_ALLOC();
 	B_KEY_INIT(key);
@@ -409,7 +409,8 @@ static void transactions(master_node_t *master)
 		if (bias_read!=-1) 
 		{
 			if (RND(10)<bias_read){ /* read file */				
-				B_KEY_MAKE(key, read_workload());				
+				rand_num = read_workload();
+				B_KEY_MAKE(key, rand_num);
 				if(B_SEARCH(master, key, NULL) < 0){
 					printf(" cannot find [%lu]\n\n", (long)*key);
 					continue;
@@ -418,7 +419,8 @@ static void transactions(master_node_t *master)
 				B_RELEASE_BH(master, master->m_cur->i_bh);
 				B_RELEASE(master, master->m_cur);
 			}else{ /* update*/
-				B_KEY_MAKE(key, update_workload());				
+				rand_num = read_workload();
+				B_KEY_MAKE(key, rand_num);
 				ret = B_UPDATE(master, key, (bitem_t *)key);
 				if(ret == -1){
 					printf(" cannot update [%lu]\n\n", (long)*key);
@@ -478,7 +480,7 @@ void delete_index(master_node_t *master)
 	B_KEY_INIT(key);
 
 	for(i = 0;i < total;i++){
-		int rand_num = i;
+		u32 rand_num;
 				
 		rand_num = delete_workload();
 		

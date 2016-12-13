@@ -57,10 +57,10 @@ typedef int offset_t;
 //				INDEX NODE DEFINITIONS
 /***************************************************************/
 
-
 #ifdef KEY_IS_INTEGER
 #	define INDEX_KEY_LEN	1
 #else
+#define USE_HALF_MD5
 #ifdef USE_SHA1
 #	define INDEX_KEY_LEN	20	//byte
 #endif 
@@ -70,21 +70,26 @@ typedef int offset_t;
 #ifdef USE_MD5
 #	define INDEX_KEY_LEN	16	//byte
 #endif 
+#ifdef USE_HALF_MD5
+#	define INDEX_KEY_LEN	8	//byte
+#endif 
 
 #endif 
 
+#define INDEX_FLAG		0
 
-#define INDEX_ITEM_LEN 1 
-//#define INDEX_KEY_NUM	(INDEX_WAY-1)
-#define INDEX_FLAG		0 
+#ifdef KEY_IS_INTEGER
 #define BP_KEY_SIZE sizeof(bkey_t)
+#else
+#define BP_KEY_SIZE INDEX_KEY_LEN
+#endif
 #define BP_ITEM_SIZE sizeof(bitem_t)
 #define BP_PAIR_SIZE (BP_KEY_SIZE + BP_ITEM_SIZE)
 
 typedef struct 
 {
 	bkey_t *i_key;
-	bitem_t *i_item; 
+	bitem_t *i_item;
 }key_pair_t;
 
 #define INDEX_NODE_FREE 0
@@ -117,7 +122,7 @@ typedef struct index_node{
 /***************************************************************/
 //				DATA NODE DEFINITIONS (LEAF NODE)
 /***************************************************************/
-#define	DATA_KEY_LEN	INDEX_KEY_LEN
+//#define	DATA_KEY_LEN	INDEX_KEY_LEN
 #define DATA_FLAG		1	 
 
 
@@ -218,7 +223,6 @@ void bp_free(void *ptr);
 #ifdef KEY_IS_INTEGER
 	#define B_KEY_MAKE(b, n) (*b = n)
 
-
 	#define B_PAIR_COPY_N(a, b,i,j,n) \
 			memcpy((char *)B_KEY_PAIR(a, i),(char *) B_KEY_PAIR(b, j), (n) * sizeof(bkey_t));\
 			memcpy((char *)B_ITEM_PAIR(a, i),(char *) B_ITEM_PAIR(b, j), (n) * sizeof(bitem_t));
@@ -231,7 +235,6 @@ void bp_free(void *ptr);
 		memset((char *)B_KEY_PAIR(a,i), 0x00, sizeof(bkey_t)*(n));\
 		memset((char *)B_ITEM_PAIR(a,i), 0x00, sizeof(bitem_t)*(n));
 
-
 	#define B_PAIR_INIT(a,i)\
 			B_KEY_INIT(B_KEY_PAIR(a,i));\
 			B_ITEM_INIT(B_ITEM_PAIR(a,i));
@@ -240,26 +243,39 @@ void bp_free(void *ptr);
 	//#define B_KEY_CMP(x, y)	(bkey_t)(*x - *y)
 	#define B_KEY_CMP(x, y) key_compare(x, y, 0, 0, 0)
 	#define B_KEY_INIT(x)	(*x =  0x00)
-	#define B_KEY_ALLOC() (bkey_t *)bp_malloc(sizeof(bkey_t) * INDEX_KEY_LEN);
+	#define B_KEY_ALLOC() (bkey_t *)bp_malloc(sizeof(bkey_t));
 	#define B_KEY_FREE(p) bp_free((void *)(p))
 
 
 	#define B_ITEM_COPY(x,y)	(*x = *y)
 	#define B_ITEM_CMP(x,y)	(int)(*x - *y)
 	#define B_ITEM_INIT(x)	(*x =  0x00)
-	#define B_ITEM_ALLOC() (bitem_t *)bp_malloc(sizeof(bitem_t) * INDEX_KEY_LEN);
+	#define B_ITEM_ALLOC() (bitem_t *)bp_malloc(sizeof(bitem_t));
 	#define B_ITEM_FREE(p) bp_free(p)
 	
-
-#define B_KEY_ISNULL(p) (*p == 0)
+	#define B_KEY_ISNULL(p) (*p == 0)
 	#define B_ITEM_ISNULL(p) (*p == 0)
-	
-#else
-	//#define B_KEY_MAKE(b, n) sprintf(b,"%031d",n);
-	
-	#define B_KEY_MAKE(b, n) B_KEY_COPY(b, n)
 
-	#define B_PAIR_COPY(a,b,i,j) \
+	#define B_KEY_GET(p, i) (&p->i_pair->i_key[i])
+	#define B_ITEM_GET(p, i) (&p->i_pair->i_item[i])
+
+	#define B_KEY_PAIR(p, i) (&p->i_key[i])
+	#define B_ITEM_PAIR(p, i) (&p->i_item[i])
+#else
+
+#if (BP_KEY_SIZE == 8)
+	#define B_KEY_MAKE(b, n) memcpy(b, &n, sizeof(n))
+#endif
+	
+	#define B_PAIR_COPY_N(a, b, i, j, n) \
+			memcpy((char *)B_KEY_PAIR(a, i),(char *) B_KEY_PAIR(b, j), (n) * BP_KEY_SIZE);\
+			memcpy((char *)B_ITEM_PAIR(a, i),(char *) B_ITEM_PAIR(b, j), (n) * BP_ITEM_SIZE);
+
+	#define B_PAIR_INIT_N(a, i, n)\
+		memset((char *)B_KEY_PAIR(a,i), 0x00, (n) * BP_KEY_SIZE);\
+		memset((char *)B_ITEM_PAIR(a,i), 0x00, (n) * BP_ITEM_SIZE);
+
+	#define B_PAIR_COPY(a,b, i, j) \
 		B_KEY_COPY(B_KEY_PAIR(a, i), B_KEY_PAIR(b, j)); \
 		B_ITEM_COPY(B_ITEM_PAIR(a, i), B_ITEM_PAIR(b, j));
 
@@ -267,36 +283,31 @@ void bp_free(void *ptr);
 		B_KEY_INIT(B_KEY_PAIR(a,i));\
 		B_ITEM_INIT(B_ITEM_PAIR(a,i));
 
-	//#define B_KEY_COPY(x, y)	strcpy(x, y)
-	#define B_KEY_COPY(x, y)	memcpy(x, y, INDEX_KEY_LEN)
-	#define B_KEY_INIT(x)	memset(x, 0x00, INDEX_KEY_LEN)
-	#define B_KEY_CMP(x,y)	memcmp(x,y, INDEX_KEY_LEN)
-	#define B_KEY_ALLOC() (bkey_t *)malloc(sizeof(bkey_t) * INDEX_KEY_LEN);
-	#define B_KEY_FREE(p) free(p)
-	//#define B_KEY_ISNULL(p) (strlen(p) == 0)
-	#define B_KEY_ISNULL(p) bp_key_is_null(p)
+	#define B_KEY_COPY(x, y)	memcpy(x, y, BP_KEY_SIZE)
+	#define B_KEY_INIT(x)		memset(x, 0x00, BP_KEY_SIZE)
+	#define B_KEY_CMP(x, y)		memcmp(x, y, BP_KEY_SIZE)
+	#define B_KEY_ALLOC()		malloc(BP_KEY_SIZE);
+	#define B_KEY_FREE(p)		free(p)	
+	#define B_KEY_ISNULL(p)		bp_key_is_null(p)
 
-	#define B_ITEM_COPY(x,y)	(*x = *y)
-	#define B_ITEM_INIT(x)	(*x =  0x00)
-	#define B_ITEM_CMP(x,y)	(int)(*x - *y)	
-	#define B_ITEM_ALLOC() (bitem_t *)malloc(sizeof(bitem_t));
-	#define B_ITEM_FREE(p) free(p)
+	#define B_ITEM_COPY(x, y)	(*x = *y)
+	#define B_ITEM_INIT(x)		(*x =  0x00)
+	#define B_ITEM_CMP(x, y)	(int)(*x - *y)	
+	#define B_ITEM_ALLOC()		(bitem_t *)malloc(sizeof(bitem_t));
+	#define B_ITEM_FREE(p)		free(p)
 
+	#define B_KEY_GET(p, i) (p->i_pair->i_key + BP_KEY_SIZE * i)
+	#define B_ITEM_GET(p, i) (p->i_pair->i_item + i)
 
+	#define B_KEY_PAIR(p, i) (p->i_key + BP_KEY_SIZE * i)
+	#define B_ITEM_PAIR(p, i) (p->i_item + i)
 #endif 
-
-#define B_KEY_GET(p,i) (&p->i_pair->i_key[i])
-#define B_ITEM_GET(p,i) (&p->i_pair->i_item[i])
-
-#define B_KEY_PAIR(p, i) (&p->i_key[i])
-#define B_ITEM_PAIR(p, i) (&p->i_item[i])
 
 #define B_PARENT(p) ((index_node_t *)p)->i_parent
 #define B_NEXT(p) p->i_next_node
 #define B_PREV(p) p->i_prev_node
 #define B_ISLEAF(p) (p->i_flag == DATA_FLAG)
 #define B_ISROOT(p) (p->i_root)
-
 
 int bp_remove_key(master_node_t *master, bkey_t *key);
 int search_data_node(master_node_t *master,bkey_t *str,index_node_t **d);
@@ -310,7 +321,7 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 int bp_release_node(master_node_t *master, index_node_t *p);
 int bp_release_bh(struct nvfuse_buffer_head *bh);
 int bp_bin_search(bkey_t *key, key_pair_t *pair, int max,
-	int(*compare)(void *, void *, void * start, int num, int mid));
+int(*compare)(void *, void *, void * start, int num, int mid));
 
 struct nvfuse_buffer_head *bp_read_block(master_node_t *master, int offset, int rwlock);
 int bp_read_node(master_node_t *master, index_node_t *node, int offset, int sync, int rwlock);
@@ -337,9 +348,9 @@ int bp_split_data_node(master_node_t *master,index_node_t *ip, index_node_t *dp,
 
 int bp_read_master(master_node_t *master);
 int bp_find_key(master_node_t *master,bkey_t *key, bitem_t *value);
-u32 nvfuse_get_ino(bkey_t key);
+//u32 nvfuse_get_ino(bkey_t key);
 
-void nvfuse_make_pair(key_pair_t *pair,inode_t ino, lbno_t lbno, u32 item,s32 *count,u32 type);
+//void nvfuse_make_pair(key_pair_t *pair,inode_t ino, lbno_t lbno, u32 item,s32 *count,u32 type);
 void bp_print_node(index_node_t *node);
 void bubble_sort(key_pair_t *pair, int num, int(*compare)(void *src1, void *src2));
 int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master);

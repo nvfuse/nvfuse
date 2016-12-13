@@ -2022,7 +2022,7 @@ RET:
 	nvfuse_release_super(sb);
 	return res;
 }
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+
 s32 nvfuse_statvfs(struct nvfuse_handle *nvh, const char *path, struct statvfs *buf)
 {
     struct nvfuse_superblock *sb;
@@ -2047,7 +2047,7 @@ s32 nvfuse_statvfs(struct nvfuse_handle *nvh, const char *path, struct statvfs *
 
     return 0;
 }
-
+#if NVFUSE_OS == NVFUSE_OS_LINUX
 s32 nvfuse_chmod_path(struct nvfuse_handle *nvh, const char *path, mode_t mode)
 {
 	struct nvfuse_dir_entry dir_entry;

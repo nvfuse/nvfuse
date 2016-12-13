@@ -168,7 +168,7 @@ int compare_str(void *src1, void *src2)
 	return B_KEY_CMP((bkey_t *)src1, (bkey_t *)src2);
 }
 
-static int compmi(void *k1,void *k2,void * start, size_t num, int mid) {
+static int compmi(void *k1, void *k2, void * start, size_t num, int mid) {
 	bkey_t  *key1 = k1;
 	key_pair_t  *key2 = (key_pair_t  *) k2;
 
@@ -182,8 +182,8 @@ static int comp_item(void *k1,void *k2) {
 	return B_ITEM_CMP(key1, key2->i_item);
 }
 
-int bp_bin_search(bkey_t *key,key_pair_t *pair,int max,
-					int (*compare)(void *,void *,void * start, int num, int mid))
+int bp_bin_search(bkey_t *key, key_pair_t *pair, int max,
+					int (*compare)(void *, void *, void * start, int num, int mid))
 {
 	int min = 0, mid = 0;	
 
@@ -203,7 +203,7 @@ int bp_bin_search(bkey_t *key,key_pair_t *pair,int max,
 	return -1;
 }
 
-index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp,bkey_t *key,bitem_t *value) {
+index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *key,bitem_t *value) {
 	index_node_t *parent_ip; 
 	index_node_t *dp_left, *dp_right;
 	index_node_t *node = NULL;
@@ -250,9 +250,9 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp,bkey_t *k
 		
 	bp_init_pair(parent_ip->i_pair, master->m_fanout);
 
-	B_ITEM_COPY(B_ITEM_GET(parent_ip,0), &dp_left->i_offset);
-	B_KEY_COPY(B_KEY_GET(parent_ip,0), B_KEY_GET(dp_left,dp_left->i_num -1));
-	B_ITEM_COPY(B_ITEM_GET(parent_ip,1), &dp_right->i_offset);
+	B_ITEM_COPY(B_ITEM_GET(parent_ip, 0), &dp_left->i_offset);
+	B_KEY_COPY(B_KEY_GET(parent_ip, 0), B_KEY_GET(dp_left,dp_left->i_num -1));
+	B_ITEM_COPY(B_ITEM_GET(parent_ip, 1), &dp_right->i_offset);
 	B_KEY_COPY(B_KEY_GET(parent_ip,1), B_KEY_GET(dp_right,dp_right->i_num -1));
 	
 	/* insert list */
@@ -307,7 +307,7 @@ int bp_split_data(master_node_t *master, index_node_t *p_ip,key_pair_t *child, i
 	//distribute half 
 	for (i = 0;i < count/2;i++) {		
 		B_KEY_COPY(B_KEY_GET(p_ip,i), &child->i_key[child_count]);
-		B_ITEM_COPY(B_ITEM_GET(p_ip,i),&child->i_item[child_count]);
+		B_ITEM_COPY(B_ITEM_GET(p_ip, i), &child->i_item[child_count]);
 		p_ip->i_num++;
 		child_count++;
 	}
@@ -317,8 +317,8 @@ int bp_split_data(master_node_t *master, index_node_t *p_ip,key_pair_t *child, i
 
 	//distribute half 
 	for (i = 0;i < count/2;i++) {
-		B_KEY_COPY(B_KEY_GET(sibling_ip,i),&child->i_key[child_count]);
-		B_ITEM_COPY(B_ITEM_GET(sibling_ip,i),&child->i_item[child_count]);
+		B_KEY_COPY(B_KEY_GET(sibling_ip,i), &child->i_key[child_count]);
+		B_ITEM_COPY(B_ITEM_GET(sibling_ip,i), &child->i_item[child_count]);
 		sibling_ip->i_num++;
 		child_count++;
 	}
@@ -376,7 +376,8 @@ int bp_split_data_node(master_node_t *master,
 				break;	
 		}
 	}
-	
+
+#if 0
 	for (i = 0; i < dp->i_num - 1; i++) {
 		u64 key1 = *B_KEY_GET(dp, i);
 		u64 key2 = *B_KEY_GET(dp, (i + 1));
@@ -390,8 +391,9 @@ int bp_split_data_node(master_node_t *master,
 
 	if (seq_detection)
 	{
-		printf(" Need to optimize that data node contains consecutive keys \n");
+	//	printf(" Need to optimize that data node contains consecutive keys \n");
 	}
+#endif
 
 	B_PAIR_COPY_N(pair_array, dp->i_pair, 0, 0, dp->i_num);
 	bp_merge_key2(pair_array, key, value, dp->i_num+1);
@@ -494,7 +496,7 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 				printf(" malloc error \n");
 				return -1;
 			}
-			memset(k, 0x00, INDEX_KEY_LEN);
+			memset(k, 0x00, BP_KEY_SIZE);
 
 			ip->i_num++;
 			count = ip->i_num+1;
@@ -601,7 +603,7 @@ void bp_insert_value_tree(index_node_t *ip,
 		printf(" Warning: key is mismatched\n");	
 }
 
-int bp_find_key(master_node_t *master,bkey_t *key, bitem_t *value) {
+int bp_find_key(master_node_t *master, bkey_t *key, bitem_t *value) {
 	int index;
 	int res;
 	bitem_t temp;
@@ -653,6 +655,7 @@ RES:;
 	return 0;
 
 }
+
 int bp_key_is_null(bkey_t *buf)
 {
 	int i;
@@ -1109,6 +1112,9 @@ index_node_t* traverse_empty(master_node_t *master, index_node_t *ip, bkey_t *ke
 		B_PUSH(master, ip->i_offset);
 		ip = bp_next_node(master, ip, key);		
 
+		if (ip->i_offset == 0)
+			printf(" debug");
+
 		assert(ip->i_offset);		
 	}
 
@@ -1117,8 +1123,7 @@ index_node_t* traverse_empty(master_node_t *master, index_node_t *ip, bkey_t *ke
 
 int rsearch_data_node(master_node_t *master, bkey_t *s_key, bkey_t *e_key)
 {
-	index_node_t *ip;
-	bkey_t key = 0;
+	index_node_t *ip;	
 	bitem_t item = 0;
 	int index;
 	
@@ -1291,6 +1296,11 @@ void bp_copy_raw_to_node(index_node_t *node, char *raw)
 	if (node->i_flag != 0 && node->i_flag != 1)
 	{
 		bp_print_node(node);
+		assert(0);
+	}
+
+	if (node->i_offset == 0)
+	{
 		assert(0);
 	}
 }
@@ -1566,6 +1576,7 @@ offset_t stack_pop(master_node_t *master)
 	return temp;
 }
 
+#ifdef KEY_IS_INTEGER
 __inline int key_compare(void *k1, void *k2, void *start, int num, int mid)
 {
 	if (*(bkey_t *)k1 > *(bkey_t *)k2)
@@ -1575,7 +1586,19 @@ __inline int key_compare(void *k1, void *k2, void *start, int num, int mid)
 	else
 		return -1;
 }
+#else
+__inline int key_compare(void *k1, void *k2, void *start, int num, int mid)
+{
+	int ret = B_KEY_CMP(k1, k2);
 
+	if (ret > 0)
+		return 1;
+	else if (ret == 0)
+		return 0;
+	else
+		return -1;
+}
+#endif
 int bp_merge_key2(key_pair_t *pair, bkey_t *key, bitem_t *value, int max) {
 	int i = 0, j = 0;
 
@@ -1604,12 +1627,14 @@ int bp_merge_key2(key_pair_t *pair, bkey_t *key, bitem_t *value, int max) {
 	return 0;
 }
 
+#if 0
 void nvfuse_make_pair(key_pair_t *pair, inode_t ino, lbno_t lbno, u32 item, s32 *count, u32 type) {
 	bkey_t key = 0;
 	(*count)++;
 	bp_merge_key2(pair, nvfuse_make_key(ino, lbno, &key, type), &item, *count);
 }
-
+#endif
+#if 0
 bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno, bkey_t *key, u32 type)
 {
 	type <<= (NVFUSE_BP_HIGH_BITS - NVFUSE_BP_TYPE_BITS);
@@ -1617,7 +1642,17 @@ bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno, bkey_t *key, u32 type)
 	*key = ((u64)(type | ino) << NVFUSE_BP_HIGH_BITS) + (u64)lbno;
 	return key;
 }
+#endif
 
+u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type)
+{
+	type <<= (NVFUSE_BP_HIGH_BITS - NVFUSE_BP_TYPE_BITS);
+
+	*key = ((u64)(type | ino) << NVFUSE_BP_HIGH_BITS) + (u64)lbno;
+	return key;
+}
+
+#if 0
 u32 nvfuse_get_ino(bkey_t key) 
 {
 	u32 mask = ~0;
@@ -1629,6 +1664,7 @@ u32 nvfuse_get_ino(bkey_t key)
 
 	return (u32)key;
 }
+#endif
 
 key_pair_t *bp_alloc_pair(int num) 
 {
@@ -1640,19 +1676,19 @@ key_pair_t *bp_alloc_pair(int num)
 		return NULL;
 	}
 
-	pair->i_key = (bkey_t *)bp_malloc(sizeof(bkey_t) * num);
+	pair->i_key = (bkey_t *)bp_malloc(BP_KEY_SIZE * num);
 	if (pair->i_key == NULL) {
 		printf(" malloc error \n");
 		return NULL;
 	}
-	memset(pair->i_key, 0x00, sizeof(bkey_t) * num);
+	memset(pair->i_key, 0x00, BP_KEY_SIZE * num);
 
-	pair->i_item = (bitem_t *)bp_malloc(sizeof(bitem_t) * num);
+	pair->i_item = (bitem_t *)bp_malloc(BP_ITEM_SIZE * num);
 	if (pair->i_item == NULL) {
 		printf(" malloc error \n");
 		return NULL;
 	}
-	memset(pair->i_item, 0x00, sizeof(bitem_t) * num);
+	memset(pair->i_item, 0x00, BP_ITEM_SIZE * num);
 
 	return pair;
 }

@@ -225,7 +225,7 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nv
 			return NULL;		
 	}
 
-	nvfuse_make_key(ino, lblock, &key, NVFUSE_BP_TYPE_DATA);
+	nvfuse_make_pbno_key(ino, lblock, &key, NVFUSE_BP_TYPE_DATA);
 	bc = nvfuse_find_bc(sb, key, lblock);
 	if (bc == NULL)
 	{
@@ -284,7 +284,7 @@ struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb, struc
 	struct nvfuse_buffer_head *bh;
 	u64 key = 0;
 	
-	nvfuse_make_key(ino, lblock, &key, NVFUSE_BP_TYPE_DATA);
+	nvfuse_make_pbno_key(ino, lblock, &key, NVFUSE_BP_TYPE_DATA);
 	bc = nvfuse_find_bc(sb, key, lblock);
 	if (bc == NULL)
 	{
@@ -684,7 +684,7 @@ struct nvfuse_buffer_head *nvfuse_find_bh_in_ictx(struct nvfuse_superblock *sb,
 		return NULL;
 	
 #ifdef USE_RBNODE
-	nvfuse_make_key(ino, lbno, &key, NVFUSE_BP_TYPE_DATA);
+	nvfuse_make_pbno_key(ino, lbno, &key, NVFUSE_BP_TYPE_DATA);
 	bh = nvfuse_rbnode_search(&ictx->ictx_data_bh_rbroot, key);
 	if (bh)
 	{

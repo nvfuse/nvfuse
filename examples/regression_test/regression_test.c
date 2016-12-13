@@ -125,7 +125,6 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 	s8 buf[FNAME_SIZE];
 	s32 max_inodes;
 	s32 i;
-	s32 fd;
 	s32 res;
 
 	if (nvfuse_statvfs(nvh, NULL, &stat) < 0)
