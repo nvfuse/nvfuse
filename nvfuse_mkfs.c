@@ -557,7 +557,11 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 
 	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, io_manager);
 
-	printf(" BUFFER POOL NUM = %fMB\n",(float)(NVFUSE_BUFFER_SIZE * CLUSTER_SIZE)/(float)(1024*1024));	
+	printf(" buffer pool size = %fMB\n",(float)(NVFUSE_BUFFER_SIZE * CLUSTER_SIZE)/(float)(1024*1024));	
+	printf("\n NVFUSE capability\n");
+	printf(" max file size = %.3fTB\n", (double)MAX_FILE_SIZE / NVFUSE_TERA_BYTES);
+
+	printf(" max files per directory = %08x\n", MAX_FILES_PER_DIR);
 	printf("\n NVFUSE was formatted successfully. (%.3f sec)\n", time_since_now(&format_tv));
 	printf("-------------------------------------------------------------------\n");
 	fflush(stdout);

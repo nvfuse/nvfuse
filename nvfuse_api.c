@@ -147,8 +147,8 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 	struct nvfuse_inode *dir_inode = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	struct nvfuse_dir_entry *dir;
-	u32 read_bytes = 0;
-	u32 dir_size = 0;
+	s64 read_bytes = 0;
+	s64 dir_size = 0;
 	s32 start = 0;
 	u32 offset = 0;
 	s32 res = -1;
@@ -288,18 +288,18 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 	struct nvfuse_buffer_head *dir_bh;
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
-	u32 dir_size;
+	s64 dir_size;
 	struct dirent *return_dentry = NULL;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
-	dir_size = dir_offset * DIR_ENTRY_SIZE;
+	dir_size = (s64)dir_offset * DIR_ENTRY_SIZE;
 
 	if (dir_inode->i_size <= dir_size) {
 		goto RES;
 	}
 
-	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (dir_offset * DIR_ENTRY_SIZE) >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
+	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, ((s64)dir_offset * DIR_ENTRY_SIZE) >> CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
 	dir += (dir_offset % (CLUSTER_SIZE / DIR_ENTRY_SIZE));
@@ -350,6 +350,9 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		if (flags & O_RDWR || flags & O_CREAT) 
 		{
 			res = nvfuse_createfile(sb, par_ino, filename, NULL, mode, 0);
+			if (res < 0)
+				return res;
+
 			if (res == NVFUSE_SUCCESS) 
 			{
 				res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);				
@@ -694,6 +697,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 
 		inode->i_type = NVFUSE_TYPE_FILE;
 		inode->i_size = of->size;
+		assert(inode->i_size < MAX_FILE_SIZE);
 
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_inode(sb, ictx, DIRTY);
@@ -757,6 +761,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 			return NVFUSE_ERROR;
 		}
 		
+		assert(inode->i_size < MAX_FILE_SIZE);
 		inode->i_size += count;
 		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
@@ -923,6 +928,12 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 	search_lblock = (dir_inode->i_links_count - 1) / DIR_ENTRY_NUM;
 	search_entry = (dir_inode->i_links_count - 1) % DIR_ENTRY_NUM;
 
+	if (dir_inode->i_links_count == MAX_FILES_PER_DIR)
+	{
+		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
+		return -1;
+	}
+
 retry:
 
 	dir_num = (dir_inode->i_size / DIR_ENTRY_SIZE);
@@ -969,10 +980,18 @@ retry:
 
 	if (!flag) // allocate new direcct block 
 	{
+		s32 ret;
 		nvfuse_release_bh(sb, dir_bh, 0, 0);
-		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+		ret = nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+		if (ret)
+		{
+			printf(" data block allocation fails.");
+			return NVFUSE_ERROR;
+		}
+
 		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, INSERT_HEAD, DIRTY);
+		assert(dir_inode->i_size < MAX_FILE_SIZE);
 		dir_inode->i_size += CLUSTER_SIZE;
 		goto retry;
 	}
@@ -988,7 +1007,13 @@ find:
 		if (new_ictx == NULL)
 			return -1;
 		
-		ino = nvfuse_alloc_new_inode(sb, new_ictx);				
+		ino = nvfuse_alloc_new_inode(sb, new_ictx);
+		if (ino == 0)
+		{
+			printf(" It runs out of free inodes.");
+			return -1;
+		}
+
 		set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
 		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
 		nvfuse_insert_ictx(sb, new_ictx);
@@ -1090,10 +1115,10 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	
-	u32 read_bytes = 0;
-	u32 start = 0;
+	s64 read_bytes = 0;
+	s64 start = 0;
 	u32 offset = 0;
-	u64 dir_size = 0;
+	s64 dir_size = 0;
 	u32 found_entry;
 	
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
@@ -1107,7 +1132,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	}
 #endif
 
-	start = offset * DIR_ENTRY_SIZE;
+	start = (s64)offset * DIR_ENTRY_SIZE;
 	if ((start & (CLUSTER_SIZE - 1))) {
 		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, start / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
@@ -1214,8 +1239,9 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	struct nvfuse_buffer_head *dir_bh = NULL;	
 	s32 start = 0;
 	lbno_t lblock = 0;
-	u64 dir_size;
-	u32 read_bytes, offset = 0;
+	s64 dir_size;
+	s64 read_bytes;
+	u32 offset = 0;
 	u32 found_entry;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
@@ -1231,7 +1257,7 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 #endif
 
 	dir_size = dir_inode->i_size;
-	start = offset * DIR_ENTRY_SIZE;
+	start = (s64)offset * DIR_ENTRY_SIZE;
 	if ((start & (CLUSTER_SIZE - 1))) {
 		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, start / CLUSTER_SIZE, READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
@@ -1383,6 +1409,11 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 	search_lblock = (dir_inode->i_links_count - 1) / DIR_ENTRY_NUM;
 	search_entry = (dir_inode->i_links_count - 1) % DIR_ENTRY_NUM;
 	
+	if (dir_inode->i_links_count == MAX_FILES_PER_DIR)
+	{
+		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
+		return -1;
+	}
 	assert(dir_inode->i_ptr + 1 == dir_inode->i_links_count);
 
 retry:
@@ -1431,11 +1462,18 @@ retry:
 	}
 
 	if (!flag) {
+		s32 ret;
 		nvfuse_release_bh(sb, dir_bh, 0, CLEAN);
 		//new dentiry allocation		
-		nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+		ret = nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+		if (ret)
+		{
+			printf(" data block allocation fails.");
+			return NVFUSE_ERROR;
+		}
 		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, 0, dir_bh->bh_bc->bc_dirty);
+		assert(dir_inode->i_size < MAX_FILE_SIZE);
 		dir_inode->i_size += CLUSTER_SIZE;		
 		goto retry;
 	}
@@ -1454,6 +1492,11 @@ find:
 			return -1;
 		set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
 		ino = nvfuse_alloc_new_inode(sb, new_ictx);
+		if (ino == 0)
+		{
+			printf(" It runs out of free inodes.");
+			return -1;
+		}
 		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
 		nvfuse_insert_ictx(sb, new_ictx);
 	}
@@ -1654,6 +1697,9 @@ s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t
 	{
 		sb = nvfuse_read_super(nvh);
 		res = nvfuse_createfile(sb, dir_entry.d_ino, filename, 0, mode, dev);
+		if (res < 0)
+			return res;
+
 		nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 
 		nvfuse_release_super(sb);
@@ -1734,6 +1780,7 @@ s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size)
 
 	nvfuse_free_inode_size(sb, ictx, size);
 	
+	assert(size < MAX_FILE_SIZE);
 	inode->i_size = size;
 	nvfuse_release_inode(sb, ictx, DIRTY);
 	
@@ -2379,7 +2426,7 @@ RET:;
 }
 
 
-s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, u64 length)
+s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64 length)
 {
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
@@ -2444,7 +2491,8 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, u64
 
 			inode = ictx->ictx_inode;
 			inode->i_size = inode->i_size < length ? length : inode->i_size;
-			
+			assert(inode->i_size < MAX_FILE_SIZE);
+
 			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 		} 

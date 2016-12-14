@@ -472,5 +472,3 @@ s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str){
 
 	return NVFUSE_SUCCESS;
 }
-
-

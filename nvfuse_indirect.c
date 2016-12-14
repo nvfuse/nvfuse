@@ -97,7 +97,7 @@ static inline void add_chain(Indirect *p, struct nvfuse_buffer_head *bh, u32 *v)
 * get there at all.
 */
 
-int nvfuse_block_to_path(u32 block, u32 offsets[4], u32 *boundary) {
+int nvfuse_block_to_path(s32 block, u32 offsets[4], u32 *boundary) {
 	int ptrs = PTRS_PER_BLOCK;
 	int ptrs_bits = PTRS_PER_BLOCK_BITS;
 	const long direct_blocks = DIRECT_BLOCKS,
@@ -105,32 +105,41 @@ int nvfuse_block_to_path(u32 block, u32 offsets[4], u32 *boundary) {
 		double_blocks = (1 << (ptrs_bits * 2));
 	int n = 0;
 	int final = 0;
+	int org_block = block;
 
-	if (block < DIRECT_BLOCKS) {
+	if (block < 0)
+	{
+		printf(" Warning: block < 0(%d)\n", org_block);
+	}
+	else if (block < DIRECT_BLOCKS) 
+	{
 		offsets[n++] = block;
 		final = direct_blocks;
 	}
-	else if ((block -= DIRECT_BLOCKS) < PTRS_PER_BLOCK) {
+	else if ((block -= DIRECT_BLOCKS) < PTRS_PER_BLOCK) 
+	{
 		offsets[n++] = INDIRECT_BLOCKS;
 		offsets[n++] = block;
 		final = ptrs;
 	}
-	else if ((block -= PTRS_PER_BLOCK) < PTRS_PER_BLOCK * PTRS_PER_BLOCK) {
+	else if ((block -= PTRS_PER_BLOCK) < PTRS_PER_BLOCK * PTRS_PER_BLOCK) 
+	{
 		offsets[n++] = DINDIRECT_BLOCKS;
 		offsets[n++] = block >> ptrs_bits;
 		offsets[n++] = block & (ptrs - 1);
 		final = ptrs;
 	}
-	else if (((block -= double_blocks) >> (ptrs_bits * 2)) < ptrs) {
+	else if (((block -= double_blocks) >> (ptrs_bits * 2)) < ptrs) 
+	{
 		offsets[n++] = TINDIRECT_BLOCKS;
 		offsets[n++] = block >> (ptrs_bits * 2);
 		offsets[n++] = (block >> ptrs_bits) & (ptrs - 1);
 		offsets[n++] = block & (ptrs - 1);
 		final = ptrs;
 	}
-	else {
-		printf(" block is too big!\n");
-		assert(0);
+	else 
+	{
+		printf(" Warning: block is too big (%d)!\n", org_block);		
 	}
 
 	if (boundary)
@@ -237,6 +246,10 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		next_id = (next_id + 1) % sb->sb_segment_num;
 	}
 	
+	if (!cnt)
+	{
+		printf(" Warning: it runs out of free blocks.\n");
+	}
 	return cnt;
 }
 
@@ -253,6 +266,8 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 		new_blocks = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
 		if (new_blocks != total_blocks) {
 			printf(" Warning: it runs out of free blocks.");
+			if (error)
+				*error = -1;
 			return -1;
 		}
 		cnt += new_blocks;
@@ -264,6 +279,8 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 		new_blocks = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
 		if (new_blocks != total_blocks) {
 			printf(" Warning: it runs out of free blocks.");
+			if (error)
+				*error = -1;
 			return -1;			
 		}	
 		
@@ -490,7 +507,7 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 * return = 0, if plain lookup failed.
 * return < 0, error case.
 */
-s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 lblock, u32 maxblocks, u32 *num_alloc_blocks, u32 *pblock, u32 create)
+s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 lblock, u32 maxblocks, u32 *num_alloc_blocks, u32 *pblock, u32 create)
 {
 	u32 offsets[INDIRECT_BLOCKS_LEVEL];
 	Indirect chain[INDIRECT_BLOCKS_LEVEL];
@@ -510,6 +527,8 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 		*num_alloc_blocks = 0;
 
 	depth = nvfuse_block_to_path(lblock, offsets, &blocks_to_boundary);
+	if (depth == 0)
+		return -1;
 	partial = nvfuse_get_branch(sb, ictx, ictx->ictx_inode, depth, offsets, chain, &err);
 	if (!partial) {
 		first_block = chain[depth - 1].key;
@@ -556,13 +575,8 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 		direct_map = malloc(sizeof(u32) * count);
 		assert(direct_map != NULL);
 		memset(direct_map, 0x00, sizeof(u32) * count);
-		
-		//if (indirect_blks == 2)
-		//{
-		//	printf("debug");
-		//}
+				
 		err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, direct_map, offsets + (partial - chain), partial);
-
 		if (err) {
 			goto cleanup;
 		}
@@ -586,6 +600,9 @@ cleanup:
 		nvfuse_release_bh(sb, partial->bh, 0, CLEAN);
 		partial--;
 	}
+	
+	if (err)
+		return err;
 	
 	return 0;
 

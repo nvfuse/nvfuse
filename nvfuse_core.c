@@ -356,7 +356,6 @@ u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id)
 
 inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
 {
-
 	struct nvfuse_buffer_head *bh;	
 	struct nvfuse_inode *ip;
 	
@@ -438,7 +437,7 @@ void nvfuse_free_blocks(struct nvfuse_superblock *sb, u32 block_to_delete, u32 c
 	}
 }
 
-void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u64 size)
+void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size)
 {
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_cache *bc;
@@ -682,7 +681,7 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
 
 	if(bp_find_key(master, key, &offset) < 0){
-		printf(" find key %lu \n", *key);
+		printf(" find key %lu \n", (unsigned long)*key);
 		return -1;
 	}
 		
@@ -1241,10 +1240,16 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 u32 nvfuse_create_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode *inode)
 {
 	master_node_t *master;
+	int ret;
 
 	/* make b+tree master and root nodes */
 	master = bp_init_master();
-	bp_alloc_master(sb, master);
+	ret = bp_alloc_master(sb, master);
+	if (ret < 0)
+	{
+		return -1;
+	}
+
 	bp_init_root(master);
 	bp_write_master(master);
 
@@ -1263,8 +1268,8 @@ s32 nvfuse_dir(struct nvfuse_handle *nvh)
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	struct nvfuse_dir_entry *dir;	
 	struct nvfuse_superblock *sb;
-	s32 read_bytes;
-	s32 dir_size;	
+	s64 read_bytes;
+	s64 dir_size;	
 
 	sb = nvfuse_read_super(nvh);
 
@@ -1282,7 +1287,7 @@ s32 nvfuse_dir(struct nvfuse_handle *nvh)
 				nvfuse_release_bh(sb, dir_bh, 0, 0);
 				dir_bh = NULL;
 			}
-			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, read_bytes >>CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
+			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, read_bytes>>CLUSTER_SIZE_BITS, READ, NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
 
@@ -1334,11 +1339,11 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_buffer_head *dir_bh;
 	
-	u32 read_bytes = 0;
+	s64 read_bytes = 0;
 	lbno_t lblock = 0;
 	u32 start = 0;
 	u32 offset = 0;
-	u64 dir_size = 0;
+	s64 dir_size = 0;
 	u32 found_entry;
 	
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
@@ -1399,6 +1404,7 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 
 	nvfuse_free_inode_size(sb, ictx, trunc_size);
 	inode->i_size = trunc_size;
+	assert(inode->i_size < MAX_FILE_SIZE);
 	nvfuse_release_inode(sb, ictx, DIRTY);
 	
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, CLEAN);
@@ -1410,7 +1416,7 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	return NVFUSE_SUCCESS;
 }
 
-s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, u64 trunc_size){	
+s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_size){	
 	struct nvfuse_inode_ctx *ictx;	
 	
 	ictx = nvfuse_read_inode(sb, NULL, ino);	
@@ -1428,10 +1434,10 @@ s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino, s8 *filename, mode_
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	lbno_t lblock = 0;
 	u32 start = 0;
-	u32 read_bytes = 0;
+	s64 read_bytes = 0;
 	u32 offset = 0;
 	s32 mask;
-	u64 dir_size = 0;
+	s64 dir_size = 0;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
@@ -1646,7 +1652,7 @@ s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position)
 }
 
 
-s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, u32 offset, s32 position)
+s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset, s32 position)
 {	
 	if (position == SEEK_SET)             /* SEEK_SET */
 		of->rwoffset = offset;
@@ -1786,6 +1792,12 @@ s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 
 	search_lblock = dir_inode->i_ptr / DIR_ENTRY_NUM;
 	search_entry = dir_inode->i_ptr % DIR_ENTRY_NUM;
 
+	if (dir_inode->i_links_count == MAX_FILES_PER_DIR)
+	{
+		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
+		return -1;
+	}
+
 retry:
 
 	dir_num = (dir_inode->i_size/DIR_ENTRY_SIZE);
@@ -1872,10 +1884,10 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 	struct nvfuse_dir_entry *dir;	
 	struct nvfuse_buffer_head *dir_bh = NULL;	
 	lbno_t lblock = 0;
-	u32 read_bytes = 0;
+	s64 read_bytes = 0;
 	u32 start = 0;
 	u32 offset = 0;
-	u64 dir_size = 0;
+	s64 dir_size = 0;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;

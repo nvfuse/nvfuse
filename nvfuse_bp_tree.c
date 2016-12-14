@@ -93,12 +93,18 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_head *bh;
-
+	s32 ret;
 	ictx = nvfuse_alloc_ictx(sb);
 	if (ictx == NULL)
 		return -1;
 
 	ino = nvfuse_alloc_new_inode(sb, ictx);
+	if (ino == 0)
+	{
+		printf(" It runs out of free inodes.");
+		return -1;
+	}
+
 	ictx = nvfuse_read_inode(sb, ictx, ino);
 	nvfuse_insert_ictx(sb, ictx);
 	set_bit(&ictx->ictx_status, BUFFER_STATUS_DIRTY);
@@ -117,9 +123,15 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	master->m_sb = sb;
 	master->m_alloc_block = 1; /* allocation of root node*/
 
-	nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+	ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+	if (ret)
+	{
+		printf(" data block allocation fails.");
+		return NVFUSE_ERROR;
+	}
 	bh = nvfuse_get_new_bh(sb, ictx, inode->i_ino, inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
 	nvfuse_release_bh(sb, bh, INSERT_HEAD, DIRTY);
+	assert(inode->i_size < MAX_FILE_SIZE);
 	inode->i_size += CLUSTER_SIZE;
 	
 	master->m_ictx = ictx;
@@ -1443,16 +1455,23 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 
 	if (!new_bno)	
 	{
+		s32 ret;
 		inode = ictx->ictx_inode;
 
 		new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
-		nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, NULL, 1);
+		ret = nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, NULL, 1);
+		if (ret)
+		{
+			printf(" data block allocation fails.");
+			return NVFUSE_ERROR;
+		}
 		bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);
 		
 		node = (index_node_t *)bh->bh_buf;
 		node->i_status = INDEX_NODE_USED;
 
 		nvfuse_release_bh(master->m_sb, bh, INSERT_HEAD, DIRTY);
+		assert(inode->i_size < MAX_FILE_SIZE);
 		inode->i_size += CLUSTER_SIZE;		
 		nvfuse_mark_inode_dirty(ictx);		
 	}

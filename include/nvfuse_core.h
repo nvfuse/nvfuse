@@ -129,6 +129,7 @@
 #define TRUE	1
 
 /* CAPACITY CALCULATION */
+#define NVFUSE_TERA_BYTES ((u64)1024*1024*1024*1024)
 #define NVFUSE_GIGA_BYTES (1024*1024*1024)
 #define NVFUSE_META_BYTES (1024*1024)
 #define NVFUSE_KILO_BYTES (1024)
@@ -266,13 +267,15 @@ struct nvfuse_superblock{
 
 struct nvfuse_file_table{	
 	inode_t	ino;
-	u64	size;
+	s64	size;
 	s32	used;
 	nvfuse_off_t prefetch_cur;
 	nvfuse_off_t rwoffset;
 	s32 flags;
 	pthread_mutex_t ft_lock;
 };
+
+#define MAX_FILES_PER_DIR (0x7FFFFFFF)
 
 struct nvfuse_dir_entry{	
 	inode_t	d_ino;
@@ -320,11 +323,16 @@ struct nvfuse_segment_summary{
 #define PTRS_PER_BLOCK		(CLUSTER_SIZE/sizeof(u32))
 #define PTRS_PER_BLOCK_BITS	10
 
+#define MAX_FILE_SIZE ((s64)DIRECT_BLOCKS * CLUSTER_SIZE + \
+						(s64)(1 << PTRS_PER_BLOCK_BITS) * CLUSTER_SIZE + \
+						(s64)(1 << (PTRS_PER_BLOCK_BITS * 2)) * CLUSTER_SIZE + \
+						(s64)(1 << (PTRS_PER_BLOCK_BITS * 3)) * CLUSTER_SIZE)
+
 struct nvfuse_inode{	
 	inode_t	i_ino; //4
 	u32	i_type; //8
 	u32 i_bpino;
-	u64	i_size;	//16	
+	s64	i_size;	//16	
 	u32	i_version; //20	
 	u32	i_deleted; // 24
 	u32	i_links_count;	/* Links count */ //28
@@ -405,7 +413,7 @@ void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx 
 s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx);
 
-void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u64 size);
+void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size);
 s32 ext2fs_set_bit(u32 nr,void * addr);
 s32 ext2fs_clear_bit(u32 nr, void * addr);
 s32 ext2fs_test_bit(u32 nr, const void * addr);
@@ -431,7 +439,7 @@ s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb);
 s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino,s8 *filename,mode_t mode);
 s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
 s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
-s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, u32 offset, s32 position);
+s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset, s32 position);
 s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino);
 s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino,s8 *name,u32 *ino);
 u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t offset);
@@ -446,7 +454,7 @@ bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno,bkey_t *key,u32 type);
 u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type);
 s32 nvfuse_mount(struct nvfuse_handle *nvh);
 
-s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, u64 trunc_size);
+s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_size);
 s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, nvfuse_off_t trunc_size);
 u32 nvfuse_create_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode *inode);
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_blks, u32 num_blocks);

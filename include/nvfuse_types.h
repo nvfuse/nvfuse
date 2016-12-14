@@ -131,8 +131,8 @@
 	};
 #	endif  
 	
-typedef u64	nvfuse_off_t;
-typedef u32	nvfuse_poff_t;
+typedef s64	nvfuse_off_t;
+//typedef u32	nvfuse_poff_t;
 typedef u32	nvfuse_loff_t;
 
 typedef u32 inode_t;//inode number
