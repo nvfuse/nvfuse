@@ -2521,6 +2521,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 					printf(" No more free block in NVFUSE \n");
 					break;
 				}
+				nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 			}			
 #if 0
 			nvfuse_fallocate_verify(sb, ictx, start / CLUSTER_SIZE, max_block);

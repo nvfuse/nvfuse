@@ -216,6 +216,8 @@ struct nvfuse_superblock{
 		s32	sb_cur_clu; /* SYNC TIME or BACKGROUND CLEANING*/
 	
 		s32 sb_last_allocated_ino;
+		s32 sb_last_allocated_sid;		
+		s32 sb_last_allocated_sid_by_ino;		
 		struct nvfuse_io_manager *io_manager;
 
 		struct nvfuse_segment_summary *sb_ss; /* SYNC TIME*/

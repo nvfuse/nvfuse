@@ -228,19 +228,28 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u32 cnt = 0;	
 	
 	seg_id = inode->i_ino / sb->sb_no_of_inodes_per_seg;
+	if (seg_id != sb->sb_last_allocated_sid && inode->i_ino == sb->sb_last_allocated_sid_by_ino)
+	{
+	    seg_id = sb->sb_last_allocated_sid;
+	}
+
 	seg_id = (seg_id + sb->sb_segment_num - 1) % sb->sb_segment_num;
 	next_id = (seg_id + 1) % sb->sb_segment_num;
 
 	while (next_id != seg_id) {
 		if (nvfuse_get_free_blocks(sb, next_id)) 
 		{
-		    ret = nvfuse_alloc_dbitmap(sb, next_id, alloc_blks + cnt, num_blocks);
+			ret = nvfuse_alloc_dbitmap(sb, next_id, alloc_blks + cnt, num_blocks);
 			num_blocks -= ret;
 			cnt += ret;
 
+			/* retain hint information to rapidly find free blocks */
+			sb->sb_last_allocated_sid = next_id;			
+			sb->sb_last_allocated_sid_by_ino = inode->i_ino;			
+
 			if (!num_blocks)
 			{				
-				break;
+			    break;
 			}			
 		}
 		next_id = (next_id + 1) % sb->sb_segment_num;
@@ -250,6 +259,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	{
 		printf(" Warning: it runs out of free blocks.\n");
 	}
+
 	return cnt;
 }
 
@@ -661,6 +671,8 @@ static inline void nvfuse_free_data(struct nvfuse_superblock *sb, struct nvfuse_
 		nvfuse_free_blocks(sb, block_to_free, count);		
 		nvfuse_mark_inode_dirty(ictx);
 	}
+
+	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 }
 
 /**
