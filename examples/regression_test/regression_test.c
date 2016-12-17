@@ -45,11 +45,43 @@
 
 #define MB (1024*1024)
 #define GB (1024*1024*1024)
+#define TB ((s64)1024*1024*1024*1024)
 
-//#define QUICK_TEST
+#define RT_TEST_TYPE MILL_TEST
+
+#define MAX_TEST    1
+#define QUICK_TEST  2
+#define MILL_TEST   3
+
+/* 1 million create/delete test */
+
+static s32 last_percent;
+
+void rt_progress_reset()
+{
+    last_percent = 0;
+}
+
+void rt_progress_report(s32 curr, s32 max)
+{
+    int curr_percent;
+
+    curr_percent = (curr + 1) * 100 / max;
+
+    if	(curr_percent != last_percent)
+    {
+		last_percent = curr_percent;
+		printf(".", curr_percent);
+		if (curr_percent % 10 == 0)
+		    printf("%d%%\n", curr_percent);
+		fflush(stdout);
+    }
+
+}
 
 int rt_create_files(struct nvfuse_handle *nvh)
 {
+	struct timeval tv;
 	struct statvfs stat;
 	s8 buf[FNAME_SIZE];
 	s32 max_inodes;
@@ -63,13 +95,24 @@ int rt_create_files(struct nvfuse_handle *nvh)
 		return -1;
 	}
 
+#if (RT_TEST_TYPE == MAX_TEST)
 	max_inodes = stat.f_ffree; /* # of free inodes */
-#ifdef QUICK_TEST
+#elif (RT_TEST_TYPE == QUICK_TEST)
 	max_inodes = 100;
+#elif (RT_TEST_TYPE == MILL_TEST)
+	max_inodes = stat.f_ffree; /* # of free inodes */
+	if (max_inodes > 1000000)
+	{
+	    max_inodes = 1000000;
+	}
 #endif
 
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
+
 	/* create null files */
-	printf(" Start: creating null files (%d).\n", max_inodes);
+	printf(" Start: creating null files (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
 	{
 		sprintf(buf, "file%d\n", i);
@@ -80,11 +123,17 @@ int rt_create_files(struct nvfuse_handle *nvh)
 			return -1;
 		}
 		nvfuse_closefile(nvh, fd);
+		/* update progress percent */
+		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: creating null files (%d).\n", max_inodes);
+	printf(" Finish: creating null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
 
 	/* lookup null files */
-	printf(" Start: looking up null files (%d).\n", max_inodes);
+	printf(" Start: looking up null files (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
 	{
 		struct stat st_buf;
@@ -98,11 +147,17 @@ int rt_create_files(struct nvfuse_handle *nvh)
 			printf(" No such file %s\n", buf);
 			return -1;
 		}
+		/* update progress percent */
+		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: looking up null files (%d).\n", max_inodes);
+	printf(" Finish: looking up null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
 
 	/* delete null files */
-	printf(" Start: deleting null files (%d).\n", max_inodes);
+	printf(" Start: deleting null files (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
 	{
 		sprintf(buf, "file%d\n", i);
@@ -113,14 +168,17 @@ int rt_create_files(struct nvfuse_handle *nvh)
 			printf(" rmfile = %s error \n", buf);
 			return -1;
 		}
+		/* update progress percent */
+		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: deleting null files (%d).\n", max_inodes);
+	printf(" Finish: deleting null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
 
 	return 0;
 }
 
 int rt_create_dirs(struct nvfuse_handle *nvh)
 {
+	struct timeval tv;
 	struct statvfs stat;
 	s8 buf[FNAME_SIZE];
 	s32 max_inodes;
@@ -133,13 +191,23 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 		return -1;
 	}
 
+#if (RT_TEST_TYPE == MAX_TEST)
 	max_inodes = stat.f_ffree; /* # of free inodes */
-#ifdef QUICK_TEST
+#elif (RT_TEST_TYPE == QUICK_TEST)
 	max_inodes = 100;
+#elif (RT_TEST_TYPE == MILL_TEST)
+	max_inodes = stat.f_ffree; /* # of free inodes */
+	if (max_inodes > 1000000)
+	{
+	    max_inodes = 1000000;
+	}
 #endif
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
 
 	/* create null directories */
-	printf(" Start: creating null directories (%d).\n", max_inodes);
+	printf(" Start: creating null directories (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
 	{
 		sprintf(buf, "dir%d\n", i);
@@ -149,12 +217,17 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 			printf(" Error: create dir = %s \n", buf);
 			return res;
 		}
+		/* update progress percent */
+		rt_progress_report(i, max_inodes);
 
 	}
-	printf(" Finish: creating null directories (%d).\n", max_inodes);
+	printf(" Finish: creating null directories (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
 
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
 	/* lookup null directories */
-	printf(" Start: looking up null directories (%d).\n", max_inodes);
+	printf(" Start: looking up null directories (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
 	{
 		struct stat st_buf;
@@ -168,11 +241,16 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 			printf(" No such directory %s\n", buf);
 			return -1;
 		}
+		/* update progress percent */
+		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: looking up null directories (%d).\n", max_inodes);
+	printf(" Finish: looking up null directories (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
 
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
 	/* delete null directories */
-	printf(" Start: deleting null directories (%d).\n", max_inodes);
+	printf(" Start: deleting null directories (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
 	{
 		sprintf(buf, "dir%d\n", i);
@@ -183,8 +261,11 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 			printf(" rmfile = %s error \n", buf);
 			return -1;
 		}
+		/* update progress percent */
+		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: deleting null files (%d).\n", max_inodes);
+	printf(" Finish: deleting null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+
 	return 0;
 }
 
@@ -207,9 +288,12 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 
 	sprintf(str, "file_allocate_test");
 
+#if (RT_TEST_TYPE == MAX_TEST)
 	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
-#ifdef QUICK_TEST
+#elif (RT_TEST_TYPE == QUICK_TEST)
 	file_size = 100 * MB;
+#elif (RT_TEST_TYPE == MILL_TEST)
+	file_size = (s64)1 * TB;
 #endif
 
 	fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
@@ -272,9 +356,12 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 
 	sprintf(str, "file_allocate_test");
 
+#if (RT_TEST_TYPE == MAX_TEST)
 	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
-#ifdef QUICK_TEST
+#elif (RT_TEST_TYPE == QUICK_TEST)
 	file_size = 100 * MB;
+#elif (RT_TEST_TYPE == MILL_TEST)
+	file_size = (s64)1 * TB;
 #endif
 
 	gettimeofday(&tv, NULL);
@@ -321,6 +408,7 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 
 int rt_create_4KB_files(struct nvfuse_handle *nvh)
 {
+	struct timeval tv;
 	struct statvfs statvfs_buf;
 	char str[FNAME_SIZE];
 	s32 res;
@@ -333,13 +421,25 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh)
 		return -1;
 	}
 
+#if (RT_TEST_TYPE == MAX_TEST)
 	nr = statvfs_buf.f_bfree / 2;
-#ifdef QUICK_TEST
+#elif (RT_TEST_TYPE == QUICK_TEST)
 	nr = 100;
+#elif (RT_TEST_TYPE == MILL_TEST)
+	nr = statvfs_buf.f_bfree / 2;
+	if (nr > 1000000)
+	{
+	    nr = 1000000;
+	}
 #endif
 
 	printf(" # of files = %d \n", nr);
 
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
+
+	printf(" Start: creating 4KB files (0x%x).\n", nr);
 	/* create files*/
 	for (i = 0; i < nr; i++)
 	{
@@ -350,8 +450,17 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh)
 			printf(" mkfile error = %s\n", str);
 			return -1;
 		}
-	}		
 
+		/* update progress percent */
+		rt_progress_report(i, nr);
+	}		
+	printf(" Finish: creating 4KB files (0x%x) %.3f OPS.\n", nr, nr / time_since_now(&tv));
+
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
+
+	printf(" Start: looking up 4KB files (0x%x).\n", nr);
 	/* lookup files */
 	for (i = 0; i < nr; i++)
 	{
@@ -365,9 +474,17 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh)
 			printf(" No such file %s\n", str);
 			return -1;
 		}
+		/* update progress percent */
+		rt_progress_report(i, nr);
 	}
+	printf(" Finish: looking up 4KB files (0x%x) %.3f OPS.\n", nr, nr / time_since_now(&tv));
+
+	/* reset progress percent */
+	rt_progress_reset();
+	gettimeofday(&tv, NULL);
 
 	/* delete files */
+	printf(" Start: deleting 4KB files (0x%x).\n", nr);
 	for (i = 0; i < nr; i++)
 	{
 		sprintf(str, "file%d", i);
@@ -377,11 +494,15 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh)
 			printf(" rmfile error = %s \n", str);
 			return -1;
 		}
+		/* update progress percent */
+		rt_progress_report(i, nr);
 	}
+	printf(" Finish: deleting 4KB files (0x%x) %.3f OPS.\n", nr, nr / time_since_now(&tv));
 
 	return NVFUSE_SUCCESS;
 
 }
+
 struct regression_test_ctx
 {
 	s32 (*function)(struct nvfuse_handle *nvh);

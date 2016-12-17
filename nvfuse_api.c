@@ -1580,8 +1580,13 @@ find:
 	new_inode->i_ctime = time(NULL);
 	new_inode->i_mtime = time(NULL);
 
-	/* create bptree related nodes for new directory's denties */
-	nvfuse_create_bptree(sb, new_inode);
+	/* create bptree related nodes for new directory's dentries */
+	ret = nvfuse_create_bptree(sb, new_inode);
+	if (ret)
+	{
+		printf(" bptree allocation fails.");
+		return NVFUSE_ERROR;
+	}
 		
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
 	nvfuse_release_inode(sb, new_ictx, DIRTY);

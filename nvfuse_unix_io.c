@@ -157,9 +157,12 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 		do {
 			res = io_getevents(io_manager->io_ctx, min_nr, max_nr, 
 					io_manager->events + cc, &time_out);
-			if(res == -EINTR) {
+#if 0
+			if(res == -EINTR) 
+			{
 				fprintf( stderr, "libaio: EINTR happens and retry ...\n");
 			}
+#endif
 		} while (res == -EINTR);
 
 		if (res < 0) {

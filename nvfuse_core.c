@@ -1023,7 +1023,21 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 
 	nvh->nvh_mounted = 1;
+
 	sb->sb_dirty_sync_policy = NVFUSE_META_DIRTY_POLICY;
+	//sb->sb_dirty_sync_policy = NVFUSE_META_DIRTY_SYNC_DELAYED;
+	switch (sb->sb_dirty_sync_policy)
+	{
+	    case DIRTY_FLUSH_DELAY:
+		printf(" DIRTY_FLUSH_POLICY: DELAY \n");
+		break;
+	    case DIRTY_FLUSH_FORCE:
+		printf(" DIRTY_FLUSH_POLICY: FORCE \n");
+		break;
+	    default:
+		printf(" DIRTY_FLUSH_POLICY: UNKNOWN\n");
+		break;
+	}
 
 	gettimeofday(&sb->sb_time_start, NULL);
 
