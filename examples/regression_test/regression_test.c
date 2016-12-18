@@ -292,8 +292,11 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
 #elif (RT_TEST_TYPE == QUICK_TEST)
 	file_size = 100 * MB;
-#elif (RT_TEST_TYPE == MILL_TEST)
+#elif (RT_TEST_TYPE == MILL_TEST)	
 	file_size = (s64)1 * TB;
+	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
+				(s64)statvfs_buf.f_bfree * CLUSTER_SIZE : 
+				(s64)1 * TB;
 #endif
 
 	fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
@@ -362,6 +365,9 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 	file_size = 100 * MB;
 #elif (RT_TEST_TYPE == MILL_TEST)
 	file_size = (s64)1 * TB;
+	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?
+		(s64)statvfs_buf.f_bfree * CLUSTER_SIZE :
+		(s64)1 * TB;
 #endif
 
 	gettimeofday(&tv, NULL);

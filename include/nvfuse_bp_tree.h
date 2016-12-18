@@ -104,8 +104,8 @@ typedef struct index_node{
 	int i_offset; //16	
 	int i_next_node; //20
 	int i_prev_node; //24
-	int i_status;
-	char pad[8]; //32
+	int i_status;	 //28
+	char pad[8 + 8]; //40
 
 	key_pair_t *i_pair;	//4086B	
 	char *i_buf;
@@ -113,8 +113,20 @@ typedef struct index_node{
 	master_node_t *i_master;	
 }index_node_t;
 
+/* Master Node Layout */
+#define BP_NODE_HEAD_SIZE	40
+#define BP_BITMAP_START		BP_NODE_HEAD_SIZE
+#define BP_BITMAP_SIZE		(CLUSTER_SIZE - BP_NODE_HEAD_SIZE) /* in bytes */
+#define BP_NODES_PER_MASTER	(1 + BP_BITMAP_SIZE << 3) /* each master + normal nodes */
+/* for testing purpose */
+//#define BP_NODES_PER_MASTER	(512) /* each master + normal nodes */
 
-#define BP_NODE_HEAD_SIZE 32
+/* B+tree Node Layout */
+/*
+|---------------|-----------|-----------|-----------|---------------|-----------|-----------|
+|	MASTER		|	NODE	|	... 	|	NODE	|	MASTER		|	NODE	|	... 	|
+|---------------|-----------|-----------|-----------|---------------|-----------|-----------|
+*/
 
 #define BP_KEY_START BP_NODE_HEAD_SIZE
 #define BP_ITEM_START(m) (BP_KEY_START + m->m_fanout * BP_KEY_SIZE)
@@ -132,15 +144,19 @@ typedef struct index_node{
 #define MAX_STACK 128
 typedef struct master_node{	
 	offset_t m_root;			//4 root start cluster
-	offset_t m_bitmap;			//8 bitmap start cluster
+	offset_t m_bitmap_free;		//8 bitmap start cluster
 	offset_t m_bitmap_num;		//12 bitmap num clusters
 	unsigned int m_max_nodes;	//16
 	int m_alloc_block;			//20
 	int m_dealloc_block;		//24
 	int m_node_size;			//28
 	int m_fanout;				//32
+	int m_last_allocated_sub_master; // 36
+	int m_last_allocated_sub_offset; // 40
 
-	//struct in-memory 
+	char bitmap[BP_BITMAP_SIZE]; //4096
+
+	//struct in-memory
 	struct nvfuse_inode_ctx *m_ictx;
 	inode_t m_ino;
 	pthread_mutex_t m_big_lock;
@@ -157,6 +173,7 @@ typedef struct master_node{
 	int m_fsize; //file size
 	char *m_buf;
 	unsigned int m_key_count;
+	
 
 	index_node_t *(*alloc) (struct master_node *master, int flag, int offset, int is_new);
 	int			(*dealloc) (struct master_node *master, index_node_t *p);
@@ -173,6 +190,17 @@ typedef struct master_node{
 	void		(*push) (struct master_node *master, offset_t v);
 	offset_t	(*pop)	(struct master_node *master);
 }master_node_t;
+
+
+/*
+* Master Node Context Structure
+*/
+typedef struct {
+	master_node_t *master;
+	struct nvfuse_buffer_head *bh;
+	s32 master_id;
+}master_ctx_t;
+
 
 /***************************************************************/
 //			 ETC 
@@ -348,14 +376,21 @@ int bp_split_data_node(master_node_t *master,index_node_t *ip, index_node_t *dp,
 
 int bp_read_master(master_node_t *master);
 int bp_find_key(master_node_t *master,bkey_t *key, bitem_t *value);
-//u32 nvfuse_get_ino(bkey_t key);
 
-//void nvfuse_make_pair(key_pair_t *pair,inode_t ino, lbno_t lbno, u32 item,s32 *count,u32 type);
 void bp_print_node(index_node_t *node);
 void bubble_sort(key_pair_t *pair, int num, int(*compare)(void *src1, void *src2));
 int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master);
 void bp_deinit_master(master_node_t *master);
 offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx);
+
+s32 bp_read_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 master_id);
+void bp_release_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 dirty);
+s32 bp_set_bitmap(master_node_t *master, u32 offset);
+s32 bp_clear_bitmap(master_node_t *master, u32 offset);
+s32 bp_test_bitmap(master_node_t *master, u32 offset);
+s32 bp_inc_free_bitmap(master_node_t *master, u32 offset);
+s32 _bp_scan_bitmap(char *bitmap, s32 offset, s32 length);
+s32 bp_scan_bitmap(master_node_t *master);
 
 #define set_bit(b, i)	ext2fs_set_bit(i, b) 
 #define clear_bit(b, i) ext2fs_clear_bit(i, b)

@@ -828,9 +828,10 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 
 		assert(bc->bc_dirty);
 		bc->bc_dirty = 0;
-		if (bc->bc_ref) {
+		
+		/*if (bc->bc_ref) {
 			printf("debug\n");
-		}
+		}*/
 		nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
 	}
 	

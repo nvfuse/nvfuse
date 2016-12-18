@@ -87,6 +87,212 @@ void bp_deinit_master(master_node_t *master)
 	bp_free((void *)master);
 }
 
+s32 bp_read_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 master_id)
+{
+	if (master_id == 0)
+	{
+		master_ctx->master = master;
+		master_ctx->bh = NULL;
+	}
+	else
+	{
+		struct nvfuse_buffer_head *bh;		
+		s32 sub_master_offset;		
+
+		sub_master_offset = master_id * BP_NODES_PER_MASTER;
+		bh = nvfuse_get_bh(master->m_sb, master->m_ictx, master->m_ino, sub_master_offset, READ, NVFUSE_TYPE_META);
+		if (bh == NULL)
+		{
+			printf(" Error: read master block = %d", sub_master_offset);
+			return -1;
+		}
+		master_ctx->master = (master_node_t *)bh->bh_buf;
+		master_ctx->bh = bh;
+	}
+
+	master_ctx->master_id = master_id;
+
+	return 0;
+}
+
+void bp_release_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 dirty)
+{
+	if (master_ctx->master_id)
+	{
+		nvfuse_release_bh(master->m_sb, master_ctx->bh, INSERT_HEAD, dirty ? DIRTY : CLEAN);		
+	}	
+}
+
+s32 bp_set_bitmap(master_node_t *master, u32 offset)
+{
+	master_ctx_t master_ctx;
+	master_node_t *sub_master;
+	s32 res;
+	
+	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
+	if (res)
+	{
+		printf(" Error: read master ctx\n");
+		return -1;
+	}	
+	sub_master = master_ctx.master;
+
+	set_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER);
+	sub_master->m_bitmap_free--;
+	assert(sub_master->m_bitmap_free >= 0);
+
+	bp_release_master_ctx(master, &master_ctx, DIRTY);
+	
+	return 0;
+}
+
+s32 bp_clear_bitmap(master_node_t *master, u32 offset)
+{
+	master_ctx_t master_ctx;
+	master_node_t *sub_master;
+	s32 res;
+
+	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
+	if (res)
+	{
+		printf(" Error: read master ctx\n");
+		return -1;
+	}
+	sub_master = master_ctx.master;
+
+	assert(test_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER));
+	clear_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER);
+	sub_master->m_bitmap_free++;
+	assert(sub_master->m_bitmap_free <= BP_NODES_PER_MASTER);
+
+	bp_release_master_ctx(master, &master_ctx, DIRTY);
+
+	return 0;
+}
+
+s32 bp_test_bitmap(master_node_t *master, u32 offset)
+{
+	master_ctx_t master_ctx;
+	master_node_t *sub_master;
+	s32 res;
+
+	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
+	if (res)
+	{
+		printf(" Error: read master ctx\n");
+		return -1;
+	}
+	sub_master = master_ctx.master;
+
+	res = test_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER);
+
+	bp_release_master_ctx(master, &master_ctx, DIRTY);		
+
+	return res;
+}
+
+s32 bp_inc_free_bitmap(master_node_t *master, u32 offset)
+{
+	master_ctx_t master_ctx;
+	master_node_t *sub_master;
+	s32 res;
+
+	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
+	if (res)
+	{
+		printf(" Error: read master ctx\n");
+		return -1;
+	}
+	sub_master = master_ctx.master;
+		
+	sub_master->m_bitmap_free++;
+	assert(sub_master->m_bitmap_free <= BP_NODES_PER_MASTER);
+	
+	bp_release_master_ctx(master, &master_ctx, CLEAN);		
+
+	return 0;
+}
+
+s32 _bp_scan_bitmap(char *bitmap, s32 offset, s32 length)
+{
+	s32 i;
+
+	for (i = 1; i < length; i++)
+	{
+		/* find free blk */
+		if (!test_bit(bitmap, offset))
+			return offset;
+
+		offset = (offset + 1 == length) ? 1 : offset + 1;
+	}
+
+	return 0;
+}
+
+s32 bp_scan_bitmap(master_node_t *master)
+{
+	struct nvfuse_inode *inode;	
+	s32 i;
+
+	s32 max_offset;
+	s32 max_master;
+	
+	s32 last_touched_master;
+	s32 last_touched_offset;
+
+	s32 free_blk = 0;
+
+	inode = master->m_ictx->ictx_inode;
+	max_offset = inode->i_size / CLUSTER_SIZE;
+	max_master = CEIL(max_offset, BP_NODES_PER_MASTER);
+
+	last_touched_master = master->m_last_allocated_sub_master;
+	last_touched_offset = master->m_last_allocated_sub_offset; 
+	
+	last_touched_offset = (last_touched_offset == 0) ? 1 : last_touched_offset;
+	
+	for (i = 0; i < max_master; i++)
+	{
+		master_ctx_t master_ctx;
+		master_node_t *sub_master;		
+		s32 res;
+
+		res = bp_read_master_ctx(master, &master_ctx, last_touched_master);
+		if (res)
+		{
+			printf(" Error: read master ctx \n");
+			return -1;
+		}
+		sub_master = master_ctx.master;
+								
+		if (sub_master->m_bitmap_free)
+		{			
+			s32 bitmap_length;
+			bitmap_length = (last_touched_master + 1 == max_master) ? (max_offset % BP_NODES_PER_MASTER) : BP_NODES_PER_MASTER;
+			free_blk = _bp_scan_bitmap(sub_master->bitmap, last_touched_offset, bitmap_length);
+		}
+		else
+		{
+			free_blk = 0;
+		}
+
+		bp_release_master_ctx(master, &master_ctx, CLEAN);
+
+		if (free_blk % BP_NODES_PER_MASTER != 0) // if not master node
+		{
+			master->m_last_allocated_sub_master = last_touched_master;
+			master->m_last_allocated_sub_offset = free_blk;
+
+			return last_touched_master * BP_NODES_PER_MASTER + free_blk;
+		}
+
+		last_touched_master = (last_touched_master + 1) % max_master;
+	}
+	
+	return 0;
+}
+
+
 int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master) 
 {
 	inode_t ino;
@@ -122,6 +328,7 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	master->m_ino = inode->i_ino;
 	master->m_sb = sb;
 	master->m_alloc_block = 1; /* allocation of root node*/
+	master->m_bitmap_free = 1;
 
 	ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
 	if (ret)
@@ -134,6 +341,8 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	assert(inode->i_size < MAX_FILE_SIZE);
 	inode->i_size += CLUSTER_SIZE;
 	
+	bp_set_bitmap(master, 0);
+
 	master->m_ictx = ictx;
 	nvfuse_mark_inode_dirty(ictx);
 
@@ -1368,9 +1577,9 @@ int bp_read_master(master_node_t *master)
 	bh = bp_read_block(master, offset, READ_LOCK);
 	master->m_buf = bh->bh_buf;
 	master->m_bh = bh;
-
-	memcpy(master, bh->bh_buf, BP_NODE_HEAD_SIZE);
 		
+	memcpy(master, bh->bh_buf, CLUSTER_SIZE);
+			
 	B_RELEASE_BH(master, bh);
 
 	return 0;
@@ -1378,17 +1587,14 @@ int bp_read_master(master_node_t *master)
 
 void bp_write_master(master_node_t *master)
 {
-	struct nvfuse_buffer_head *bh;
-	char *raw = NULL;
+	struct nvfuse_buffer_head *bh;	
 	int offset = 0;
 
 	bh = bp_read_block(master, offset, WRITE_LOCK);
 	master->m_buf = bh->bh_buf;
 	master->m_bh = bh;
-
-	raw = bh->bh_buf;
-
-	memcpy(raw, master, BP_NODE_HEAD_SIZE);
+	
+	memcpy(bh->bh_buf, master, CLUSTER_SIZE);
 	
 	nvfuse_mark_dirty_bh(master->m_sb, bh);
 	B_RELEASE_BH(master, bh);
@@ -1403,6 +1609,7 @@ int bp_write_node(master_node_t *master, index_node_t *node, int offset)
 
 	return 1;
 }
+
 /* necessary a bitmap table to quickly find a free node */
 /* alloc free block in a b+tree file*/
 offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
@@ -1411,69 +1618,84 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 	struct nvfuse_inode *inode;
 	index_node_t *node;
 	u32 new_bno = 0;
-
-	
-	if (master->m_dealloc_block) 
-	{
-		u32 cnt = 0;
-		u32 lblock = master->m_bitmap_ptr;
 		
-		//ictx = nvfuse_read_inode(master->m_sb, NULL, master->m_ino);
-		inode = ictx->ictx_inode;
-
-		while (cnt++ < (inode->i_size >> CLUSTER_SIZE_BITS))
-		{
-			bh = nvfuse_get_bh(master->m_sb, master->m_ictx, master->m_ino, lblock, READ, NVFUSE_TYPE_META);
-			if (!bh)
-			{
-				printf(" Warning: read block error \n");
-				return 0;
-			}
-			node = (index_node_t *)bh->bh_buf;
-			if (node->i_status == INDEX_NODE_FREE)
-			{				
-				new_bno = lblock;
-				//printf(" new bno = %d\n ", new_bno);
-
-				master->m_dealloc_block--;
-				memset(bh->bh_buf, 0x00, CLUSTER_SIZE);
-				node->i_status = INDEX_NODE_USED;
-				master->m_bitmap_ptr = lblock;
-			}
-			
-			if (new_bno)
-				nvfuse_release_bh(master->m_sb, bh, INSERT_HEAD, DIRTY);
-			else
-				nvfuse_release_bh(master->m_sb, bh, INSERT_TAIL, CLEAN);
-
-			if (new_bno)
-				break;
-
-			lblock = (lblock + 1) % (inode->i_size >> CLUSTER_SIZE_BITS);
+	if (master->m_dealloc_block)
+	{		
+		new_bno = bp_scan_bitmap(master);
+		if (new_bno) {
+			master->m_dealloc_block--;
+			master->m_bitmap_ptr = new_bno;
+			//printf(" new bno = %d \n", new_bno);
+			goto FREE_BLK_FOUND;
 		}
 	}
 
 	if (!new_bno)	
 	{
 		s32 ret;
+
+		inode = ictx->ictx_inode;
+		new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
+
+		/* alloc sub master node */
+		if (new_bno % BP_NODES_PER_MASTER == 0)
+		{
+			master_node_t *sub_master;
+			s8 *bitmap;
+
+			/* alloc data block */
+			ret = nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, NULL, 1);
+			if (ret)
+			{
+				printf(" data block allocation fails.");
+				return NVFUSE_ERROR;
+			}
+			
+			//bp_inc_free_bitmap(master, new_bno);
+
+			bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);									
+			sub_master = (master_node_t *)bh->bh_buf;
+			/* sub_master->free_count--;*/
+
+			bitmap = bh->bh_buf + BP_NODE_HEAD_SIZE;
+			
+			set_bit(bitmap, 0);
+
+			nvfuse_release_bh(master->m_sb, bh, INSERT_HEAD, DIRTY);
+			
+			assert(inode->i_size < MAX_FILE_SIZE);
+			inode->i_size += CLUSTER_SIZE;
+			master->m_alloc_block++;			
+
+			new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
+		}
+		
+		bp_inc_free_bitmap(master, new_bno);
+
+FREE_BLK_FOUND:;
 		inode = ictx->ictx_inode;
 
-		new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
+		/* alloc data block */
 		ret = nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, NULL, 1);
 		if (ret)
 		{
 			printf(" data block allocation fails.");
 			return NVFUSE_ERROR;
 		}
-		bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);
-		
+		bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);		
+
 		node = (index_node_t *)bh->bh_buf;
 		node->i_status = INDEX_NODE_USED;
 
 		nvfuse_release_bh(master->m_sb, bh, INSERT_HEAD, DIRTY);
 		assert(inode->i_size < MAX_FILE_SIZE);
 		inode->i_size += CLUSTER_SIZE;		
-		nvfuse_mark_inode_dirty(ictx);		
+		nvfuse_mark_inode_dirty(ictx);
+
+		/* check where bit is cleared. */
+		assert(bp_test_bitmap(master, new_bno) == 0);
+		/* set bitmap */
+		bp_set_bitmap(master, new_bno);
 	}
 		
 	master->m_alloc_block++;	
@@ -1490,7 +1712,10 @@ int bp_dealloc_bitmap(master_node_t *master, index_node_t *p)
 	p->i_status = INDEX_NODE_FREE;
 	master->m_bitmap_ptr = p->i_offset;
 	master->m_dealloc_block++;
-		
+	
+	/* clear bitmap */
+	bp_clear_bitmap(master, p->i_offset);
+	
 	bp_write_master(master);
 
 	return 0;
