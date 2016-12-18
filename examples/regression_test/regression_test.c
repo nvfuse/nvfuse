@@ -71,7 +71,7 @@ void rt_progress_report(s32 curr, s32 max)
     if	(curr_percent != last_percent)
     {
 		last_percent = curr_percent;
-		printf(".", curr_percent);
+		printf(".");
 		if (curr_percent % 10 == 0)
 		    printf("%d%%\n", curr_percent);
 		fflush(stdout);
