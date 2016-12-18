@@ -2509,9 +2509,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 				res = nvfuse_get_block(sb, ictx, curr_block, remain_block, &num_alloc_blks, NULL, 1 /*create*/);				
 				if (res < 0)
 				{
-					printf(" Error: nvfuse_get_block()\n");
-					res = -1;
-					goto RET;
+					printf(" Warning: nvfuse_get_block()\n");					
 				}			
 								
 				curr_block += num_alloc_blks;
@@ -2527,6 +2525,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 			nvfuse_fallocate_verify(sb, ictx, start / CLUSTER_SIZE, max_block);
 #endif
 
+			length = (s64)curr_block * CLUSTER_SIZE;
 			inode = ictx->ictx_inode;
 			inode->i_size = inode->i_size < length ? length : inode->i_size;
 			assert(inode->i_size < MAX_FILE_SIZE);

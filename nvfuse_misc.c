@@ -97,6 +97,8 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	s32 last_progress = 0;
 	s32 curr_progress = 0;
 	s32 flags;
+	s64 file_allocated_size;
+	struct stat stat_buf;
 
 	printf(" aiotest %s filesize = %0.3fMB io_size = %d qdpeth = %d (%c) direct (%d)\n", str, (double)file_size/(1024*1024), io_size, qdepth, is_read ? 'R' : 'W', is_direct);
 
@@ -115,6 +117,20 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	/* pre-allocation of data blocks*/
 	nvfuse_fallocate(nvh, str, 0, file_size);
 	printf(" finish fallocate %s size %lu \n", str, (long)file_size);
+
+	ret = nvfuse_getattr(nvh, str, &stat_buf);
+	if (ret)
+	{
+		printf(" No such file %s\n", str);
+		return -1;
+	}
+	/* NOTE: Allocated size may differ from requested size. */
+	file_allocated_size = stat_buf.st_size;
+
+	printf(" requested size %dMB.\n", (long)file_size / NVFUSE_MEGA_BYTES);
+	printf(" allocated size %dMB.\n", (long)file_allocated_size / NVFUSE_MEGA_BYTES);
+
+	file_size = file_allocated_size;
 
 	/* initialization of aio queue */
 	ret = nvfuse_aio_queue_init(&aioq, qdepth);

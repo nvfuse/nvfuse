@@ -263,9 +263,20 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	return cnt;
 }
 
+void nvfuse_return_free_blocks(struct nvfuse_superblock *sb, u32 *blks, u32 num)
+{
+	u32 *end = blks + num;
+
+	while (blks < end)
+	{
+		nvfuse_free_blocks(sb, *blks, 1);
+		blks++;
+	}
+}
+
 u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, u32 *blocks, u32 num_indirect_blocks, u32 num_blocks, u32 *direct_map, s32 *error)
 {
-	u32 new_blocks = 0;
+	u32 new_blocks[2] = { 0, 0 };
 	u32 cnt = 0;
 	u32 total_blocks;
 
@@ -273,31 +284,49 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 
 	if (total_blocks)
 	{		
-		new_blocks = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
-		if (new_blocks != total_blocks) {
-			printf(" Warning: it runs out of free blocks.");
-			if (error)
-				*error = -1;
-			return -1;
+		new_blocks[0] = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
+		if (new_blocks[0] != total_blocks) {
+			printf(" Warning: it runs out of free blocks.\n");
+			if (error) {
+				*error = -1;				
+				goto RELEASE_FREE;
+			}
 		}
-		cnt += new_blocks;
+		cnt += new_blocks[0];
 	}
+	
+	if (*error)
+		return 0;
 
 	total_blocks =  num_blocks - 1;
 	if (total_blocks)
 	{
-		new_blocks = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
-		if (new_blocks != total_blocks) {
-			printf(" Warning: it runs out of free blocks.");
-			if (error)
+		new_blocks[1] = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
+		if (new_blocks[1] != total_blocks) {
+			printf(" Warning: it runs out of free blocks.\n");
+			if (error) {
 				*error = -1;
-			return -1;			
-		}	
-		
-		cnt += new_blocks;
+				goto RELEASE_FREE;
+			}
+		}			
+		cnt += new_blocks[1];
 	}
 
 	return cnt;
+
+RELEASE_FREE:;
+
+	if (new_blocks[1])
+	{
+		nvfuse_return_free_blocks(sb, direct_map, new_blocks[1]);
+	}
+
+	if (new_blocks[0])
+	{
+		nvfuse_return_free_blocks(sb, blocks, new_blocks[0]);
+	}
+			
+	return 0;
 }
 
 /**
@@ -379,7 +408,9 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 
 	num = nvfuse_alloc_free_blocks(sb, inode, new_blocks, indirect_blks, *blks, direct_map, &err);
 	if (err)
+	{
 		return err;
+	}
 
 	if (indirect_blks)
 		num -= indirect_blks;
