@@ -164,7 +164,9 @@ struct nvfuse_io_manager {
 #define nvfuse_aio_prep(b, io_manager) io_manager->aio_prep(io_manager, b)
 
 #define nvfuse_aio_submit(b, n, io_manager) io_manager->aio_submit(io_manager, b, n);
-#define nvfuse_aio_resetnextsjob(io_manager) io_manager->aio_resetnextsjob(io_manager);
+#define nvfuse_aio_resetnextsjob(io_manager) \
+	if (io_manager->aio_resetnextsjob) \
+		io_manager->aio_resetnextsjob(io_manager);
 #define nvfuse_aio_resetnextcjob(io_manager) io_manager->aio_resetnextcjob(io_manager);
 #define nvfuse_aio_complete(io_manager) io_manager->aio_complete(io_manager);
 #define nvfuse_aio_getnextcjob(io_manager) io_manager->aio_getnextcjob(io_manager);

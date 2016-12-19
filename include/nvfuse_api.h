@@ -32,6 +32,8 @@ struct dirent {
 #define DT_REG 2
 #endif
 
+//#define VERIFY_BEFORE_RM_FILE
+
 s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count);
 

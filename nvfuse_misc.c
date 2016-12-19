@@ -127,11 +127,12 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	/* NOTE: Allocated size may differ from requested size. */
 	file_allocated_size = stat_buf.st_size;
 
-	printf(" requested size %dMB.\n", (long)file_size / NVFUSE_MEGA_BYTES);
-	printf(" allocated size %dMB.\n", (long)file_allocated_size / NVFUSE_MEGA_BYTES);
+	printf(" requested size %ldMB.\n", (long)file_size / NVFUSE_MEGA_BYTES);
+	printf(" allocated size %ldMB.\n", (long)file_allocated_size / NVFUSE_MEGA_BYTES);
 
+#if (NVFUSE_OS == NVFUSE_OS_LINUX)
 	file_size = file_allocated_size;
-
+#endif
 	/* initialization of aio queue */
 	ret = nvfuse_aio_queue_init(&aioq, qdepth);
 	if (ret)

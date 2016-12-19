@@ -1206,6 +1206,9 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 
 	inode->i_links_count--;
 	if (inode->i_links_count == 0) {	
+#ifdef VERIFY_BEFORE_RM_FILE
+		nvfuse_fallocate_verify(sb, ictx, 0, (u32)((s64)inode->i_size / CLUSTER_SIZE));
+#endif
 		nvfuse_free_inode_size(sb, ictx, 0/*size*/);
 		nvfuse_relocate_delete_inode(sb, ictx);
 	}

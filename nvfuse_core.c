@@ -1746,12 +1746,23 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t 
 	int flag = 0;
 
 	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
+	if (ss_bh == NULL)
+	{
+	    printf(" Error: get_bh\n");
+	    assert(0);
+	}
+
 	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
 	assert(ss->ss_id == seg_id);
 
 	bh = nvfuse_get_bh(sb, NULL, DBITMAP_INO, seg_id, READ, NVFUSE_TYPE_META);
+	if (bh == NULL)
+	{
+	    printf(" Error: get_bh\n");
+	    assert(0);
+	}
 	buf = bh->bh_buf;
-		
+
 	if (ext2fs_test_bit(offset, buf))
 	{
 		ext2fs_clear_bit(offset, buf);

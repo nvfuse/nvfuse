@@ -296,7 +296,7 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	file_size = (s64)1 * TB;
 	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
 				(s64)statvfs_buf.f_bfree * CLUSTER_SIZE : 
-				(s64)1 * TB;
+				(s64)file_size;
 #endif
 
 	fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
@@ -367,7 +367,7 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 	file_size = (s64)1 * TB;
 	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?
 		(s64)statvfs_buf.f_bfree * CLUSTER_SIZE :
-		(s64)1 * TB;
+		(s64)file_size;
 #endif
 
 	gettimeofday(&tv, NULL);
@@ -381,7 +381,7 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 			return -1;
 		}
 		printf(" nvfuse aio write through %.3fMB/s\n", (double)file_size/MB/time_since_now(&tv));
-
+				
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0)
 		{
