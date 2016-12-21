@@ -293,7 +293,11 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 #elif (RT_TEST_TYPE == QUICK_TEST)
 	file_size = 100 * MB;
 #elif (RT_TEST_TYPE == MILL_TEST)	
+#	if (NVFUSE_OS==NVFUSE_OS_LINUX)
 	file_size = (s64)1 * TB;
+#	else
+	file_size = (s64)32 * GB;
+#	endif
 	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
 				(s64)statvfs_buf.f_bfree * CLUSTER_SIZE : 
 				(s64)file_size;
@@ -364,7 +368,11 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 #elif (RT_TEST_TYPE == QUICK_TEST)
 	file_size = 100 * MB;
 #elif (RT_TEST_TYPE == MILL_TEST)
+#	if (NVFUSE_OS==NVFUSE_OS_LINUX)
 	file_size = (s64)1 * TB;
+#	else
+	file_size = (s64)32 * GB;
+#	endif
 	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?
 		(s64)statvfs_buf.f_bfree * CLUSTER_SIZE :
 		(s64)file_size;
@@ -527,7 +535,7 @@ rt_ctx[] =
 
 int main(int argc, char *argv[])
 {
-	struct nvfuse_handle *nvh;	
+	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;
 	char *devname; 
 	int ret = 0;

@@ -1223,12 +1223,15 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	/* Shrink directory entry that last entry is moved to delete entry. */
 	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
 	
-	/*if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
-		nvfuse_truncate_blocks(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
-		dir_inode->i_size -= CLUSTER_SIZE;
-	}*/
-
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
+
+	/* Free block reclaimation is necessary but test is required. */
+	if ((dir_inode->i_links_count * DIR_ENTRY_SIZE) % CLUSTER_SIZE == 0) {
+		//nvfuse_truncate_blocks(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+		nvfuse_free_inode_size(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+		dir_inode->i_size -= CLUSTER_SIZE;
+	}
+
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
@@ -1368,14 +1371,16 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	/* Shrink directory entry that last entry is moved to delete entry. */
 	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
 	
-	/* Free block reclaimation is necessary but test is required. */
-	/*if (dir_inode->i_links_count * DIR_ENTRY_SIZE % CLUSTER_SIZE == 0) {
-		nvfuse_truncate_blocks(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
-		dir_inode->i_size -= CLUSTER_SIZE;
-	}*/
-
-	/* Parent Directory Modification */
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
+
+	/* Free block reclaimation is necessary but test is required. */
+	if ((dir_inode->i_links_count * DIR_ENTRY_SIZE) % CLUSTER_SIZE == 0) {
+		//nvfuse_truncate_blocks(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+		nvfuse_free_inode_size(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+		dir_inode->i_size -= CLUSTER_SIZE;
+	}
+
+	/* Parent Directory Modification */	
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
@@ -1509,7 +1514,7 @@ retry:
 		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(dir_inode->i_size), NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, 0, dir_bh->bh_bc->bc_dirty);
 		assert(dir_inode->i_size < MAX_FILE_SIZE);
-		dir_inode->i_size += CLUSTER_SIZE;		
+		dir_inode->i_size += CLUSTER_SIZE;
 		goto retry;
 	}
 

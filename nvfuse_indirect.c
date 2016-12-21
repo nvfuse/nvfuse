@@ -830,8 +830,8 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 				(u32*)bh->bh_buf + addr_per_block,
 				depth);
 			
-			nvfuse_release_bh(sb, bh, 0, DIRTY);
-			//nvfuse_forget_bh(sb, bh);
+			//nvfuse_release_bh(sb, bh, 0, DIRTY);
+			nvfuse_forget_bh(sb, bh);
 			nvfuse_free_blocks(sb, nr, 1);			
 			nvfuse_mark_inode_dirty(ictx);
 		}

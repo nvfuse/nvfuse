@@ -292,7 +292,7 @@ void nvfuse_dec_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
 
-void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
+void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 {
 	struct nvfuse_segment_summary *ss = NULL;
 	struct nvfuse_buffer_head *ss_bh;
@@ -303,9 +303,9 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
 	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
 	assert(ss->ss_id == seg_id);
 
-	ss->ss_free_blocks++;
-	sb->sb_free_blocks++;
-	sb->sb_no_of_used_blocks--;
+	ss->ss_free_blocks += cnt;
+	sb->sb_free_blocks += cnt;
+	sb->sb_no_of_used_blocks -= cnt;
 
 	assert(ss->ss_free_blocks <= ss->ss_max_blocks);
 	assert(sb->sb_free_blocks <= sb->sb_no_of_blocks);
@@ -314,7 +314,7 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
 
-void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
+void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 {
 	struct nvfuse_segment_summary *ss = NULL;
 	struct nvfuse_buffer_head *ss_bh;
@@ -325,9 +325,9 @@ void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno)
 	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
 	assert(ss->ss_id == seg_id);
 
-	ss->ss_free_blocks--;
-	sb->sb_free_blocks--;
-	sb->sb_no_of_used_blocks++;
+	ss->ss_free_blocks -= cnt;
+	sb->sb_free_blocks -= cnt;
+	sb->sb_no_of_used_blocks += cnt;
 	assert(ss->ss_free_blocks >= 0);
 	assert(sb->sb_free_blocks >= 0);
 	assert(sb->sb_no_of_used_blocks <= sb->sb_no_of_blocks);
@@ -343,6 +343,12 @@ u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id)
 
 	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
 	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+	if (ss->ss_id != seg_id)
+	{
+		printf(" debug \n");
+		ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
+		ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+	}
 	assert(ss->ss_id == seg_id);
 
 	free_blocks = ss->ss_free_blocks;
@@ -428,11 +434,28 @@ void nvfuse_free_blocks(struct nvfuse_superblock *sb, u32 block_to_delete, u32 c
 {
 	u32 end_blk = block_to_delete + count;
 	u32 start_blk = block_to_delete;
+	u32 seg_id;
+	u32 offset;
+	u32 next_seg_id;
+	u32 length = 0;
 	
+	start_blk--;
+	goto RESET;
+
 	while (start_blk < end_blk) {
-		u32 seg_id = start_blk / sb->sb_no_of_blocks_per_seg;
-		u32 offset = start_blk % sb->sb_no_of_blocks_per_seg;
-		nvfuse_free_dbitmap(sb, seg_id, offset);
+		
+		length++;
+
+		next_seg_id = (start_blk + 1) / sb->sb_no_of_blocks_per_seg;
+		if (seg_id != next_seg_id || start_blk + 1 == end_blk)
+		{
+			nvfuse_free_dbitmap(sb, seg_id, offset, length);
+			
+		RESET:;
+			length = 0;
+			seg_id = (start_blk + 1) / sb->sb_no_of_blocks_per_seg;
+			offset = (start_blk + 1) % sb->sb_no_of_blocks_per_seg;
+		}
 		start_blk ++;
 	}
 }
@@ -474,6 +497,7 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 			bc->bc_load = 0;			
 			bc->bc_pno = 0;	
 			bc->bc_dirty = 0;
+			bc->bc_ref = 0;
 
 			nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_UNUSED, INSERT_HEAD);
 		}
@@ -1724,8 +1748,8 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_bl
 		int i;
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
-		for (i = 0; i < alloc_cnt; i++)
-			nvfuse_dec_free_blocks(sb, ss->ss_seg_start + free_block);
+		
+		nvfuse_dec_free_blocks(sb, ss->ss_seg_start + free_block, alloc_cnt);
 
 		return alloc_cnt;
 	}
@@ -1735,12 +1759,13 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_bl
 	return 0;
 }
 
-u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset)
+u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset, u32 count)
 {
 	struct nvfuse_segment_summary *ss;
 	struct nvfuse_buffer_head *ss_bh, *bh;		
 	void *buf;
 	int flag = 0;
+	int i;
 
 	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
 	if (ss_bh == NULL)
@@ -1760,25 +1785,28 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t 
 	}
 	buf = bh->bh_buf;
 
-	if (ext2fs_test_bit(offset, buf))
+	for (i = 0; i < count; i++)
 	{
-		ext2fs_clear_bit(offset, buf);
+		if (ext2fs_test_bit(offset + i, buf))
+		{
+			ext2fs_clear_bit(offset + i, buf);
 
-		/* keep track of hit information to quickly lookup free blocks. */
-		ss->ss_next_block = offset; 
-		flag = 1;
-	}
-	else
-	{
-		printf(" ERROR: block was already cleared. ");
-		assert(0);
-	}
+			/* keep track of hit information to quickly lookup free blocks. */
+			ss->ss_next_block = offset;
+			flag = 1;
+		}
+		else
+		{
+			printf(" ERROR: block was already cleared. ");
+			assert(0);
+		}
+	}	
 		
 	nvfuse_release_bh(sb, bh, 0, DIRTY);
 	nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
 	
 	if(flag)
-		nvfuse_inc_free_blocks(sb, ss->ss_seg_start + offset);
+		nvfuse_inc_free_blocks(sb, ss->ss_seg_start + offset, count);
 
 	return 0;
 }

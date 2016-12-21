@@ -235,6 +235,7 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nv
 	if(!bc->bc_pno)
 	{	/* logical to physical address translation */
 		bc->bc_pno = nvfuse_get_pbn(sb, ictx, ino, lblock);
+		assert(bc->bc_pno);
 	}
 
 	if(bc->bc_pno)
@@ -248,9 +249,9 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nv
 		}
 	}else if(!bc->bc_pno && sync_read && !bc->bc_load){
 		/* FIXME: how can we handle this case? */
-		bc->bc_pno = nvfuse_get_pbn(sb, ictx, ino, lblock);
-		printf(" Error: bc has no pblock addr \n");		
-		assert(0);		
+		printf(" Error: bc has no pblock addr \n");
+		bc->bc_pno = nvfuse_get_pbn(sb, ictx, ino, lblock);		
+		assert(0);
 	}
 	
 	bh->bh_bc = bc;
@@ -566,8 +567,7 @@ s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *b
 
 	bc = bh->bh_bc;
 
-	bc->bc_ref--;	
-
+	bc->bc_ref--;
 	assert(bc->bc_ref >= 0);
 	
 	if (dirty || bc->bc_dirty)

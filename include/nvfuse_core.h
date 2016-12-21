@@ -395,8 +395,6 @@ struct nvfuse_handle {
 	u32 nvh_mounted;
 };
 
-u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset);
-
 s32 error_msg(s8 *str);
 s32 fat_dirname(const s8 *path, s8 *dest);
 s32 fat_filename(const s8 *path, s8 *dest);
@@ -461,7 +459,7 @@ s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_siz
 s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, nvfuse_off_t trunc_size);
 u32 nvfuse_create_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode *inode);
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_blks, u32 num_blocks);
-u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset);
+u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset, u32 count);
 void nvfuse_free_blocks(struct nvfuse_superblock *sb, u32 block_to_delete, u32 count);
 s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb);
 s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position);
