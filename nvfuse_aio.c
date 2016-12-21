@@ -380,7 +380,7 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		}
 		else
 		{/* direct i/o without buffer head */
-			actx->actx_bh_count = actx->actx_bytes > CLUSTER_SIZE_BITS;
+			actx->actx_bh_count = NVFUSE_SIZE_TO_BLK(actx->actx_bytes);
 			nvfuse_aio_gen_dev_reqs_directio(&nvh->nvh_sb, actx);
 		}	
 	}

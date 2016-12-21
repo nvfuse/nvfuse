@@ -572,6 +572,9 @@ int main(int argc, char *argv[])
 
 RET:;
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-
+#if (NVFUSE_OS==NVFUSE_OS_WINDOWS)
+	printf(" Ctrl + C to exit.\n");
+	while (1);
+#endif
 	return ret;
 }

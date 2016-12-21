@@ -243,7 +243,7 @@ s32 bp_scan_bitmap(master_node_t *master)
 	s32 free_blk = 0;
 
 	inode = master->m_ictx->ictx_inode;
-	max_offset = inode->i_size / CLUSTER_SIZE;
+	max_offset = NVFUSE_SIZE_TO_BLK(inode->i_size);
 	max_master = CEIL(max_offset, BP_NODES_PER_MASTER);
 
 	last_touched_master = master->m_last_allocated_sub_master;
@@ -330,13 +330,13 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	master->m_alloc_block = 1; /* allocation of root node*/
 	master->m_bitmap_free = 1;
 
-	ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+	ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL, 1);
 	if (ret)
 	{
 		printf(" data block allocation fails.");
 		return NVFUSE_ERROR;
 	}
-	bh = nvfuse_get_new_bh(sb, ictx, inode->i_ino, inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
+	bh = nvfuse_get_new_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(inode->i_size), NVFUSE_TYPE_META);
 	nvfuse_release_bh(sb, bh, INSERT_HEAD, DIRTY);
 	assert(inode->i_size < MAX_FILE_SIZE);
 	inode->i_size += CLUSTER_SIZE;
@@ -1635,7 +1635,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 		s32 ret;
 
 		inode = ictx->ictx_inode;
-		new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
+		new_bno = NVFUSE_SIZE_TO_BLK(inode->i_size);
 
 		/* alloc sub master node */
 		if (new_bno % BP_NODES_PER_MASTER == 0)
@@ -1667,7 +1667,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 			inode->i_size += CLUSTER_SIZE;
 			master->m_alloc_block++;			
 
-			new_bno = inode->i_size >> CLUSTER_SIZE_BITS;
+			new_bno = NVFUSE_SIZE_TO_BLK(inode->i_size);
 		}
 		
 		bp_inc_free_bitmap(master, new_bno);

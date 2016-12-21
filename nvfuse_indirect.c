@@ -855,7 +855,7 @@ static void __nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse
 	long iblock;
 	unsigned blocksize;
 	blocksize = CLUSTER_SIZE;
-	iblock = (offset + blocksize - 1) >> CLUSTER_SIZE_BITS;
+	iblock = NVFUSE_SIZE_TO_BLK(offset + blocksize - 1);
 
 	n = nvfuse_block_to_path(iblock, offsets, NULL);
 	if (n == 0)

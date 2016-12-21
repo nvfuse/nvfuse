@@ -173,7 +173,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 
 	if (offset) // dir entry found
 	{
-		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (u32)(start >> CLUSTER_SIZE_BITS), READ, NVFUSE_TYPE_META);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(start), READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		dir += (offset % DIR_ENTRY_NUM);
 		
@@ -209,7 +209,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 				if (dir_bh)
 					nvfuse_release_bh(sb, dir_bh, 0, 0);
 
-				dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (u32)(read_bytes >> CLUSTER_SIZE_BITS), READ, NVFUSE_TYPE_META);
+				dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(read_bytes), READ, NVFUSE_TYPE_META);
 				dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 			}
 
@@ -331,10 +331,10 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 		goto RES;
 	}
 
-	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (u32)(((s64)dir_offset * DIR_ENTRY_SIZE) >> CLUSTER_SIZE_BITS), READ, NVFUSE_TYPE_META);
+	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK((s64)dir_offset * DIR_ENTRY_SIZE), READ, NVFUSE_TYPE_META);
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
-	dir += (dir_offset % (CLUSTER_SIZE / DIR_ENTRY_SIZE));
+	dir += (dir_offset % DIR_ENTRY_NUM);
 
 	if (nvfuse_dir_is_invalid(dir)) {
 		return_dentry = NULL;
@@ -556,7 +556,7 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 
 	while (count > 0 && of->rwoffset < inode->i_size) {
 
-		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, (u32)(of->rwoffset >> CLUSTER_SIZE_BITS), sync_read, NVFUSE_TYPE_DATA);
+		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(of->rwoffset), sync_read, NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
 			printf(" read error \n");
 			goto RES;
@@ -696,7 +696,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		ictx = nvfuse_read_inode(sb, NULL, of->ino);
 		inode = ictx->ictx_inode;
 
-		lblock = of->rwoffset >> CLUSTER_SIZE_BITS;
+		lblock = NVFUSE_SIZE_TO_BLK(of->rwoffset);
 		offset = of->rwoffset & (CLUSTER_SIZE - 1);
 		remain = CLUSTER_SIZE - offset;
 		if (remain > count)
@@ -704,7 +704,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 
 		if (count && inode->i_size <= of->rwoffset)
 		{
-			ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+			ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL, 1);
 			if (ret)
 			{
 				printf(" data block allocation fails.");
@@ -786,7 +786,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 	if (count && inode->i_size <= of->rwoffset)
 	{
 		u32 num_alloc = count >> CLUSTER_SIZE_BITS;
-		ret = nvfuse_get_block(sb, ictx, inode->i_size >> CLUSTER_SIZE_BITS, num_alloc/* num block */, NULL, NULL, 1);
+		ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), num_alloc/* num block */, NULL, NULL, 1);
 		if (ret)
 		{
 			printf(" data block allocation fails.");
@@ -873,7 +873,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 	inode = ictx->ictx_inode;
 
 	while (count > 0) {
-		lblock = curoffset >> CLUSTER_SIZE_BITS;
+		lblock = NVFUSE_SIZE_TO_BLK(curoffset);
 		offset = curoffset & (CLUSTER_SIZE - 1);
 		remain = CLUSTER_SIZE - offset;
 		
@@ -1002,7 +1002,7 @@ retry:
 		dir_bh = NULL;
 		search_entry = -1;
 		search_lblock++;
-		if (search_lblock == dir_inode->i_size >> CLUSTER_SIZE_BITS)
+		if (search_lblock == NVFUSE_SIZE_TO_BLK(dir_inode->i_size))
 			search_lblock = 0;
 	}
 
@@ -1014,14 +1014,14 @@ retry:
 	{
 		s32 ret;
 		nvfuse_release_bh(sb, dir_bh, 0, 0);
-		ret = nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+		ret = nvfuse_get_block(sb, dir_ictx, NVFUSE_SIZE_TO_BLK(dir_inode->i_size), 1/* num block */, NULL, NULL, 1);
 		if (ret)
 		{
 			printf(" data block allocation fails.");
 			return NVFUSE_ERROR;
 		}
 
-		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
+		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(dir_inode->i_size), NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, INSERT_HEAD, DIRTY);
 		assert(dir_inode->i_size < MAX_FILE_SIZE);
 		dir_inode->i_size += CLUSTER_SIZE;
@@ -1106,12 +1106,12 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 
 	assert(to_entry < from_entry);
 
-	dir_bh_from = nvfuse_get_bh(sb, ictx, inode->i_ino, (u32)((u64)from_entry * DIR_ENTRY_SIZE / CLUSTER_SIZE), READ, NVFUSE_TYPE_META);
+	dir_bh_from = nvfuse_get_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK((s64)from_entry * DIR_ENTRY_SIZE), READ, NVFUSE_TYPE_META);
 	dir_from = (struct nvfuse_dir_entry *)dir_bh_from->bh_buf;
 	dir_from += (from_entry % DIR_ENTRY_NUM);	
 	assert(dir_from->d_flag != DIR_DELETED);
 	
-	dir_bh_to = nvfuse_get_bh(sb, ictx, inode->i_ino, (u32)((u64)to_entry * DIR_ENTRY_SIZE / CLUSTER_SIZE), READ, NVFUSE_TYPE_META);
+	dir_bh_to = nvfuse_get_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK((s64)to_entry * DIR_ENTRY_SIZE), READ, NVFUSE_TYPE_META);
 	dir_to = (struct nvfuse_dir_entry *)dir_bh_to->bh_buf;
 	dir_to += (to_entry % DIR_ENTRY_NUM);
 	assert(dir_to->d_flag == DIR_DELETED);
@@ -1166,7 +1166,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 
 	start = (s64)offset * DIR_ENTRY_SIZE;
 	if ((start & (CLUSTER_SIZE - 1))) {
-		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (u32)(start / CLUSTER_SIZE), READ, NVFUSE_TYPE_META);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(start), READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		dir += (offset % DIR_ENTRY_NUM);
 	}
@@ -1175,7 +1175,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 		if (!(read_bytes & (CLUSTER_SIZE - 1))) {
 			if (dir_bh)
 				nvfuse_release_bh(sb, dir_bh, 0/*tail*/, 0/*dirty*/);
-			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (u32)(read_bytes >> CLUSTER_SIZE_BITS), READ, NVFUSE_TYPE_META);
+			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(read_bytes), READ, NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
 
@@ -1207,7 +1207,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	inode->i_links_count--;
 	if (inode->i_links_count == 0) {	
 #ifdef VERIFY_BEFORE_RM_FILE
-		nvfuse_fallocate_verify(sb, ictx, 0, (u32)((s64)inode->i_size / CLUSTER_SIZE));
+		nvfuse_fallocate_verify(sb, ictx, 0, NVFUSE_SIZE_TO_BLK(inode->i_size));
 #endif
 		nvfuse_free_inode_size(sb, ictx, 0/*size*/);
 		nvfuse_relocate_delete_inode(sb, ictx);
@@ -1294,7 +1294,7 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	dir_size = dir_inode->i_size;
 	start = (s64)offset * DIR_ENTRY_SIZE;
 	if ((start & (CLUSTER_SIZE - 1))) {
-		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, (u32)(start / CLUSTER_SIZE), READ, NVFUSE_TYPE_META);
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(start), READ, NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		dir += (offset % DIR_ENTRY_NUM);
 	}
@@ -1304,7 +1304,7 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 			if (dir_bh)
 				nvfuse_release_bh(sb, dir_bh, 0, 0);
 
-			lblock = read_bytes >> CLUSTER_SIZE_BITS;
+			lblock = NVFUSE_SIZE_TO_BLK(read_bytes);
 			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, lblock, READ, NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
@@ -1484,7 +1484,7 @@ retry:
 		dir_bh = NULL;
 		search_entry = -1;
 		search_lblock++;
-		if (search_lblock == dir_inode->i_size >> CLUSTER_SIZE_BITS)
+		if (search_lblock == NVFUSE_SIZE_TO_BLK(dir_inode->i_size))
 			search_lblock = 0;
 	}
 
@@ -1500,13 +1500,13 @@ retry:
 		s32 ret;
 		nvfuse_release_bh(sb, dir_bh, 0, CLEAN);
 		//new dentiry allocation		
-		ret = nvfuse_get_block(sb, dir_ictx, dir_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+		ret = nvfuse_get_block(sb, dir_ictx, NVFUSE_SIZE_TO_BLK(dir_inode->i_size), 1/* num block */, NULL, NULL, 1);
 		if (ret)
 		{
 			printf(" data block allocation fails.");
 			return NVFUSE_ERROR;
 		}
-		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, dir_inode->i_size >> CLUSTER_SIZE_BITS, NVFUSE_TYPE_META);
+		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(dir_inode->i_size), NVFUSE_TYPE_META);
 		nvfuse_release_bh(sb, dir_bh, 0, dir_bh->bh_bc->bc_dirty);
 		assert(dir_inode->i_size < MAX_FILE_SIZE);
 		dir_inode->i_size += CLUSTER_SIZE;		
@@ -1551,7 +1551,7 @@ find:
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
-	ret = nvfuse_get_block(sb, new_ictx, new_inode->i_size >> CLUSTER_SIZE_BITS, 1/* num block */, NULL, NULL, 1);
+	ret = nvfuse_get_block(sb, new_ictx, NVFUSE_SIZE_TO_BLK(new_inode->i_size), 1/* num block */, NULL, NULL, 1);
 	if (ret)
 	{
 		printf(" data block allocation fails.");
@@ -2500,7 +2500,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 		if (ictx->ictx_inode->i_size < (start + length))
 		{
 			curr_block = start / CLUSTER_SIZE;
-			max_block = (length / CLUSTER_SIZE) + ((length % CLUSTER_SIZE) ? 1 : 0);			
+			max_block = CEIL(length, CLUSTER_SIZE);
 			remain_block = max_block;
 			
 			/*printf(" free no of blocks = %ld\n", (long)sb->sb_free_blocks);*/
@@ -2525,7 +2525,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 				nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 			}			
 #if 0
-			nvfuse_fallocate_verify(sb, ictx, start / CLUSTER_SIZE, max_block);
+			nvfuse_fallocate_verify(sb, ictx, NVFUSE_SIZE_TO_BLK(start), max_block);
 #endif
 
 			length = (s64)curr_block * CLUSTER_SIZE;

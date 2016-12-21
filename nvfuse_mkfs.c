@@ -511,7 +511,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	printf(" segment size = %dMB \n", (1 << seg_size_bits)/1024/1024);
 	printf(" num segments = %ld \n", (unsigned long)num_seg);
 
-	seg_p_clu = 1 << (seg_size_bits-CLUSTER_SIZE_BITS);
+	seg_p_clu = 1 << (seg_size_bits - CLUSTER_SIZE_BITS);
 
 	ret = nvfuse_format_segment(nvh, nvfuse_sb_disk, num_seg, seg_p_clu);
 	if (ret)
@@ -538,10 +538,10 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 
 	nvfuse_sb_disk->sb_root_ino = ROOT_INO;
 
-	nvfuse_sb_disk->sb_segment_num = NVFUSE_SEG_NUM(nvfuse_sb_disk->sb_no_of_blocks, seg_size_bits-CLUSTER_SIZE_BITS);
+	nvfuse_sb_disk->sb_segment_num = NVFUSE_SEG_NUM(nvfuse_sb_disk->sb_no_of_blocks, seg_size_bits - CLUSTER_SIZE_BITS);
 	
 	nvfuse_sb_disk->sb_no_of_blocks = (nvfuse_sb_disk->sb_segment_num) * seg_p_clu;
-	nvfuse_sb_disk->sb_no_of_sectors = (nvfuse_sb_disk->sb_segment_num) * seg_p_clu * (CLUSTER_SIZE/SECTOR_SIZE);
+	nvfuse_sb_disk->sb_no_of_sectors = (nvfuse_sb_disk->sb_segment_num) * seg_p_clu * (CLUSTER_SIZE / SECTOR_SIZE);
 		
 	nvfuse_sb_disk->sb_umount = 1;
 

@@ -117,6 +117,7 @@
 
 #define NVFUSE_CLUSTER_SIZE (CLUSTER_SIZE)
 #define NVFUSE_CLUSTER_SIZE_BITS CLUSTER_SIZE_BITS
+#define NVFUSE_SIZE_TO_BLK(x) ((s32)((s64)(x) >> NVFUSE_CLUSTER_SIZE_BITS))
 #define NVFUSE_CLU_P_SEG(sb) (sb->sb_no_of_blocks_per_seg)
 #define NVFUSE_CLUSTER_PER_SEGMENTS_BITS(s_bits,c_bits) (s_bits - c_bits)
 #define NVFUSE_CLU_P_SEG_BITS(sb) NVFUSE_CLUSTER_PER_SEGMENTS_BITS(sb->sb_segment_size_bits, CLUSTER_SIZE_BITS)
