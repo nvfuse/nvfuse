@@ -1549,7 +1549,7 @@ int bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, 
 int bp_read_node(master_node_t *master, index_node_t *node, int offset, int sync, int rwlock)
 {		
 	node->i_bh = bp_read_block(master, offset, rwlock);
-	node->i_buf = node->i_bh->bh_buf+ BP_NODE_SIZE*(offset%BP_CLUSTER_PER_NODE);
+	node->i_buf = node->i_bh->bh_buf + BP_NODE_SIZE * (offset % BP_CLUSTER_PER_NODE);
 
 	node->i_pair->i_key = (bkey_t *)(node->i_buf + BP_KEY_START);
 	node->i_pair->i_item = (bitem_t *)(node->i_buf + BP_ITEM_START(master));
@@ -1623,7 +1623,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 	{		
 		new_bno = bp_scan_bitmap(master);
 		if (new_bno) {
-			master->m_dealloc_block--;
+			master->m_dealloc_block--;			
 			master->m_bitmap_ptr = new_bno;
 			//printf(" new bno = %d \n", new_bno);
 			goto FREE_BLK_FOUND;
@@ -1662,7 +1662,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 			set_bit(bitmap, 0);
 
 			nvfuse_release_bh(master->m_sb, bh, INSERT_HEAD, DIRTY);
-			
+			/* inc size due to allocation of submaster ctx */
 			assert(inode->i_size < MAX_FILE_SIZE);
 			inode->i_size += CLUSTER_SIZE;
 			master->m_alloc_block++;			
@@ -1671,6 +1671,10 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 		}
 		
 		bp_inc_free_bitmap(master, new_bno);
+		
+		/* inc size due to allocation of node */
+		assert(inode->i_size < MAX_FILE_SIZE);
+		inode->i_size += CLUSTER_SIZE;
 
 FREE_BLK_FOUND:;
 		inode = ictx->ictx_inode;
@@ -1688,8 +1692,8 @@ FREE_BLK_FOUND:;
 		node->i_status = INDEX_NODE_USED;
 
 		nvfuse_release_bh(master->m_sb, bh, INSERT_HEAD, DIRTY);
-		assert(inode->i_size < MAX_FILE_SIZE);
-		inode->i_size += CLUSTER_SIZE;		
+		
+		
 		nvfuse_mark_inode_dirty(ictx);
 
 		/* check where bit is cleared. */
@@ -1711,6 +1715,7 @@ int bp_dealloc_bitmap(master_node_t *master, index_node_t *p)
 {
 	p->i_status = INDEX_NODE_FREE;
 	master->m_bitmap_ptr = p->i_offset;
+	master->m_alloc_block--;
 	master->m_dealloc_block++;
 	
 	/* clear bitmap */

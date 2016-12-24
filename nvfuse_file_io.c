@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <assert.h>
 #include "nvfuse_core.h"
 #include "nvfuse_io_manager.h"
 
@@ -135,9 +136,13 @@ static int file_write_blk(struct nvfuse_io_manager *io_manager, unsigned long bl
 {
 	int	size, ret;	
 	s64	location;	
-	
-	if (block == 37380)
-		block = 37380;
+
+	/* debug code */
+	if (block % 32768 == NVFUSE_SUMMARY_OFFSET)
+	{
+		struct nvfuse_segment_summary *ss = buf;
+		assert(ss->ss_dbitmap_size);		
+	}
 
 	size = count * CLUSTER_SIZE;
 	location = ((s64) block * CLUSTER_SIZE);

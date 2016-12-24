@@ -70,12 +70,15 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 				return -1;
 		}
 		nvfuse_writefile(nvh, fd,file_source, i, 0); /* write remainder */
+
+		nvfuse_fsync(nvh, fd);
+		nvfuse_closefile(nvh, fd);
 	}
 	
-	nvfuse_fsync(nvh, fd);
-	nvfuse_closefile(nvh, fd);
-
-	return NVFUSE_SUCCESS;
+	if (fd > 0)
+		return NVFUSE_SUCCESS;
+	
+	return NVFUSE_ERROR;
 }
 
 void nvfuse_aio_test_callback(void *arg)
@@ -169,6 +172,8 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			INIT_LIST_HEAD(&actx->actx_list);
 			actx->actx_cb_func = nvfuse_aio_test_callback;
 			actx->actx_sb = &nvh->nvh_sb;
+
+			memset(actx->actx_buf, 0xaa, io_size);
 
 			/* enqueue actx to aio queue */
 			ret = nvfuse_aio_queue_enqueue(&aioq, actx, NVFUSE_READY_QUEUE);

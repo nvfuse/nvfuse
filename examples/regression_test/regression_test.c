@@ -76,7 +76,6 @@ void rt_progress_report(s32 curr, s32 max)
 		    printf("%d%%\n", curr_percent);
 		fflush(stdout);
     }
-
 }
 
 int rt_create_files(struct nvfuse_handle *nvh)

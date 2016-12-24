@@ -271,8 +271,16 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 	length = actx->actx_offset + actx->actx_bytes;
 	for (start = actx->actx_offset; start < length; start += CLUSTER_SIZE)
 	{
+		s32 blk;
+
+		blk = nvfuse_fgetblk(sb, actx->actx_fid, start / CLUSTER_SIZE);
+		if (blk < 0)
+		{
+			printf(" Error: nvfuse_fgetblk()\n");
+			return -1;
+		}
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
-		(*(jobs + count)).offset = (long)start;
+		(*(jobs + count)).offset = (long)blk * CLUSTER_SIZE;
 		(*(jobs + count)).bytes = (size_t)CLUSTER_SIZE;
 		(*(jobs + count)).ret = 0;
 		(*(jobs + count)).req_type = (actx->actx_opcode == READ) ? READ : WRITE;
@@ -281,12 +289,11 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		(*(jobs + count)).tag = (void *)actx;
 
 		iocb[count] = &((*(jobs + count)).iocb);
-		
-#else		
+#else
 		if (actx->actx_opcode == READ)
-			nvfuse_read_cluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, start / CLUSTER_SIZE, sb->io_manager);
+			nvfuse_read_cluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, blk, sb->io_manager);
 		else
-			nvfuse_write_cluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, start / CLUSTER_SIZE, sb->io_manager);
+			nvfuse_write_cluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, blk, sb->io_manager);
 #endif
 		count++;
 	}

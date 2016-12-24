@@ -193,6 +193,8 @@ struct nvfuse_buffer_head *nvfuse_alloc_buffer_head()
 	INIT_LIST_HEAD(&bh->bh_bc_list);	
 	INIT_LIST_HEAD(&bh->bh_dirty_list);
 
+	rb_init_node(&bh->bh_dirty_rbnode);
+
 	bh->bh_bc = NULL;
 	bh->bh_seq = seq_num++;
 	
@@ -263,8 +265,7 @@ FOUND_BH:;
 		nvfuse_set_bh_status(bh, BUFFER_STATUS_META);
 	else
 		nvfuse_clear_bh_status(bh, BUFFER_STATUS_META);
-
-	//bc->bc_load = 1;
+	
 	bc->bc_ino = ino;
 	bc->bc_lbno = lblock;
 	bc->bc_ref++;
@@ -510,7 +511,7 @@ s32 nvfuse_insert_dirty_bh_to_ictx(struct nvfuse_buffer_head *bh, struct nvfuse_
 		nvfuse_rbnode_insert(&ictx->ictx_meta_bh_rbroot, bh);
 #endif
 		ictx->ictx_meta_dirty_count++;
-		//printf(" Meta: ino = %d lbno = %d count = %d pno = %d \n", ictx->ictx_ino, bh->bh_bc->bc_lbno, ictx->ictx_meta_dirty_count, bh->bh_bc->bc_pno);
+		//printf(" insert dirty Meta: ino = %d lbno = %d count = %d pno = %d \n", ictx->ictx_ino, bh->bh_bc->bc_lbno, ictx->ictx_meta_dirty_count, bh->bh_bc->bc_pno);
 	}
 	else
 	{
@@ -520,7 +521,7 @@ s32 nvfuse_insert_dirty_bh_to_ictx(struct nvfuse_buffer_head *bh, struct nvfuse_
 		nvfuse_rbnode_insert(&ictx->ictx_data_bh_rbroot, bh);
 #endif
 		ictx->ictx_data_dirty_count++;
-		//printf(" Data: ino = %d lbno = %d count = %d pno = %d \n", ictx->ictx_ino, bh->bh_bc->bc_lbno, ictx->ictx_meta_dirty_count, bh->bh_bc->bc_pno);				
+		//printf(" insert dirty Data: ino = %d lbno = %d count = %d pno = %d \n", ictx->ictx_ino, bh->bh_bc->bc_lbno, ictx->ictx_meta_dirty_count, bh->bh_bc->bc_pno);				
 	}
 
 	assert(list_empty(&bh->bh_bc_list));
@@ -531,6 +532,10 @@ s32 nvfuse_insert_dirty_bh_to_ictx(struct nvfuse_buffer_head *bh, struct nvfuse_
 
 		list_add(&bh->bh_bc_list, &bc->bc_bh_head);
 		bc->bc_bh_count++;
+	}
+	else
+	{
+		printf(" warning:");
 	}
 
 	return 0;
@@ -551,7 +556,7 @@ s32 nvfuse_forget_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh
 		printf("debug\n");
 	}
 
-	nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
+	nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_UNUSED, INSERT_HEAD);
 
 	nvfuse_free_buffer_head(bh);
 
@@ -630,25 +635,30 @@ void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_c
 		
 		list_del(&bh->bh_bc_list);
 		list_del(&bh->bh_dirty_list);
-
+		/*
+		if (test_bit(&bh->bh_status, BUFFER_STATUS_META))
+			printf(" remove dirty Meta: ino = %d lbno = %d count = %d pno = %d \n", ictx->ictx_ino, bh->bh_bc->bc_lbno, ictx->ictx_meta_dirty_count, bh->bh_bc->bc_pno);
+		else
+			printf(" remove dirty Data: ino = %d lbno = %d count = %d pno = %d \n", ictx->ictx_ino, bh->bh_bc->bc_lbno, ictx->ictx_meta_dirty_count, bh->bh_bc->bc_pno);
+		*/
 #ifdef USE_RBNODE
 		if (test_bit(&bh->bh_status, BUFFER_STATUS_META))
-			rb_erase(&bh->bh_dirty_rbnode, &ictx->ictx_meta_bh_rbroot);	
+			rb_erase(&bh->bh_dirty_rbnode, &ictx->ictx_meta_bh_rbroot);
 		else
-			rb_erase(&bh->bh_dirty_rbnode, &ictx->ictx_data_bh_rbroot);	
+			rb_erase(&bh->bh_dirty_rbnode, &ictx->ictx_data_bh_rbroot);
 #endif
 		
 		/* decrement count in buffer cache node */
 		bc->bc_bh_count--;
-		
-		/* removal of buffer head */
-		nvfuse_free(bh);
-		
+	
 		/* FIXME: */
 		if (ictx->ictx_bh == bh) {
 			ictx->ictx_bh = NULL;
 			bc->bc_ref--;
 		}
+
+		/* removal of buffer head */
+		nvfuse_free(bh);	
 
 		/* move inode context to clean list */
 		if (ictx->ictx_meta_dirty_count == 0 &&

@@ -90,8 +90,12 @@ struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct 
 	
 	block = ino / IFILE_ENTRY_NUM;
 	offset = ino % IFILE_ENTRY_NUM;
-
 	bh = nvfuse_get_bh(sb, alloc_ictx, IFILE_INO, block, READ, NVFUSE_TYPE_META);
+	if (bh == NULL)
+	{
+		printf(" Error: get_bh() for read inode()\n");
+		return NULL;
+	}
 	inode = (struct nvfuse_inode *)bh->bh_buf;
 	inode += offset;
 	assert(ino == inode->i_ino);
@@ -185,7 +189,7 @@ u32 nvfuse_scan_free_ibitmap(struct nvfuse_superblock *sb, struct nvfuse_inode_c
 		count++;
 	}
 	
-	if (free_inode < sb->sb_no_of_inodes_per_seg)
+	if (found && free_inode < sb->sb_no_of_inodes_per_seg)
 	{
 		ext2fs_set_bit(free_inode, buf);
 		free_inode += (seg_id * ss->ss_max_inodes);
@@ -342,13 +346,12 @@ u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id)
 	u32 free_blocks;
 
 	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
-	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
-	if (ss->ss_id != seg_id)
+	if (ss_bh == NULL)
 	{
-		printf(" debug \n");
-		ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
-		ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+		printf(" Error: nvfuse_get_bh\n");
+		return 0;
 	}
+	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
 	assert(ss->ss_id == seg_id);
 
 	free_blocks = ss->ss_free_blocks;
@@ -1728,7 +1731,7 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_bl
 		}
 
 		if (!ext2fs_test_bit(free_block, buf))
-		{
+		{			
 			//printf(" free block %d found \n", free_block);
 			ss->ss_next_block = free_block; // keep track of hit information to quickly lookup free blocks.
 			ext2fs_set_bit(free_block, buf); // right approach?
@@ -1747,7 +1750,7 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_bl
 	if (flag) {
 		int i;
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
-		nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
+		nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 		
 		nvfuse_dec_free_blocks(sb, ss->ss_seg_start + free_block, alloc_cnt);
 
@@ -1802,12 +1805,19 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t 
 		}
 	}	
 		
-	nvfuse_release_bh(sb, bh, 0, DIRTY);
-	nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
 	
-	if(flag)
+		
+	if (flag)
+	{
+		nvfuse_release_bh(sb, bh, 0, DIRTY);
+		nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 		nvfuse_inc_free_blocks(sb, ss->ss_seg_start + offset, count);
-
+	}
+	else
+	{
+		nvfuse_release_bh(sb, bh, 0, CLEAN);
+		nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
+	}
 	return 0;
 }
 
