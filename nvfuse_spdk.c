@@ -136,14 +136,10 @@ probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts 
 }
 #else
 static bool
-probe_cb(void *cb_ctx, const struct spdk_nvme_probe_info *probe_info,
+probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	 struct spdk_nvme_ctrlr_opts *opts)
 {
-	printf("Attaching to %04x:%02x:%02x.%02x\n",
-	       probe_info->pci_addr.domain,
-	       probe_info->pci_addr.bus,
-	       probe_info->pci_addr.dev,
-	       probe_info->pci_addr.func);
+	printf("Attaching to %s\n", trid->traddr);
 
 	return true;
 }
@@ -192,7 +188,7 @@ attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctr
 }
 #else
 static void
-attach_cb(void *cb_ctx, const struct spdk_nvme_probe_info *probe_info,
+attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	  struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
 {
 	int nsid, num_ns;
@@ -205,11 +201,7 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_probe_info *probe_info,
 		exit(1);
 	}
 
-	printf("Attached to %04x:%02x:%02x.%02x\n",
-	       probe_info->pci_addr.domain,
-	       probe_info->pci_addr.bus,
-	       probe_info->pci_addr.dev,
-	       probe_info->pci_addr.func);
+	printf("Attached to %s\n", trid->traddr);
 
 	snprintf(entry->name, sizeof(entry->name), "%-20.20s (%-20.20s)", cdata->mn, cdata->sn);
 
@@ -231,8 +223,6 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_probe_info *probe_info,
 		register_ns(ctrlr, spdk_nvme_ctrlr_get_ns(ctrlr, nsid));
 	}
 }
-
-
 #endif
 
 static int spdk_init(struct nvfuse_io_manager *io_manager)
@@ -566,7 +556,7 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
      *  called for each controller after the SPDK NVMe driver has completed
      *  initializing the controller we chose to attach.
      */
-    rc = spdk_nvme_probe(NULL, probe_cb, attach_cb, NULL);
+    rc = spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL);
     if (rc != 0) {
 	fprintf(stderr, "spdk_nvme_probe() failed\n");
 	spdk_close(io_manager);
