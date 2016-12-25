@@ -32,6 +32,8 @@
 #include <windows.h>
 #endif
 
+s64 nvfuse_rand();
+
 extern struct nvfuse_handle *g_nvh;
 
 s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
@@ -87,7 +89,7 @@ void nvfuse_aio_test_callback(void *arg)
 	free(actx);
 }
 
-s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read, u32 is_direct)
+s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand)
 {
 	struct nvfuse_aio_queue aioq;
 	struct nvfuse_aio_ctx *actx;	
@@ -166,7 +168,18 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			actx->actx_fid = fd;
 			actx->actx_opcode = is_read ? READ : WRITE;
 			actx->actx_buf = user_buf + io_size * i;
-			actx->actx_offset = io_curr;
+			if (!is_rand)
+			{	
+				actx->actx_offset = io_curr;
+			}
+			else
+			{
+				s64 blkno = nvfuse_rand() % (file_size / io_size);
+				actx->actx_offset = blkno * io_size;
+			}
+
+			//printf(" aio offset = %ld\n", actx->actx_offset);
+
 			actx->actx_bytes = io_size;
 			actx->actx_error = 0;
 			INIT_LIST_HEAD(&actx->actx_list);
@@ -237,7 +250,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, 0 /* sequential */);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
@@ -258,7 +271,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, 0 /* sequential */);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
@@ -493,4 +506,21 @@ s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str){
 	nvfuse_closefile(nvh, fid);
 
 	return NVFUSE_SUCCESS;
+}
+
+void nvfuse_srand(long seed)
+{
+	srand48(seed);
+}
+
+s64 nvfuse_rand()
+{
+	s64 val;
+#if (NVFUSE_OF==NVFUSE_OS_LINUX)
+	val = mrand48();
+#else
+	val = (s64)(rand()) << 32;
+	val += rand();
+#endif
+	return val;
 }

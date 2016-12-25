@@ -78,7 +78,7 @@ void rt_progress_report(s32 curr, s32 max)
     }
 }
 
-int rt_create_files(struct nvfuse_handle *nvh)
+int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 {
 	struct timeval tv;
 	struct statvfs stat;
@@ -175,7 +175,7 @@ int rt_create_files(struct nvfuse_handle *nvh)
 	return 0;
 }
 
-int rt_create_dirs(struct nvfuse_handle *nvh)
+int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 {
 	struct timeval tv;
 	struct statvfs stat;
@@ -268,7 +268,7 @@ int rt_create_dirs(struct nvfuse_handle *nvh)
 	return 0;
 }
 
-int rt_create_max_sized_file(struct nvfuse_handle *nvh)
+int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 {
 	struct statvfs statvfs_buf;
 	struct stat stat_buf;
@@ -345,7 +345,7 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh)
 	return NVFUSE_SUCCESS;
 }
 
-int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
+int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh, u32 is_rand)
 {
 	struct statvfs statvfs_buf;
 	char str[FNAME_SIZE];
@@ -381,7 +381,7 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 
 	/* write phase */
 	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, is_rand);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
@@ -399,7 +399,7 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 
 	/* read phase */
 	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, is_rand);
 		if (res < 0)
 		{
 			printf(" Error: aio read test \n");
@@ -419,7 +419,7 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh)
 
 }
 
-int rt_create_4KB_files(struct nvfuse_handle *nvh)
+int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 {
 	struct timeval tv;
 	struct statvfs statvfs_buf;
@@ -516,20 +516,25 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh)
 
 }
 
+#define RANDOM		1
+#define SEQUENTIAL	0
+
 struct regression_test_ctx
 {
-	s32 (*function)(struct nvfuse_handle *nvh);
+	s32 (*function)(struct nvfuse_handle *nvh, u32 arg);
 	s8 test_name[128];
+	s32 arg;
 	s32 pass_criteria; /* compare return code */
 	s32 pass_criteria_ignore; /* no compare */
 } 
 rt_ctx[] = 
 {
-	{ rt_create_files, "Creating Max Number of Files.", 0, 0},
-	{ rt_create_dirs, "Creating Max Number of Directories.", 0, 0},
-	{ rt_create_max_sized_file, "Creating Maximum Sized Single File.", 0, 0},
-	{ rt_create_max_sized_file_aio, "Creating Maximum Sized Single File with AIO Read and Write.", 0, 0},
-	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0},
+	{ rt_create_files, "Creating Max Number of Files.", 0, 0, 0},
+	{ rt_create_dirs, "Creating Max Number of Directories.", 0, 0, 0},
+	{ rt_create_max_sized_file, "Creating Maximum Sized Single File.", 0, 0, 0},
+	{ rt_create_max_sized_file_aio, "Creating Maximum Sized Single File with Sequential AIO Read and Write.", SEQUENTIAL, 0, 0},
+	{ rt_create_max_sized_file_aio, "Creating Maximum Sized Single File with Random AIO Read and Write.", RANDOM, 0, 0},
+	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0, 0},
 };
 
 int main(int argc, char *argv[])
@@ -565,7 +570,7 @@ int main(int argc, char *argv[])
 	{
 		s32 index = cur_rt_ctx - rt_ctx + 1;
 		printf(" Regression Test %d: %s\n", index, cur_rt_ctx->test_name);
-		ret = cur_rt_ctx->function(nvh);
+		ret = cur_rt_ctx->function(nvh, cur_rt_ctx->arg);
 		if (!cur_rt_ctx->pass_criteria && 
 			ret != cur_rt_ctx->pass_criteria)
 		{
