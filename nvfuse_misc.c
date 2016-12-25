@@ -510,13 +510,17 @@ s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str){
 
 void nvfuse_srand(long seed)
 {
+#if (NVFUSE_OS==NVFUSE_OS_LINUX)
 	srand48(seed);
+#else
+	srand(seed);
+#endif
 }
 
 s64 nvfuse_rand()
 {
 	s64 val;
-#if (NVFUSE_OF==NVFUSE_OS_LINUX)
+#if (NVFUSE_OS==NVFUSE_OS_LINUX)
 	val = mrand48();
 #else
 	val = (s64)(rand()) << 32;
