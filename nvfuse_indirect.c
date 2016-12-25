@@ -627,11 +627,11 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 
 		free(direct_map);
 	}
-
+	
+got_it:
 	if (num_alloc_blocks)
 		*num_alloc_blocks = count;
 
-got_it:
 	if (pblock)
 		*pblock = chain[depth - 1].key;
 	partial = chain + depth - 1;    /* the whole chain */

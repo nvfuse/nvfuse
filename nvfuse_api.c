@@ -2561,7 +2561,7 @@ RET:;
     return res;
 }
 
-s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk)
+s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, s32 *num_alloc)
 {
 	struct nvfuse_file_table *of;
 	struct nvfuse_inode_ctx *ictx;
@@ -2580,7 +2580,7 @@ s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk)
 
 	inode = ictx->ictx_inode;
 
-	ret = nvfuse_get_block(sb, ictx, lblk, 0, NULL, &blk, 1);
+	ret = nvfuse_get_block(sb, ictx, lblk, max_blocks, num_alloc, &blk, 0);
 	if (ret < 0)
 	{
 		printf(" Error: nvfuse_get_block\n");

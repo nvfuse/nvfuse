@@ -345,25 +345,72 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 	return NVFUSE_SUCCESS;
 }
 
-int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh, u32 is_rand)
+int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 direct, s32 qdepth)
+{	
+	struct timeval tv;
+	char str[FNAME_SIZE];
+	s32 res;
+
+	sprintf(str, "file_allocate_test");
+
+	gettimeofday(&tv, NULL);
+
+	/* write phase */
+	{
+		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, AIO_MAX_QDEPTH, WRITE, direct, is_rand);
+		if (res < 0)
+		{
+			printf(" Error: aio write test \n");
+			return -1;
+		}
+		printf(" nvfuse aio write through %.3fMB/s\n", (double)file_size / MB / time_since_now(&tv));
+
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			return -1;
+		}
+	}
+
+	/* read phase */
+	{
+		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, AIO_MAX_QDEPTH, READ, direct, is_rand);
+		if (res < 0)
+		{
+			printf(" Error: aio read test \n");
+			return -1;
+		}
+		printf(" nvfuse aio read through %.3fMB/s\n", (double)file_size / MB / time_since_now(&tv));
+
+		res = nvfuse_rmfile_path(nvh, str);
+		if (res < 0)
+		{
+			printf(" Error: rmfile = %s\n", str);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
 {
 	struct statvfs statvfs_buf;
-	char str[FNAME_SIZE];
-	struct timeval tv;
+	s32 direct;
+	s32 qdepth;
+	s32 res;	
 	s64 file_size;
-	s32 res;
-	s32 direct = 1;
-
+	s32 block_size;
+	
 	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
 	{
 		printf(" statfs error \n");
 		return -1;
 	}
-
-	sprintf(str, "file_allocate_test");
-
+	
 #if (RT_TEST_TYPE == MAX_TEST)
-	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
+	file_size = (s64)statvfs_buf.f_bfree * CLUSTER_SIZE;
 #elif (RT_TEST_TYPE == QUICK_TEST)
 	file_size = 100 * MB;
 #elif (RT_TEST_TYPE == MILL_TEST)
@@ -377,46 +424,50 @@ int rt_create_max_sized_file_aio(struct nvfuse_handle *nvh, u32 is_rand)
 		(s64)file_size;
 #endif
 
-	gettimeofday(&tv, NULL);
-
-	/* write phase */
-	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, is_rand);
-		if (res < 0)
-		{
-			printf(" Error: aio write test \n");
-			return -1;
-		}
-		printf(" nvfuse aio write through %.3fMB/s\n", (double)file_size/MB/time_since_now(&tv));
-				
-		res = nvfuse_rmfile_path(nvh, str);
-		if (res < 0)
-		{
-			printf(" Error: rmfile = %s\n", str);
-			return -1;
-		}
-	}
-
-	/* read phase */
-	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, is_rand);
-		if (res < 0)
-		{
-			printf(" Error: aio read test \n");
-			return -1;
-		}
-		printf(" nvfuse aio read through %.3fMB/s\n", (double)file_size/MB/time_since_now(&tv));
-
-		res = nvfuse_rmfile_path(nvh, str);
-		if (res < 0)
-		{
-			printf(" Error: rmfile = %s\n", str);
-			return -1;
-		}
-	}
+	direct = 1;
+	qdepth = AIO_MAX_QDEPTH;
+	block_size = 4096;
+	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
 
 	return NVFUSE_SUCCESS;
+}
 
+int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
+{
+	struct statvfs statvfs_buf;
+	s32 direct;
+	s32 qdepth;
+	s32 res;
+	s64 file_size;
+	s32 block_size;
+
+	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
+	{
+		printf(" statfs error \n");
+		return -1;
+	}
+
+#if (RT_TEST_TYPE == MAX_TEST)
+	file_size = (s64)statvfs_buf.f_bfree * CLUSTER_SIZE;
+#elif (RT_TEST_TYPE == QUICK_TEST)
+	file_size = 100 * MB;
+#elif (RT_TEST_TYPE == MILL_TEST)
+#	if (NVFUSE_OS==NVFUSE_OS_LINUX)
+	file_size = (s64)1 * TB;
+#	else
+	file_size = (s64)32 * GB;
+#	endif
+	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?
+		(s64)statvfs_buf.f_bfree * CLUSTER_SIZE :
+		(s64)file_size;
+#endif
+
+	direct = 1;
+	qdepth = AIO_MAX_QDEPTH;
+	block_size = 128 * 1024;
+	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
+
+	return NVFUSE_SUCCESS;
 }
 
 int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
@@ -532,9 +583,11 @@ rt_ctx[] =
 	{ rt_create_files, "Creating Max Number of Files.", 0, 0, 0},
 	{ rt_create_dirs, "Creating Max Number of Directories.", 0, 0, 0},
 	{ rt_create_max_sized_file, "Creating Maximum Sized Single File.", 0, 0, 0},
-	{ rt_create_max_sized_file_aio, "Creating Maximum Sized Single File with Sequential AIO Read and Write.", SEQUENTIAL, 0, 0},
-	{ rt_create_max_sized_file_aio, "Creating Maximum Sized Single File with Random AIO Read and Write.", RANDOM, 0, 0},
-	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0, 0},
+	{ rt_create_max_sized_file_aio_4KB, "Creating Maximum Sized Single File with 4KB Sequential AIO Read and Write.", SEQUENTIAL, 0, 0},
+	{ rt_create_max_sized_file_aio_4KB, "Creating Maximum Sized Single File with 4KB Random AIO Read and Write.", RANDOM, 0, 0},
+	{ rt_create_max_sized_file_aio_128KB, "Creating Maximum Sized Single File with 128KB Sequential AIO Read and Write.", SEQUENTIAL, 0, 0 },
+	{ rt_create_max_sized_file_aio_128KB, "Creating Maximum Sized Single File with 128KB Random AIO Read and Write.", RANDOM, 0, 0 },
+	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0, 0}
 };
 
 int main(int argc, char *argv[])

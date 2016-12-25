@@ -157,6 +157,8 @@ struct nvfuse_io_manager {
     int (*aio_cancel)(struct nvfuse_io_manager *, struct io_job *);
 };
 
+#define nvfuse_write_ncluster(b, n, k, io_manager) io_manager->io_write(io_manager, n, k, b)
+#define nvfuse_read_ncluster(b, n, k, io_manager) io_manager->io_read(io_manager, n, k, b)
 
 #define nvfuse_write_cluster(b, n, io_manager) io_manager->io_write(io_manager, n, 1, b)
 #define nvfuse_read_cluster(b, n, io_manager) io_manager->io_read(io_manager, n, 1, b)
