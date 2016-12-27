@@ -26,8 +26,8 @@
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	0
-#define EXAM_USE_UNIXIO		1
-#define EXAM_USE_SPDK		0
+#define EXAM_USE_UNIXIO		0
+#define EXAM_USE_SPDK		1
 #else
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	1
@@ -357,11 +357,11 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 
 	/* write phase */
 	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, AIO_MAX_QDEPTH, WRITE, direct, is_rand);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, WRITE, direct, is_rand);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
-			return -1;
+			goto AIO_ERROR;
 		}
 		printf(" nvfuse aio write through %.3fMB/s\n", (double)file_size / MB / time_since_now(&tv));
 
@@ -373,13 +373,14 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 		}
 	}
 
+	gettimeofday(&tv, NULL);
 	/* read phase */
 	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, AIO_MAX_QDEPTH, READ, direct, is_rand);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, READ, direct, is_rand);
 		if (res < 0)
 		{
 			printf(" Error: aio read test \n");
-			return -1;
+			goto AIO_ERROR;
 		}
 		printf(" nvfuse aio read through %.3fMB/s\n", (double)file_size / MB / time_since_now(&tv));
 
@@ -392,6 +393,15 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 	}
 
 	return 0;
+
+AIO_ERROR:	
+	res = nvfuse_rmfile_path(nvh, str);
+	if (res < 0)
+	{
+	    printf(" Error: rmfile = %s\n", str);
+	    return -1;
+	}
+	return -1;
 }
 
 int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
@@ -415,7 +425,7 @@ int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
 	file_size = 100 * MB;
 #elif (RT_TEST_TYPE == MILL_TEST)
 #	if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	file_size = (s64)1 * TB;
+	file_size = (s64)128 * GB;
 #	else
 	file_size = (s64)32 * GB;
 #	endif
@@ -425,7 +435,7 @@ int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
 #endif
 
 	direct = 1;
-	qdepth = AIO_MAX_QDEPTH;
+	qdepth = 128;
 	block_size = 4096;
 	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
 
@@ -453,7 +463,7 @@ int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
 	file_size = 100 * MB;
 #elif (RT_TEST_TYPE == MILL_TEST)
 #	if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	file_size = (s64)1 * TB;
+	file_size = (s64)128 * GB;
 #	else
 	file_size = (s64)32 * GB;
 #	endif
@@ -463,7 +473,7 @@ int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
 #endif
 
 	direct = 1;
-	qdepth = AIO_MAX_QDEPTH;
+	qdepth = 128;
 	block_size = 128 * 1024;
 	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
 

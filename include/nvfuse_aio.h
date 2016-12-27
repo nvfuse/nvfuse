@@ -39,14 +39,14 @@ struct nvfuse_aio_ctx {
 	s32 actx_status; /* status (e.g., ready, submitted, and completed) */
 	struct list_head actx_list; /* linked list */
 	struct list_head actx_bh_head; /* buffer head list */
-    s32 actx_bh_count;
+	s32 actx_bh_count;
 	void(*actx_cb_func)(void  *arg); /* callback function to process completion for each context */
 	struct nvfuse_aio_queue *actx_queue; /* aio queue pointer */
 	struct nvfuse_superblock *actx_sb; /* superblock pointer */
 
-    void *tag1; /* keep track of temp pointer */
-    void *tag2; /* keep track of temp pointer */
-    void *tag3; /* keep track of temp pointer */
+	void *tag1; /* keep track of temp pointer */
+	void *tag2; /* keep track of temp pointer */
+	void *tag3; /* keep track of temp pointer */
 };
 
 struct nvfuse_aio_queue {

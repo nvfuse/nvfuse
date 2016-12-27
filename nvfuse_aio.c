@@ -250,12 +250,15 @@ s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse
 
 s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx)
 {
-	u64 start, length;
+	s64 start, length;
 	s32 count = 0;
+	s32 req_count = 0;
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
 	struct io_job *jobs;
 	struct iocb **iocb;	
 	s32 res;
+
+	assert(actx->actx_bh_count);
 
 	res = nvfuse_make_jobs(&jobs, actx->actx_bh_count);
 	if (res < 0) {
@@ -267,10 +270,13 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		printf(" Malloc error: struct iocb\n");
 		return -1;
 	}
+	memset(iocb, 0x00, sizeof(struct iocb *) * actx->actx_bh_count);
 #endif
 	
 	start = actx->actx_offset;
 	length = actx->actx_bytes;
+
+	//printf(" start = %ld, length = %ld \n", start, length);
 
 	while (length)
 	{
@@ -279,26 +285,32 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		s32 max_blocks;
 		s32 num_alloc;
 		
-		lblk = start / CLUSTER_SIZE;
+		lblk = (s64)start / CLUSTER_SIZE;
+#ifdef	SPDK_ENABLED
 		max_blocks = length / CLUSTER_SIZE;
+#else
+		max_blocks = 1;
+#endif
 
 		pblk = nvfuse_fgetblk(sb, actx->actx_fid, lblk, max_blocks, &num_alloc);
 		if (pblk < 0)
 		{
-			printf(" Error: nvfuse_fgetblk()\n");
+			printf(" Error: nvfuse_fgetblk() lblk = %x\n", lblk);
 			return -1;
 		}
 		
+		//printf(" lblk = %d, pblk = %d, num_alloc = %d \n", lblk, pblk, num_alloc);
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
-		(*(jobs + count)).offset = (long)pblk * CLUSTER_SIZE;
-		(*(jobs + count)).bytes = (size_t)num_alloc * CLUSTER_SIZE;
-		(*(jobs + count)).ret = 0;
-		(*(jobs + count)).req_type = (actx->actx_opcode == READ) ? READ : WRITE;
-		(*(jobs + count)).buf = actx->actx_buf + count * CLUSTER_SIZE;
-		(*(jobs + count)).complete = 0;
-		(*(jobs + count)).tag = (void *)actx;
+		(*(jobs + req_count)).offset = (long)pblk * CLUSTER_SIZE;
+		(*(jobs + req_count)).bytes = (size_t)num_alloc * CLUSTER_SIZE;
+		(*(jobs + req_count)).ret = 0;
+		(*(jobs + req_count)).req_type = (actx->actx_opcode == READ) ? READ : WRITE;
+		(*(jobs + req_count)).buf = actx->actx_buf + count * CLUSTER_SIZE;
+		(*(jobs + req_count)).complete = 0;
+		(*(jobs + req_count)).tag = (void *)actx;
 
-		iocb[count] = &((*(jobs + count)).iocb);
+		iocb[req_count] = &((*(jobs + req_count)).iocb);
+		assert(iocb[req_count] != NULL);
 #else
 		if (actx->actx_opcode == READ)
 			nvfuse_read_ncluster((s8 *)actx->actx_buf + count * CLUSTER_SIZE, pblk, num_alloc, sb->io_manager);
@@ -308,20 +320,31 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		start += (num_alloc * CLUSTER_SIZE);
 		length -= (num_alloc * CLUSTER_SIZE);
 		count += num_alloc;
+		req_count++;
 	}
 	
+	assert(req_count <= count);
 	assert(count == actx->actx_bh_count);
 
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
 	count = 0;
-	while (count < actx->actx_bh_count)
+	while (count < req_count)
 	{
 		nvfuse_aio_prep(jobs + count, sb->io_manager);
 		count++;
 	}
 
-	nvfuse_aio_submit(iocb, actx->actx_bh_count, sb->io_manager);
-	sb->io_manager->queue_cur_count += actx->actx_bh_count;
+	res = nvfuse_aio_submit(iocb, req_count, sb->io_manager);
+	if (res < 0)
+	{
+		printf(" Error: aio submit error = %d\n", res);
+		return -1;
+	}
+
+	sb->io_manager->queue_cur_count += req_count;
+	actx->actx_bh_count = req_count;
+
+	//printf(" cur queue depth = %d \n", sb->io_manager->queue_cur_count);
 
 	actx->tag1 = (void *)jobs;
 	actx->tag2 = (void *)iocb;
@@ -400,7 +423,9 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		else
 		{/* direct i/o without buffer head */
 			actx->actx_bh_count = NVFUSE_SIZE_TO_BLK(actx->actx_bytes);
-			nvfuse_aio_gen_dev_reqs_directio(&nvh->nvh_sb, actx);
+			res = nvfuse_aio_gen_dev_reqs_directio(&nvh->nvh_sb, actx);
+			if (res < 0)
+			    return -1;
 		}	
 	}
 	

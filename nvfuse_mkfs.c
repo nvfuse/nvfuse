@@ -85,6 +85,33 @@ u64 get_no_of_sectors(s32 fd)
 #endif //__NOUSE_FUSE__
 #endif // NVFUSE_OS == NVFUSE_OS_LINUX
 
+static void nvfuse_ss_debug(struct nvfuse_io_manager *io_manager, u32 seg_size, u32 num_ss)
+{
+	void *ss_buf;
+	s32 seg_id;
+	struct nvfuse_segment_summary *ss;
+
+	ss_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
+	if (ss_buf == NULL)
+	{
+		printf(" Malloc error \n");
+	}
+
+	for (seg_id = 0;seg_id < num_ss; seg_id++)
+	{
+	    memset(ss_buf, 0x00, CLUSTER_SIZE);
+	    nvfuse_read_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, io_manager);
+	    ss = (struct nvfuse_segment_summary *)ss_buf;
+	    if (seg_id != ss->ss_id)
+	    {
+		printf(" mismatch segid = %d\n", seg_id);
+		assert(0);
+	    }
+	}
+
+	nvfuse_free_aligned_buffer(ss_buf);
+}
+
 
 static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, struct nvfuse_superblock *sb_disk, u32 seg_id, u32 seg_size)
 {
@@ -103,8 +130,10 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 		return -1;
 	}
 
+	memset(ss_buf, 0x00, CLUSTER_SIZE);
 	nvfuse_read_cluster(ss_buf, seg_id * seg_size + NVFUSE_SUMMARY_OFFSET, io_manager);
 	ss = (struct nvfuse_segment_summary *)ss_buf;
+	assert(ss->ss_id == seg_id);
 
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL)
@@ -122,7 +151,6 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager, 
 		sb_disk->sb_free_inodes--;
 	}
 	nvfuse_write_cluster(buf, ss->ss_ibitmap_start, io_manager);
-
 
 	// data block for root directory allocation
 	nvfuse_read_cluster(buf, ss->ss_dbitmap_start, io_manager);
@@ -242,7 +270,7 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 	for (seg_id = 0; seg_id < num_segs; seg_id++)
 	{
 		seg_start = seg_id * seg_size;
-		//printf(" seg_stat = %u \n", seg_start);
+		//printf(" write seg = %u \n", seg_id);
 
 		/* Initialize and Write Segment Summary */
 		memset(ss_buf, 0x00, CLUSTER_SIZE);
@@ -254,7 +282,7 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 		sb_disk->sb_free_inodes += ss->ss_free_inodes;
 		sb_disk->sb_free_blocks += ss->ss_free_blocks;
 
-		nvfuse_write_cluster(ss, ss->ss_summary_start, io_manager);
+		nvfuse_write_cluster(ss_buf, ss->ss_summary_start, io_manager);
 
 #if 1
 		if(seg_id != 0)
@@ -402,6 +430,9 @@ void nvfuse_type_check()
 	assert(sizeof(u32) == 4);
 	assert(sizeof(s64) == 8);
 	assert(sizeof(u64) == 8);
+#if (NVFUSE_OS==NVFUSE_OS_LINUX)
+	assert(sizeof(long) == 8);
+#endif
 }
 
 
@@ -519,6 +550,8 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 		return NVFUSE_ERROR;
 	}
 	
+	//nvfuse_ss_debug(&nvh->nvh_iom, seg_p_clu, num_seg);
+
 	ret = nvfuse_alloc_root_inode_direct(&nvh->nvh_iom, nvfuse_sb_disk, 0, seg_p_clu);
 	if (ret)
 	{

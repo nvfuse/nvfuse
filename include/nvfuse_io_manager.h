@@ -143,8 +143,8 @@ struct nvfuse_io_manager {
 
     int (*io_open)(struct nvfuse_io_manager *io_manager, int flags);
     int (*io_close)(struct nvfuse_io_manager *io_manager);
-    int (*io_read)(struct nvfuse_io_manager *io_manager, unsigned long block, int count, void *data);
-    int (*io_write)(struct nvfuse_io_manager *io_manager, unsigned long block, int count, void *data);
+    int (*io_read)(struct nvfuse_io_manager *io_manager, long block, int count, void *data);
+    int (*io_write)(struct nvfuse_io_manager *io_manager, long block, int count, void *data);
 
     int (*aio_init)(struct nvfuse_io_manager *);
     int (*aio_cleanup)(struct nvfuse_io_manager *);
@@ -157,11 +157,11 @@ struct nvfuse_io_manager {
     int (*aio_cancel)(struct nvfuse_io_manager *, struct io_job *);
 };
 
-#define nvfuse_write_ncluster(b, n, k, io_manager) io_manager->io_write(io_manager, n, k, b)
-#define nvfuse_read_ncluster(b, n, k, io_manager) io_manager->io_read(io_manager, n, k, b)
+#define nvfuse_write_ncluster(b, n, k, io_manager) io_manager->io_write(io_manager, (long)n, k, b)
+#define nvfuse_read_ncluster(b, n, k, io_manager) io_manager->io_read(io_manager, (long)n, k, b)
 
-#define nvfuse_write_cluster(b, n, io_manager) io_manager->io_write(io_manager, n, 1, b)
-#define nvfuse_read_cluster(b, n, io_manager) io_manager->io_read(io_manager, n, 1, b)
+#define nvfuse_write_cluster(b, n, io_manager) io_manager->io_write(io_manager, (long)n, 1, b)
+#define nvfuse_read_cluster(b, n, io_manager) io_manager->io_read(io_manager, (long)n, 1, b)
 
 #define nvfuse_aio_prep(b, io_manager) io_manager->aio_prep(io_manager, b)
 

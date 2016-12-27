@@ -49,8 +49,8 @@
 #define NVFUSE_HASH_SIZE 100000
 
 #ifdef __linux__
-//#	define NVFUSE_BUFFER_SIZE (1024*32) //128MB
-#	define NVFUSE_BUFFER_SIZE (8*1024*32) //1024MB
+#	define NVFUSE_BUFFER_SIZE (2 * 1024*32) //256MB
+//#	define NVFUSE_BUFFER_SIZE (8*1024*32) //1024MB
 #else
 #	define NVFUSE_BUFFER_SIZE (32*1024) //128MB
 #endif

@@ -442,7 +442,7 @@ write_complete(void *arg, const struct spdk_nvme_cpl *completion)
 	job->is_completed = 1;
 }
 
-static int spdk_read_blk(struct nvfuse_io_manager *io_manager, unsigned long block, int count, void *buf){		
+static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf){		
     struct ns_entry *ns_entry;
     struct spdk_job job;
     int rbytes = 0;
@@ -453,14 +453,17 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, unsigned long blo
     job.is_completed = 0;
     job.ns_entry = ns_entry;
 
+    /*if ( block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
+	printf(" ss read: block = %ld count = %d \n", block, count);*/
+
     res = spdk_nvme_ns_cmd_read(ns_entry->ns, io_manager->spdk_queue, job.buf,
-	    block * 8, /* LBA start */
+	    (uint64_t)block * 8, /* LBA start */
 	    count * 8, /* number of LBAs */
 	    write_complete, &job, 0);
 
     if (res != 0) {
-	fprintf(stderr, "starting write I/O failed\n");
-	exit(1);
+		fprintf(stderr, "starting read I/O failed\n");
+		exit(1);
     }
 
     while (!job.is_completed) {
@@ -472,11 +475,14 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, unsigned long blo
 }
 
 	    
-static int spdk_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block, int count, void *buf){	
+static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf){	
     struct ns_entry *ns_entry;
     struct spdk_job job;
     int wbytes = 0;
     int res;
+
+    /*if (block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
+	printf(" ss write: block = %ld count = %d \n", block, count);*/
 
     ns_entry = g_namespaces;
     job.buf = buf;
@@ -484,17 +490,17 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, unsigned long bl
     job.ns_entry = ns_entry;
 
     res = spdk_nvme_ns_cmd_write(ns_entry->ns, io_manager->spdk_queue, job.buf,
-	    block * 8, /* LBA start */
+	    (uint64_t)block * 8, /* LBA start */
 	    count * 8, /* number of LBAs */
 	    write_complete, &job, 0);
 
     if (res != 0) {
-	fprintf(stderr, "starting write I/O failed\n");
-	exit(1);
+		fprintf(stderr, "starting write I/O failed\n");
+		exit(1);
     }
 
     while (!job.is_completed) {
-	spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
+		spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
     }
 
     wbytes = count * CLUSTER_SIZE;
@@ -563,8 +569,13 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
 	return 1;
     }
 
+#if 1
     io_manager->blk_size = spdk_nvme_ns_get_sector_size(g_namespaces->ns);
     io_manager->total_blkcount = (spdk_nvme_ns_get_num_sectors(g_namespaces->ns) >> 3) << 3;
+#else /* Reduced Device Size */
+    io_manager->blk_size = spdk_nvme_ns_get_sector_size(g_namespaces->ns);
+    io_manager->total_blkcount =  (long) 2 * 1024 * 1024 * 1024 * 2;
+#endif
 
     printf(" NVMe: sector size = %d, number of sectors = %ld\n", io_manager->blk_size, io_manager->total_blkcount);
     printf(" NVMe: total capacity = %0.3fTB\n", (double)io_manager->total_blkcount * io_manager->blk_size/1024/1024/1024/1024);

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <assert.h>
 
 #include "nvfuse_core.h"
 #include "nvfuse_buffer_cache.h"
@@ -104,6 +105,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	s32 flags;
 	s64 file_allocated_size;
 	struct stat stat_buf;
+	struct timeval tv;
 
 	printf(" aiotest %s filesize = %0.3fMB io_size = %d qdpeth = %d (%c) direct (%d)\n", str, (double)file_size/(1024*1024), io_size, qdepth, is_read ? 'R' : 'W', is_direct);
 
@@ -157,6 +159,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	    return -1;
 	}
 
+	gettimeofday(&tv, NULL);
 	while (io_remaining > 0)
 	{
 
@@ -174,9 +177,11 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			}
 			else
 			{
-				s64 blkno = nvfuse_rand() % (file_size / io_size);
+				s64 blkno = (u64)nvfuse_rand() % (file_size / io_size);
 				actx->actx_offset = blkno * io_size;
 			}
+
+			assert(actx->actx_offset + io_size  <= file_size);
 
 			//printf(" aio offset = %ld\n", actx->actx_offset);
 
@@ -193,7 +198,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			if (ret)
 			{
 				printf(" Error: Enqueue error\n");
-				return ret;
+				goto CLOSE_FD;
 			}
 
 			io_curr += io_size;
@@ -204,9 +209,13 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		
 		/* progress bar */
 		curr_progress = (io_curr * 100 / file_size);
-		if (curr_progress % 10 == 0 && curr_progress != last_progress)
+		if (curr_progress != last_progress)
 		{
 			printf(".");
+			if (curr_progress % 10 == 0)
+			{
+			    printf("%d%% %.3fMB/s\n", curr_progress, (double)io_curr / NVFUSE_MEGA_BYTES / time_since_now(&tv));
+			}
 			fflush(stdout);
 			last_progress = curr_progress;
 		}
@@ -217,7 +226,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		if (ret)
 		{
 			printf(" Error: queue submission \n");
-			return ret;
+			goto CLOSE_FD;
 		}
 
 		//printf(" completion\n");
@@ -226,10 +235,12 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		if (ret)
 		{
 			printf(" Error: queue completion \n");
-			return ret;
+			goto CLOSE_FD;
 		}
 	}
 	
+CLOSE_FD:
+
 	nvfuse_free_aligned_buffer(user_buf);
 	nvfuse_fsync(nvh, fd);
 	nvfuse_closefile(nvh, fd);

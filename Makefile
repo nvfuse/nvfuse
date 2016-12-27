@@ -40,7 +40,7 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) -O2 -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test
 

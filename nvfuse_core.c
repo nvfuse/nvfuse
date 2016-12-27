@@ -1028,6 +1028,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		nvfuse_read_cluster(buf, cno, sb->io_manager);
 		memcpy(sb->sb_ss + i, buf, sizeof(struct nvfuse_segment_summary));
 		//printf("seg %d ibitmap start = %d \n", i, g_nvfuse_sb->sb_ss[i].ss_ibitmap_start);
+		assert(sb->sb_ss[i].ss_id == i);		
 	}
 	nvfuse_free_aligned_buffer(buf);
 

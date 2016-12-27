@@ -33,9 +33,9 @@
 
 static int unix_open(struct nvfuse_io_manager *io_manager, int flags);
 static int unix_close(struct nvfuse_io_manager *io_manager);
-static int unix_read_blk(struct nvfuse_io_manager *io_manager, unsigned long block,
+static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block,
 							   int count, void *buf);
-static int unix_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block,
+static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block,
 								int count,void *buf);
 
 static void io_getevents_error(int error){
@@ -152,6 +152,7 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 	int res;
 	int i;
 
+	//printf(" libaio_complete: max_nr = %d \n", max_nr);
 	while (max_nr)
 	{
 		do {
@@ -180,6 +181,7 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 		if (res) {
 			max_nr -= res;
 			cc += res;
+			//printf(" cc = %d \n", cc);
 		}
 	}
 
@@ -342,7 +344,7 @@ RES:
 	return retval;
 }
 
-static int unix_read_blk(struct nvfuse_io_manager *io_manager, unsigned long block, int count, void *buf){		
+static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf){		
 	int	size, rbytes = 0;
 	s64	location;	
 	
@@ -365,7 +367,7 @@ RETRY:;
 
 }
 
-static int unix_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block,int count,void *buf){	
+static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block,int count,void *buf){	
 	int	size, wbytes = 0;
 	s64	location;
 	

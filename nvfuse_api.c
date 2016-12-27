@@ -101,6 +101,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s8 *devn
 	
 	/* file system mount */
 	if (need_mount) {
+		memset(&nvh->nvh_sb, 0x00, sizeof(struct nvfuse_superblock));
 		ret = nvfuse_mount(nvh);
 		if (ret < 0) {
 			printf(" Error: mount() \n");
