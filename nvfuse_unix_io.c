@@ -281,6 +281,7 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->aio_resetnextsjob = libaio_resetnextsjob;
 	io_manager->aio_resetnextcjob = libaio_resetnextcjob;
 	io_manager->aio_cancel = libaio_cancel;
+	io_manager->dev_format = NULL;
 }
 
 

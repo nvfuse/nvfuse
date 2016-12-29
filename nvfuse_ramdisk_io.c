@@ -50,6 +50,7 @@ void nvfuse_init_memio(struct nvfuse_io_manager *io_manager,char *name,char *pat
 	io_manager->io_close = mem_close;
 	io_manager->io_read = mem_read_blk;
 	io_manager->io_write = mem_write_blk;
+	io_manager->dev_format = NULL;
 
 	io_manager->total_blkcount = NO_OF_SECTORS;
 }

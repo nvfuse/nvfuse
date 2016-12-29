@@ -363,7 +363,7 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 			printf(" Error: aio write test \n");
 			goto AIO_ERROR;
 		}
-		printf(" nvfuse aio write through %.3fMB/s\n", (double)file_size / MB / time_since_now(&tv));
+		printf(" nvfuse aio write through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
 
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0)
@@ -382,7 +382,7 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 			printf(" Error: aio read test \n");
 			goto AIO_ERROR;
 		}
-		printf(" nvfuse aio read through %.3fMB/s\n", (double)file_size / MB / time_since_now(&tv));
+		printf(" nvfuse aio read through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
 
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0)

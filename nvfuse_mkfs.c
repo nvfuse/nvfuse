@@ -491,6 +491,9 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 		printf(" nvfuse_malloc error \n");
 		return -1;
 	}
+
+	/* low level device format (e.g., nvme format) */
+	nvfuse_dev_format(&nvh->nvh_iom);
 	
 	// initialize super block
 	memset(buf, 0x00, CLUSTER_SIZE);

@@ -49,6 +49,7 @@ void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->io_close = file_close;
 	io_manager->io_read = file_read_blk;
 	io_manager->io_write = file_write_blk;
+	io_manager->dev_format = NULL;
 
 	io_manager->total_blkcount = NO_OF_SECTORS;
 

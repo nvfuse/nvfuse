@@ -155,6 +155,7 @@ struct nvfuse_io_manager {
     void (*aio_resetnextcjob)(struct nvfuse_io_manager *);
     void (*aio_resetnextsjob)(struct nvfuse_io_manager *);
     int (*aio_cancel)(struct nvfuse_io_manager *, struct io_job *);
+    int (*dev_format)(struct nvfuse_io_manager *);
 };
 
 #define nvfuse_write_ncluster(b, n, k, io_manager) io_manager->io_write(io_manager, (long)n, k, b)
@@ -173,6 +174,10 @@ struct nvfuse_io_manager {
 #define nvfuse_aio_complete(io_manager) io_manager->aio_complete(io_manager);
 #define nvfuse_aio_getnextcjob(io_manager) io_manager->aio_getnextcjob(io_manager);
 #define nvfuse_aio_cancel(b, io_manager) io_manager->aio_cancel(io_manager, b);
+/* device level format (e.g., nvme format) */
+#define nvfuse_dev_format(io_manager) \
+    if ((io_manager)->dev_format(io_manager)) \
+	(io_manager)->dev_format(io_manager);
 
 extern struct nvfuse_io_manager *nvfuse_io_manager;
 void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth);

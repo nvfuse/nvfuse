@@ -586,6 +586,30 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
     return 0;
 }
 
+static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
+{
+
+    struct ctrlr_entry *ctrlr_entry = g_controllers;
+    struct spdk_nvme_format format = {};
+    u32 ns_id = 1;
+    int ret = 0;
+
+    printf(" nvme foramt: started\n");
+    format.lbaf	= 0;
+    format.ms	= 0;
+    format.pi	= 0;
+    format.pil	= 0;
+    format.ses	= 0;
+    ret = spdk_nvme_ctrlr_format(ctrlr_entry->ctrlr, ns_id, &format);
+    if (ret) {
+	fprintf(stdout, "nvme format: Failed\n");
+	return -1;
+    }
+    printf(" nvme foramt: completed\n");
+
+    return 0;
+}
+
 int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path, int iodepth)
 {
     int len;
@@ -628,10 +652,10 @@ int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char 
     io_manager->aio_resetnextsjob = spdk_resetnextsjob;
     io_manager->aio_resetnextcjob = spdk_resetnextcjob;
     io_manager->aio_cancel = spdk_cancel;
+    io_manager->dev_format = spdk_dev_format;
 
     printf("Initialization complete.\n");
 
     return 0;
 }
-
 #endif
