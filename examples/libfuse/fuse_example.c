@@ -55,8 +55,6 @@
 struct nvfuse_handle *nvh;
 s8 *gdevname;
 
-#define INIT_IOM	1
-#define MOUNT		1
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
@@ -70,16 +68,27 @@ void xmp_destroy(void *data);
 int nvfuse_init(int format, s8 *devname)
 {
 	int ret = 0;
+	char *argv[] = 	{ 
+		"fuse_example",
+	#ifdef SPDK_ENABLED
+		"-t spdk",
+		"-d 01:00",  /* PCIe Slot Number */
+	#else
+		"-t block",
+		"-d /dev/nvme0n1",
+	#endif
+		"-f", /* format */
+		"-m", /* mount */
+		};
+	int argc = 2;
 
-#	if (EXAM_USE_RAMDISK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, format, MOUNT);
-#	elif (EXAM_USE_FILEDISK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, format, MOUNT);
-#	elif (EXAM_USE_UNIXIO == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, format, MOUNT);
-#	elif (EXAM_USE_SPDK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, format, MOUNT);
-#	endif
+	/* create nvfuse_handle with user spcified parameters */
+	nvh = nvfuse_create_handle(NULL, argc, argv);
+	if (nvh == NULL)
+	{
+		fprintf(stderr, "Error: nvfuse_create_handle()\n");
+		return -1;
+	}
 	
 	if (nvh == NULL)
 		ret = -1;

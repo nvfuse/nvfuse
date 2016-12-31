@@ -61,12 +61,8 @@ static char	tokens[512];
 
 /* globla nvfuse handle */
 struct nvfuse_handle *g_nvh;
-#define INIT_IOM	1
-#define FORMAT		0
-#define MOUNT		0
 #define DEINIT_IOM	1
 #define UMOUNT		0
-
 
 #ifndef __USE_FUSE__
 int main(int argc, char *argv[]) {
@@ -82,24 +78,13 @@ int mini_main(int argc, char *argv[]){
 	printf(" Caution!: all data stored in your divice is removed permanently. \n");
 	printf("\n");
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
-	devname = argv[1];
-	if (argc < 2) {
-		printf(" please enter the device file (e.g., /dev/sdb)\n");
+	/* create nvfuse_handle with user spcified parameters */
+	g_nvh = nvfuse_create_handle(NULL, argc, argv);
+	if (g_nvh == NULL)
+	{
+		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
-	printf(" device name = %s \n", devname);
-#endif
-	
-#	if (EXAM_USE_RAMDISK == 1)
-	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
-#	elif (EXAM_USE_FILEDISK == 1)
-	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
-#	elif (EXAM_USE_UNIXIO == 1)
-	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
-#	elif (EXAM_USE_SPDK == 1)
-	g_nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
-#	endif
 	
 	printf("NVFUSE-CLI # ");
 	input = linebuf;

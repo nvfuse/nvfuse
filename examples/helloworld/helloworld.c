@@ -20,21 +20,6 @@
 #include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
-#define EXAM_USE_RAMDISK	0
-#define EXAM_USE_FILEDISK	0
-#define EXAM_USE_UNIXIO		0
-#define EXAM_USE_SPDK		1
-#else
-#define EXAM_USE_RAMDISK	0
-#define EXAM_USE_FILEDISK	1
-#define EXAM_USE_UNIXIO		0
-#define EXAM_USE_SPDK		0
-#endif
-
-#define INIT_IOM	1
-#define FORMAT		1
-#define MOUNT		1
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
@@ -45,24 +30,14 @@ int main(int argc, char *argv[])
 	int fd;
 	int count;
 	char *buf;
-	char *devname; 
-
-	devname = argv[1];
-	if (argc < 2) {
-		printf(" please enter the device file (e.g., /dev/sdb)\n");
+	
+	/* create nvfuse_handle with user spcified parameters */
+	nvh = nvfuse_create_handle(NULL, argc, argv);
+	if (nvh == NULL)
+	{
+		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
-	printf(" device name = %s \n", devname);
-
-#	if (EXAM_USE_RAMDISK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
-#	elif (EXAM_USE_FILEDISK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
-#	elif (EXAM_USE_UNIXIO == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
-#	elif (EXAM_USE_SPDK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
-#	endif
 
 	/* file open and create */
 	fd = nvfuse_openfile_path(nvh, "helloworld.file", O_RDWR | O_CREAT, 0);
@@ -112,4 +87,6 @@ int main(int argc, char *argv[])
 RET:;
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
+	
+	return 0;
 }

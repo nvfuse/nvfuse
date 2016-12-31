@@ -25,14 +25,11 @@
 
 static int mem_open(struct nvfuse_io_manager *io_manager, int flags);
 static int mem_close(struct nvfuse_io_manager *io_manager);
-static int mem_read_blk(struct nvfuse_io_manager *io_manager, unsigned long block,int count, void *buf);
-static int mem_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block,int count, void *buf);
-static int mem_erase_blk(struct nvfuse_io_manager *io_manager, unsigned long block);
-static int mem_readspare(struct nvfuse_io_manager *io_manager, unsigned long block,char *buf);
-static int mem_writespare(struct nvfuse_io_manager *io_manager, unsigned long block,char *buf);
+static int mem_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf);
+static int mem_write_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf);
 
-
-void nvfuse_init_memio(struct nvfuse_io_manager *io_manager,char *name,char *path)
+/* dev_size in MB units */
+void nvfuse_init_memio(struct nvfuse_io_manager *io_manager,char *name,char *path, int dev_size)
 {
 	int len;
 
@@ -52,18 +49,20 @@ void nvfuse_init_memio(struct nvfuse_io_manager *io_manager,char *name,char *pat
 	io_manager->io_write = mem_write_blk;
 	io_manager->dev_format = NULL;
 
-	io_manager->total_blkcount = NO_OF_SECTORS;
+	io_manager->total_blkcount = (s64)dev_size * NVFUSE_MEGA_BYTES / SECTOR_SIZE;
 }
 
 
 static int mem_open(struct nvfuse_io_manager *io_manager,int flags)
 {
-	if(DISK_SIZE >= 1024*1024*1024)
-		printf(" Disk Size = %.2fGB\n", (float)DISK_SIZE/(float)(1024*1024*1024));
-	else if((DISK_SIZE >= 1024*1024))
-		printf(" Disk Size = %.2fMB\n", (float)DISK_SIZE/(float)(1024*1024));
+	int size_mb = io_manager->total_blkcount * SECTOR_SIZE / NVFUSE_MEGA_BYTES;
 
-	io_manager->ramdisk = nvfuse_malloc((size_t)DISK_SIZE);
+	if(size_mb >= 1024)
+		printf(" Disk Size = %.2fGB\n", (float)io_manager->total_blkcount * SECTOR_SIZE /(float)(NVFUSE_GIGA_BYTES));
+	else
+		printf(" Disk Size = %.2fMB\n", (float)io_manager->total_blkcount * SECTOR_SIZE /(float)(NVFUSE_MEGA_BYTES));
+
+	io_manager->ramdisk = nvfuse_malloc((size_t)io_manager->total_blkcount * SECTOR_SIZE);
 	if(io_manager->ramdisk == NULL)
 	{
 		printf(" nvfuse_malloc error\n");
@@ -83,7 +82,7 @@ static int mem_close(struct nvfuse_io_manager *io_manager)
 
 }
  
-static int mem_read_blk(struct nvfuse_io_manager *io_manager, unsigned long block,
+static int mem_read_blk(struct nvfuse_io_manager *io_manager, long block,
 							   int count, void *buf)
 {
 	int	size;
@@ -100,7 +99,7 @@ static int mem_read_blk(struct nvfuse_io_manager *io_manager, unsigned long bloc
 
 }
 
-static int mem_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block,
+static int mem_write_blk(struct nvfuse_io_manager *io_manager, long block,
 								int count, void *buf)
 {
 	int		size;

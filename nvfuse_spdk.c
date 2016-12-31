@@ -329,8 +329,8 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
             exit(1);
         }
 
-	io_manager->io_job_subq[io_manager->io_job_subq_count] = job;
-	io_manager->io_job_subq_count ++;
+        io_manager->io_job_subq[io_manager->io_job_subq_count] = job;
+        io_manager->io_job_subq_count ++;
     }
 
     //printf(" spdk: %d jobs submitted total count = %d\n", qcnt, io_manager->io_job_subq_count);
@@ -358,19 +358,21 @@ static int spdk_complete(struct nvfuse_io_manager *io_manager)
                 cc++;
 
             job_id++;
-	    //printf(" job id = %d \n", job_id);
+	        //printf(" job id = %d \n", job_id);
         }
     }
 
     //printf(" %s: complete ios = %d \n", __FUNCTION__, cc);
     for(job_id = 0; job_id < cc; job_id++){
-        struct io_job *job = io_manager->io_job_subq[job_id];
+        struct io_job *job;
+        
+        job = io_manager->io_job_subq[job_id];        
         job->ret = job->bytes; 
+
         io_manager->cjob[job_id] = job;
         io_manager->num_cjob++;
         io_manager->io_job_subq_count--;
-
-	io_manager->io_job_subq[job_id] = NULL;
+	    io_manager->io_job_subq[job_id] = NULL;
     }
 
     return cc;
@@ -388,7 +390,7 @@ static void spdk_resetnextsjob(struct nvfuse_io_manager *io_manager)
 
     for (i = 0; i < AIO_MAX_QDEPTH; i++)
     {
-	io_manager->io_job_subq[i] = NULL;
+	    io_manager->io_job_subq[i] = NULL;
     }
 
     io_manager->io_job_subq_count = 0;
@@ -400,7 +402,7 @@ static void spdk_resetnextcjob(struct nvfuse_io_manager *io_manager)
 
     for (i = 0; i < AIO_MAX_QDEPTH; i++)
     {
-	io_manager->cjob[i] = NULL;
+	    io_manager->cjob[i] = NULL;
     }
 
     io_manager->num_cjob = 0;
@@ -467,7 +469,7 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
     }
 
     while (!job.is_completed) {
-	spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
+    	spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
     }
 
     rbytes = count * CLUSTER_SIZE;
@@ -550,8 +552,8 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
      */
     rc = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), ealargs);
     if (rc < 0) {
-	fprintf(stderr, "could not initialize dpdk\n");
-	return 1;
+        fprintf(stderr, "could not initialize dpdk\n");
+        return 1;
     }
 
     printf("Initializing NVMe Controllers\n");
@@ -564,9 +566,9 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
      */
     rc = spdk_nvme_probe(NULL, NULL, probe_cb, attach_cb, NULL);
     if (rc != 0) {
-	fprintf(stderr, "spdk_nvme_probe() failed\n");
-	spdk_close(io_manager);
-	return 1;
+        fprintf(stderr, "spdk_nvme_probe() failed\n");
+        spdk_close(io_manager);
+        return 1;
     }
 
 #if 1
@@ -595,27 +597,28 @@ static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
     int ret = 0;
 
     printf(" nvme format: started\n");
-    format.lbaf	= 0;
-    format.ms	= 0;
-    format.pi	= 0;
-    format.pil	= 0;
-    format.ses	= 0;
+    format.lbaf	= 0; /* LBA format (e.g., 512, 512 + 8, 4096, 4096 + 8 */
+    format.ms	= 0; /* metadata setting */
+    format.pi	= 0; /* protection info */
+    format.pil	= 0; /* pi location */
+    format.ses	= 0; /* secure erase setting */
+
     ret = spdk_nvme_ctrlr_format(ctrlr_entry->ctrlr, ns_id, &format);
     if (ret) {
-	fprintf(stdout, "nvme format: Failed\n");
-	return -1;
+        fprintf(stdout, "nvme format: Failed\n");
+        return -1;
     }
     printf(" nvme format: completed\n");
 
     return 0;
 }
 
-int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path, int iodepth)
+void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path, int qdepth)
 {
     int len;
     int i;
 
-    printf(" spdk_setup: filename = %s, iodepth = %d \n", filename, iodepth);
+    printf(" spdk_setup: filename = %s, qdepth = %d \n", filename, qdepth);
 
     len = strlen(path)+1;
     io_manager->dev_path = (char *)malloc(len);	
@@ -638,8 +641,8 @@ int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char 
 
     for (i = 0; i < AIO_MAX_QDEPTH; i++)
     {
-	io_manager->io_job_subq[i] = NULL;
-	io_manager->cjob[i] = NULL;
+        io_manager->io_job_subq[i] = NULL;
+        io_manager->cjob[i] = NULL;
     }
 
     /* SPDK I/O Function Pointers */
@@ -654,8 +657,6 @@ int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char 
     io_manager->aio_cancel = spdk_cancel;
     io_manager->dev_format = spdk_dev_format;
 
-    printf("Initialization complete.\n");
-
-    return 0;
+    printf("Initialization complete.\n");    
 }
 #endif

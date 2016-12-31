@@ -36,10 +36,11 @@ struct io_event;
 //#define USE_NVFUSE_TRACE 0 
 //#define USE_BUFFER_POOL 0
 
-#define IO_MANAGER_RAMDISK	1
-#define IO_MANAGER_FILEDISK	2
-#define IO_MANAGER_UNIXIO	3
-#define IO_MANAGER_SPDK		4
+#define IO_MANAGER_SPDK		1
+#define IO_MANAGER_UNIXIO	2
+#define IO_MANAGER_FILEDISK	3
+#define IO_MANAGER_RAMDISK	4
+
 
 #ifndef __USE_FUSE__
 #if NVFUSE_OS == NVFUSE_OS_LINUX
@@ -64,20 +65,20 @@ struct io_event;
 #	define USE_MTDIO    0
 #endif 
 
-#define DISK_NAME "/dev/nvme0n1p1"
+// #define DISK_NAME "/dev/nvme0n1p1"
 
-#define DISK_FILE_NUM 2
-#define DISK_FILE_PATH "d:/DATA_DISK.DAT"
+// #define DISK_FILE_NUM 2
+// #define DISK_FILE_PATH "d:/DATA_DISK.DAT"
 
-#ifndef __USE_FUSE__
-#if (USE_RAMDISK == 1)
-	#define NO_OF_SECTORS	(2*2*1024*1024) // 64M	
-#else
-#	define NO_OF_SECTORS	((long long)128*2*1024*1024) // 512M
-#endif
-#else
-#	define NO_OF_SECTORS	(16*1024*1024) // 512M
-#endif 
+// #ifndef __USE_FUSE__
+// #if (USE_RAMDISK == 1)
+// 	#define NO_OF_SECTORS	(2*2*1024*1024) // 64M	
+// #else
+// #	define NO_OF_SECTORS	((long long)128*2*1024*1024) // 512M
+// #endif
+// #else
+// #	define NO_OF_SECTORS	(16*1024*1024) // 512M
+// #endif
 
 #define SECTOR_SIZE      512
 #define SECTOR_SIZE_BITS 9
@@ -85,7 +86,7 @@ struct io_event;
 #define CLUSTER_PER_SECTOR (CLUSTER_SIZE >> SECTOR_SIZE_BITS)
 #define SECTORS_PER_CLUSTER CLUSTER_PER_SECTOR
 
-#define DISK_SIZE ((unsigned long long)SECTOR_SIZE * NO_OF_SECTORS)
+//#define DISK_SIZE ((unsigned long long)SECTOR_SIZE * NO_OF_SECTORS)
 
 /* Maximum Number of Queue Depth */
 #define AIO_MAX_QDEPTH  512
@@ -114,7 +115,7 @@ struct nvfuse_io_manager {
     pthread_mutex_t io_lock;
     char *io_name;
     char *dev_path;
-
+    int type;
     char *ramdisk;
     FILE *fp;
     int dev;
@@ -181,7 +182,7 @@ struct nvfuse_io_manager {
 
 extern struct nvfuse_io_manager *nvfuse_io_manager;
 void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth);
-int nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path, int iodepth);
-void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *path);
-
+void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path, int iodepth);
+void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *path, int dev_size);
+void nvfuse_init_memio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth);
 #endif 

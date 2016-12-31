@@ -22,21 +22,24 @@
 #include <assert.h>
 #include "nvfuse_core.h"
 #include "nvfuse_io_manager.h"
+#include "nvfuse_types.h"
+#include "nvfuse_malloc.h"
 
 static int file_open(struct nvfuse_io_manager *io_manager, int flags);
 static int file_close(struct nvfuse_io_manager *io_manager);
-static int file_read_blk(struct nvfuse_io_manager *io_manager,unsigned long block,
+static int file_read_blk(struct nvfuse_io_manager *io_manager, long block,
 							  int count, void *buf);
-static int file_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block,
-							   int count,const void *buf);
+static int file_write_blk(struct nvfuse_io_manager *io_manager, long block,
+							   int count, void *buf);
 
-void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *path)
+/* dev_size in MB units */
+void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *path, s32 dev_size)
 {
 	int len;
 
 	len = strlen(path)+1;
 		
-	io_manager->dev_path = (char *)nvfuse_malloc(len);	
+	io_manager->dev_path = (char *)nvfuse_malloc(len);
 	memset(io_manager->dev_path, 0x00, len);
 	strcpy(io_manager->dev_path, path);
 	
@@ -51,7 +54,7 @@ void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->io_write = file_write_blk;
 	io_manager->dev_format = NULL;
 
-	io_manager->total_blkcount = NO_OF_SECTORS;
+	io_manager->total_blkcount = (s64)dev_size * NVFUSE_MEGA_BYTES / SECTOR_SIZE;
 
 	pthread_mutex_init(&io_manager->io_lock,NULL);
 }
@@ -60,24 +63,23 @@ static int file_open(struct nvfuse_io_manager *io_manager, int flags)
 {
 	struct stat	st;
 	FILE *fp;
-	int	retval;
-	int	open_flags;
-	int i;
 	char buf[CLUSTER_SIZE];
+	int	retval = 0;	
+	int i;	
 	s64 max;
 
 	memset(buf, 0x00, CLUSTER_SIZE);
 
 	fp = fopen(io_manager->dev_path, "rb+");
-	if(fp == NULL){
+	if (fp == NULL) {
 		fp = fopen(io_manager->dev_path, "wb+");
 		if(fp == NULL){
 			printf(" fopen error\n");
-			retval = errno;
+			retval = -1;
 			goto cleanup;
 		}
 		
-		max = (unsigned long long)NO_OF_SECTORS * 512;
+		max = io_manager->total_blkcount * 512;
 		max = max / CLUSTER_SIZE;
 		printf("create file for FILE IO\n");
 		for (i = 0; i < max; i++) {
@@ -92,8 +94,7 @@ static int file_open(struct nvfuse_io_manager *io_manager, int flags)
 
 cleanup:
 
-
-	return 0;
+	return retval;
 }
 
 
@@ -110,52 +111,67 @@ static int file_close(struct nvfuse_io_manager *io_manager)
 	return retval;
 }
 
-
-static int file_read_blk(struct nvfuse_io_manager *io_manager,unsigned long block,
+static int file_read_blk(struct nvfuse_io_manager *io_manager, long block,
 							  int count, void *buf)
 {
-
 	int	size, ret;	
-	s64	location;	
+	#if (_FILE_OFFSET_BITS==64)
+	s64 location;	
+	#else
+	s32	location;
+	#endif
 	
 	size = count * CLUSTER_SIZE;
 	location = ((s64) block * CLUSTER_SIZE);
 	
 	pthread_mutex_lock(&io_manager->io_lock);
-	fsetpos(io_manager->fp, &location);
+	#if (_FILE_OFFSET_BITS==64)
+	fsetpos64(io_manager->fp, (fpos64_t *)(&location));
+	#else
+	fsetpos(io_manager->fp, (fpos_t *)(&location));
+	#endif
 	ret = fread(buf, size, 1, io_manager->fp);
 	pthread_mutex_unlock(&io_manager->io_lock);
 
 	if(ret)
-		return CLUSTER_SIZE;
+		return size;
 	else 
 		return -1;
 }
 
-static int file_write_blk(struct nvfuse_io_manager *io_manager, unsigned long block,
-							   int count,const void *buf)
+static int file_write_blk(struct nvfuse_io_manager *io_manager, long block,
+							   int count, void *buf)
 {
 	int	size, ret;	
-	s64	location;	
+	#if (FILE_OFFSET_BITS==64)
+	s64 location;	
+	#else
+	s32	location;
+	#endif	
 
 	/* debug code */
+	#if 0
 	if (block % 32768 == NVFUSE_SUMMARY_OFFSET)
 	{
 		struct nvfuse_segment_summary *ss = buf;
 		assert(ss->ss_dbitmap_size);		
 	}
+	#endif
 
 	size = count * CLUSTER_SIZE;
 	location = ((s64) block * CLUSTER_SIZE);
 	
 	pthread_mutex_lock(&io_manager->io_lock);
-	fsetpos(io_manager->fp, &location);
+	#if (_FILE_OFFSET_BITS==64)
+	fsetpos64(io_manager->fp, (fpos64_t *)&location);
+	#else
+	fsetpos(io_manager->fp, (fpos_t *)(&location));
+	#endif
 	ret = fwrite(buf, size, 1, io_manager->fp);
 	pthread_mutex_unlock(&io_manager->io_lock);
 	if(ret)
-		return CLUSTER_SIZE;
+		return size;
 	else 
-		return -1;
-	
+		return -1;	
 }
 

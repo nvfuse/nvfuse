@@ -584,8 +584,7 @@ int imark_main(int argc, char *argv[]) {
 	printf(" bias read = %d\n", bias_read);
 	printf(" bias create = %d\n", bias_create);
 	printf(" randon workload = %d\n", rand_workload);
-	printf(" no of lru cache = %d\n", lru_num);
-	printf(" device file = %s\n", DISK_NAME);
+	printf(" no of lru cache = %d\n", lru_num);	
 	printf(" use ramdisk io  = %d\n", use_ramdisk);
 	printf(" use file io = %d\n", use_file);
 	printf(" use device io = %d\n", use_device);

@@ -23,21 +23,6 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
-#define EXAM_USE_RAMDISK	0
-#define EXAM_USE_FILEDISK	0
-#define EXAM_USE_UNIXIO		0
-#define EXAM_USE_SPDK		1
-#else
-#define EXAM_USE_RAMDISK	0
-#define EXAM_USE_FILEDISK	1
-#define EXAM_USE_UNIXIO		0
-#define EXAM_USE_SPDK		0
-#endif
-
-#define INIT_IOM	1
-#define FORMAT		1
-#define MOUNT		1
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
@@ -50,10 +35,10 @@
 #define RT_TEST_TYPE MILL_TEST
 
 #define MAX_TEST    1
+/* quick test */
 #define QUICK_TEST  2
-#define MILL_TEST   3
-
 /* 1 million create/delete test */
+#define MILL_TEST   3
 
 static s32 last_percent;
 
@@ -603,26 +588,16 @@ rt_ctx[] =
 int main(int argc, char *argv[])
 {
 	struct nvfuse_handle *nvh;
-	struct regression_test_ctx *cur_rt_ctx;
-	char *devname; 
+	struct regression_test_ctx *cur_rt_ctx;	
 	int ret = 0;
 
-	devname = argv[1];
-	if (argc < 2) {
-		printf(" please enter the device file (e.g., /dev/sdb)\n");
+	/* create nvfuse_handle with user spcified parameters */
+	nvh = nvfuse_create_handle(NULL, argc, argv);
+	if (nvh == NULL)
+	{
+		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
-	printf(" device name = %s \n", devname);
-
-#	if (EXAM_USE_RAMDISK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_RAMDISK, FORMAT, MOUNT);
-#	elif (EXAM_USE_FILEDISK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_FILEDISK, FORMAT, MOUNT);
-#	elif (EXAM_USE_UNIXIO == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_UNIXIO, FORMAT, MOUNT);
-#	elif (EXAM_USE_SPDK == 1)
-	nvh = nvfuse_create_handle(NULL, devname, INIT_IOM, IO_MANAGER_SPDK, FORMAT, MOUNT);
-#	endif
 
 	printf("\n");
 

@@ -792,61 +792,68 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 {	
 	struct list_head *ptr, *temp;
 	struct nvfuse_buffer_head *bh;
-	struct nvfuse_buffer_cache *bc;	
-	s32 res = 0;
+	struct nvfuse_buffer_cache *bc;
 
-#ifdef USE_AIO_WRITE
+#if (NVFUSE_OS==NVFUSE_OS_LINUX)
 	struct io_job *jobs;
 	struct iocb **iocb;
 	s32 count = 0;	
-
-	res = nvfuse_make_jobs(&jobs, num_blocks);
-	if (res < 0) {
-		return res;
-	}
-
-	iocb = (struct iocb **)malloc(sizeof(struct iocb *) * num_blocks);
-	if (!iocb) {
-		printf(" Malloc error: struct iocb\n");
-		return -1;
-	}
-
-	list_for_each_safe(ptr, temp, head) {
-		bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
-		assert(bc->bc_dirty);
-
-		(*(jobs + count)).offset = (s64)bc->bc_pno * CLUSTER_SIZE;
-		(*(jobs + count)).bytes = (size_t)CLUSTER_SIZE;
-		(*(jobs + count)).ret = 0;
-		(*(jobs + count)).req_type = WRITE;
-		(*(jobs + count)).buf = bc->bc_buf;
-		(*(jobs + count)).complete = 0;
-		iocb[count] = &((*(jobs + count)).iocb);
-		count++;
-
-	}
-
-	count = 0;
-	while(count < num_blocks)
-	{
-		nvfuse_aio_prep(jobs + count, sb->io_manager);
-		count++;
-	}
-
-	nvfuse_aio_submit(iocb, num_blocks, sb->io_manager);
-	sb->io_manager->queue_cur_count = num_blocks;
-
-	nvfuse_wait_aio_completion(sb, jobs, num_blocks);
-
-	free(iocb);
-	free(jobs);
-#else
-	list_for_each_safe(ptr, temp, head) {
-		bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
-		assert(bc->bc_dirty);
-		nvfuse_write_cluster(bc->bc_buf, bc->bc_pno, sb->io_manager);
-	}
 #endif
+	
+	s32 res = 0;
+#if (NVFUSE_OS==NVFUSE_OS_LINUX)
+	if (sb->io_manager->type == IO_MANAGER_SPDK || sb->io_manager->type == IO_MANAGER_UNIXIO)
+	{
+		res = nvfuse_make_jobs(&jobs, num_blocks);
+		if (res < 0) {
+			return res;
+		}
+
+		iocb = (struct iocb **)malloc(sizeof(struct iocb *) * num_blocks);
+		if (!iocb) {
+			printf(" Malloc error: struct iocb\n");
+			return -1;
+		}
+
+		list_for_each_safe(ptr, temp, head) {
+			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+			assert(bc->bc_dirty);
+
+			(*(jobs + count)).offset = (s64)bc->bc_pno * CLUSTER_SIZE;
+			(*(jobs + count)).bytes = (size_t)CLUSTER_SIZE;
+			(*(jobs + count)).ret = 0;
+			(*(jobs + count)).req_type = WRITE;
+			(*(jobs + count)).buf = bc->bc_buf;
+			(*(jobs + count)).complete = 0;
+			iocb[count] = &((*(jobs + count)).iocb);
+			count++;
+
+		}
+
+		count = 0;
+		while(count < num_blocks)
+		{
+			nvfuse_aio_prep(jobs + count, sb->io_manager);
+			count++;
+		}
+
+		nvfuse_aio_submit(iocb, num_blocks, sb->io_manager);
+		sb->io_manager->queue_cur_count = num_blocks;
+
+		nvfuse_wait_aio_completion(sb, jobs, num_blocks);
+
+		free(iocb);
+		free(jobs);
+	}
+	else
+#endif
+	{	/* in case of ramdisk or filedisk */
+		list_for_each_safe(ptr, temp, head) {
+			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+			assert(bc->bc_dirty);
+			nvfuse_write_cluster(bc->bc_buf, bc->bc_pno, sb->io_manager);
+		}
+	}
 
 	list_for_each_safe(ptr, temp, head) {
 		bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);

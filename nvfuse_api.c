@@ -36,11 +36,103 @@
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
 
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s8 *devname, s32 init_iom, s32 io_manager_type, s32 need_format, s32 need_mount)
+void usage(char *cmd)
+{
+	printf("\n Usage: \n\n");
+	printf(" %s -d spdk [other options]\n", cmd);
+	printf("\t-t: device type (e.g., spdk, block, file, ramdisk)\n");
+	printf("\t-d: device name (e.g., 01:00, /dev/nvme0n1, /home/file.dat, ramdisk)\n");	
+	printf("\t-f: nvfuse format\n");
+	printf("\t-m: nvfuse mount\n");
+	printf("\t-q: qdepth \n");
+	printf("\t-s: size (in MB) \n\n");
+
+	printf(" Example:\n");
+	printf(" #sudo %s -t spdk -d 01:00 -f -m\n", cmd);
+	printf(" #sudo %s -t block -d /dev/nvme0n1 -f -m\n", cmd);
+	printf(" #sudo %s -t file -d /home/file.data -s 65536 -f -m\n", cmd);
+	printf(" #sudo %s -t ramdisk -s 8192 -f -m\n", cmd);
+	printf("\n");
+}
+
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc, char **argv)
 {
 	struct nvfuse_handle *nvh;
-	struct nvfuse_io_manager *io_manager;
-	s32 ret;
+	struct nvfuse_io_manager *io_manager;	
+	s8 *devname; /* e.g., /dev/nvme0n1, /home/filedisk.dat, 01:00 */
+	s32 init_iom = 1;
+	s32 io_manager_type;
+	s32 need_format;
+	s32 need_mount;
+	s32 qdepth = AIO_MAX_QDEPTH;
+	s32 dev_size; /* in MB units */
+	s32 ret;	
+	s8 op;
+	s8 *cmd;
+
+	cmd = argv[0];
+
+	if (argc == 1) 
+	{
+		goto PRINT_USAGE;
+	}
+	
+	/* f (format) and m (mount) don't have any argument. */
+	while ((op = getopt(argc, argv, "d:t:fmq:s:")) != -1) {
+		switch (op) {		
+		case 'd':		
+			devname = optarg;
+			break;
+		case 'f':		
+			need_format = 1;
+			break;
+		case 'm':
+			need_mount = 1;
+			break;
+		case 't':			
+			//printf(" type = %s\n", optarg);
+		#ifdef SPDK_ENABLED
+			if (!strcmp("spdk", optarg))
+			{
+				io_manager_type = IO_MANAGER_SPDK;
+			}		
+			else 
+		#endif			
+			if (!strcmp("block", optarg))
+			{
+				io_manager_type = IO_MANAGER_UNIXIO;
+			}
+			else if (!strcmp("file", optarg))
+			{
+				io_manager_type = IO_MANAGER_FILEDISK;
+			}
+			else if (!strcmp("ramdisk", optarg))
+			{
+				io_manager_type = IO_MANAGER_RAMDISK;
+			}
+			else
+			{	
+				goto PRINT_USAGE;
+			}
+			break;
+		case 'q':
+			qdepth = atoi(optarg);
+			if (qdepth == 0 || qdepth > AIO_MAX_QDEPTH)
+			{
+				fprintf( stderr, "Invalid qdepth value = %d (max qdepth = %d)\n", qdepth, AIO_MAX_QDEPTH);
+			}
+			break;
+		case 's':
+			dev_size = atoi(optarg);
+			if (dev_size == 0)
+			{
+				fprintf( stderr, "Invalid dev size = %d MB)\n", dev_size);
+			}
+			break;
+		default:
+			goto PRINT_USAGE;
+		}
+	}
 
 	if (a_nvh == NULL) 
 	{
@@ -56,30 +148,29 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s8 *devn
 	{
 		nvh = a_nvh;
 	}
-
+	
+	
 	/* Initialize IO Manager */
 	if (init_iom) {
+		//printf(" io_manager_type = %d\n", io_manager_type);
 		io_manager = &nvh->nvh_iom;
+		io_manager->type = io_manager_type;
 		switch (io_manager_type)
 		{
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
 		case IO_MANAGER_RAMDISK:
-			nvfuse_init_memio(io_manager, "RANDISK", "RAM");
+			nvfuse_init_memio(io_manager, "RAMDISK", "RAM", dev_size);
 			break;
 		case IO_MANAGER_FILEDISK:
-			nvfuse_init_fileio(io_manager, "FILE", DISK_FILE_PATH);
+			nvfuse_init_fileio(io_manager, "FILE", devname, dev_size);
 			break;
-#endif
-#if NVFUSE_OS == NVFUSE_OS_LINUX
 		case IO_MANAGER_UNIXIO:
-			nvfuse_init_unixio(io_manager, "SSD", devname, AIO_MAX_QDEPTH);
+			nvfuse_init_unixio(io_manager, "SSD", devname, qdepth);
 			break;
 #	ifdef SPDK_ENABLED
 		case IO_MANAGER_SPDK:
-			nvfuse_init_spdk(io_manager, "SPDK", "spdk:namespace0", AIO_MAX_QDEPTH);
+			nvfuse_init_spdk(io_manager, "SPDK", devname, qdepth);
 			break;
 #	endif
-#endif
 		default:
 			printf(" Error: Invalid IO Manager Type = %d", io_manager_type);
 			return NULL;
@@ -109,6 +200,10 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, s8 *devn
 		}
 	}	
 	return nvh;
+
+PRINT_USAGE:
+	usage(cmd);
+	return NULL;
 }
 
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount)

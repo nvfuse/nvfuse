@@ -1,3 +1,4 @@
 #!/bin/sh
 
-make
+# execute helloworld example
+examples/helloworld/helloworld -t ramdisk -t ramdisk -s 1024
