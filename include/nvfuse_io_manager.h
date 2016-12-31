@@ -176,7 +176,7 @@ struct nvfuse_io_manager {
 #define nvfuse_aio_cancel(b, io_manager) io_manager->aio_cancel(io_manager, b);
 /* device level format (e.g., nvme format) */
 #define nvfuse_dev_format(io_manager) \
-    if ((io_manager)->dev_format(io_manager)) \
+    if ((io_manager)->dev_format) \
 	(io_manager)->dev_format(io_manager);
 
 extern struct nvfuse_io_manager *nvfuse_io_manager;

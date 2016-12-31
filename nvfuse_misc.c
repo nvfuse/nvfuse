@@ -342,7 +342,7 @@ s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh)
 		/* pre-allocation of data blocks*/
 		nvfuse_fallocate(nvh, str, 0, file_size);
 		printf(" finish fallocate %s size %lu \n", str, (long)file_size);				
-		printf(" nvfuse fallocate throughput %.3fMB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
+		printf(" nvfuse fallocate throughput %.3f MB/s\n", (double)file_size/(1024*1024)/time_since_now(&tv));
 
 		gettimeofday(&tv, NULL);
 		printf(" start rmfile %s size %lu \n", str, (long)file_size);
@@ -352,7 +352,7 @@ s32 nvfuse_fallocate_test(struct nvfuse_handle *nvh)
 			printf(" Error: rmfile = %s\n", str);
 			break;
 		}
-		printf(" nvfuse rmfile throughput %.3fMB/s\n", (double)file_size / (1024 * 1024) / time_since_now(&tv));
+		printf(" nvfuse rmfile throughput %.3f MB/s\n", (double)file_size / (1024 * 1024) / time_since_now(&tv));
 	}
 
 	return NVFUSE_SUCCESS;

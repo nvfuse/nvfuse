@@ -16,7 +16,8 @@ Consistency
 	+ Metadata logging
 
 Interface
-	+ AIO server layer (similar to Linux native AIO engine)
+	+ Create handle with storage device type (e.g., SPDK, Linux block device, file, and memory), buffer size, and buffer mode (e.g., meta buffer, data buffer, sync)
+	+ AIO layer (similar to Linux native AIO engine)
 	+ seekdir, telldir, closedir
 	+ O_DIRECT, O_SYNC flags
 
@@ -42,3 +43,7 @@ Test Script
 	+ creating maximum size of file (e.g., approximately 4TB)
 	+ Generating AIO workloads with measurements of bandwidth, iops, and latency
 	+ Sync workloads with measurements of bandwdith, iops and latency	
+
++Miscellaneous
+	+ Debug message print
+	+ Error handleing and status code

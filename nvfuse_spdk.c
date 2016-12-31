@@ -594,7 +594,7 @@ static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
     u32 ns_id = 1;
     int ret = 0;
 
-    printf(" nvme foramt: started\n");
+    printf(" nvme format: started\n");
     format.lbaf	= 0;
     format.ms	= 0;
     format.pi	= 0;
@@ -605,7 +605,7 @@ static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
 	fprintf(stdout, "nvme format: Failed\n");
 	return -1;
     }
-    printf(" nvme foramt: completed\n");
+    printf(" nvme format: completed\n");
 
     return 0;
 }

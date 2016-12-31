@@ -283,7 +283,10 @@ static s32 nvfuse_format_write_segment_summary(struct nvfuse_handle *nvh, struct
 		sb_disk->sb_free_blocks += ss->ss_free_blocks;
 
 		nvfuse_write_cluster(ss_buf, ss->ss_summary_start, io_manager);
-
+		#if 0 /* debug */
+		nvfuse_read_cluster(ss_buf, ss->ss_summary_start, io_manager);
+		assert(ss->ss_id == seg_id);
+		#endif
 #if 1
 		if(seg_id != 0)
 			continue;

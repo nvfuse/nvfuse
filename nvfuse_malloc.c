@@ -36,8 +36,9 @@ void *nvfuse_alloc_aligned_buffer(size_t size)
 {
 	void *p;
 #ifndef USE_RTE_MEMALLOC
-	posix_memalign(&p, getpagesize(), size);
-	if(!p) {
+	s32 ret;
+	ret = posix_memalign(&p, getpagesize(), size);
+	if (!p || ret) {
 		perror("memalign");
 		return NULL;
 	}
