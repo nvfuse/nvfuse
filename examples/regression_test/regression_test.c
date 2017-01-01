@@ -41,6 +41,7 @@
 #define MILL_TEST   3
 
 static s32 last_percent;
+static s32 test_type = QUICK_TEST;
 
 void rt_progress_reset()
 {
@@ -63,6 +64,20 @@ void rt_progress_report(s32 curr, s32 max)
     }
 }
 
+char *rt_decode_test_type(s32 type)
+{
+	switch (type)
+	{
+		case MAX_TEST:
+			return "MAX_TEST";
+		case QUICK_TEST:
+			return "QUICK_TEST";
+		case MILL_TEST:
+			return "MILL_TEST";
+	}
+
+	return NULL;
+}
 int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 {
 	struct timeval tv;
@@ -79,18 +94,23 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		return -1;
 	}
 
-#if (RT_TEST_TYPE == MAX_TEST)
-	max_inodes = stat.f_ffree; /* # of free inodes */
-#elif (RT_TEST_TYPE == QUICK_TEST)
-	max_inodes = 100;
-#elif (RT_TEST_TYPE == MILL_TEST)
-	max_inodes = stat.f_ffree; /* # of free inodes */
-	if (max_inodes > 1000000)
+	switch (test_type)
 	{
-	    max_inodes = 1000000;
+		case MAX_TEST:
+			max_inodes = stat.f_ffree; /* # of free inodes */
+			break;
+		case QUICK_TEST:
+			max_inodes = 100;
+			break;
+		case MILL_TEST:
+			/* # of free inodes */
+			max_inodes = stat.f_ffree < 1000000 ? stat.f_ffree: 1000000;			
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;
 	}
-#endif
-
+	
 	/* reset progress percent */
 	rt_progress_reset();
 	gettimeofday(&tv, NULL);
@@ -175,17 +195,23 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		return -1;
 	}
 
-#if (RT_TEST_TYPE == MAX_TEST)
-	max_inodes = stat.f_ffree; /* # of free inodes */
-#elif (RT_TEST_TYPE == QUICK_TEST)
-	max_inodes = 100;
-#elif (RT_TEST_TYPE == MILL_TEST)
-	max_inodes = stat.f_ffree; /* # of free inodes */
-	if (max_inodes > 1000000)
+	switch (test_type)
 	{
-	    max_inodes = 1000000;
+		case MAX_TEST:
+			max_inodes = stat.f_ffree; /* # of free inodes */
+			break;
+		case QUICK_TEST:
+			max_inodes = 100;
+			break;
+		case MILL_TEST:
+			/* # of free inodes */
+			max_inodes = stat.f_ffree < 1000000 ? stat.f_ffree: 1000000;			
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;			
 	}
-#endif
+
 	/* reset progress percent */
 	rt_progress_reset();
 	gettimeofday(&tv, NULL);
@@ -272,20 +298,24 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 
 	sprintf(str, "file_allocate_test");
 
-#if (RT_TEST_TYPE == MAX_TEST)
-	file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
-#elif (RT_TEST_TYPE == QUICK_TEST)
-	file_size = 100 * MB;
-#elif (RT_TEST_TYPE == MILL_TEST)	
-#	if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	file_size = (s64)1 * TB;
-#	else
-	file_size = (s64)32 * GB;
-#	endif
-	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
-				(s64)statvfs_buf.f_bfree * CLUSTER_SIZE : 
+	switch (test_type)
+	{
+		case MAX_TEST:
+			file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
+			break;
+		case QUICK_TEST:
+			file_size = 100 * MB;
+			break;
+		case MILL_TEST:
+			file_size = (s64)1 * TB;
+			file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
+				(s64)(statvfs_buf.f_bfree / 2) * CLUSTER_SIZE : 
 				(s64)file_size;
-#endif
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;
+	}
 
 	fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
 	if (fid < 0)
@@ -403,21 +433,25 @@ int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
 		printf(" statfs error \n");
 		return -1;
 	}
-	
-#if (RT_TEST_TYPE == MAX_TEST)
-	file_size = (s64)statvfs_buf.f_bfree * CLUSTER_SIZE;
-#elif (RT_TEST_TYPE == QUICK_TEST)
-	file_size = 100 * MB;
-#elif (RT_TEST_TYPE == MILL_TEST)
-#	if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	file_size = (s64)128 * GB;
-#	else
-	file_size = (s64)32 * GB;
-#	endif
-	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?
-		(s64)statvfs_buf.f_bfree * CLUSTER_SIZE :
-		(s64)file_size;
-#endif
+
+	switch (test_type)
+	{
+		case MAX_TEST:
+			file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
+			break;
+		case QUICK_TEST:
+			file_size = 100 * MB;
+			break;
+		case MILL_TEST:
+			file_size = (s64)128 * GB;
+			file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
+				(s64)(statvfs_buf.f_bfree / 2) * CLUSTER_SIZE : 
+				(s64)file_size;
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;
+	}
 
 	direct = 1;
 	qdepth = 128;
@@ -442,20 +476,24 @@ int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
 		return -1;
 	}
 
-#if (RT_TEST_TYPE == MAX_TEST)
-	file_size = (s64)statvfs_buf.f_bfree * CLUSTER_SIZE;
-#elif (RT_TEST_TYPE == QUICK_TEST)
-	file_size = 100 * MB;
-#elif (RT_TEST_TYPE == MILL_TEST)
-#	if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	file_size = (s64)128 * GB;
-#	else
-	file_size = (s64)32 * GB;
-#	endif
-	file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?
-		(s64)statvfs_buf.f_bfree * CLUSTER_SIZE :
-		(s64)file_size;
-#endif
+	switch (test_type)
+	{
+		case MAX_TEST:
+			file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
+			break;
+		case QUICK_TEST:
+			file_size = 100 * MB;
+			break;
+		case MILL_TEST:
+			file_size = (s64)128 * GB;
+			file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
+				(s64)(statvfs_buf.f_bfree / 2) * CLUSTER_SIZE : 
+				(s64)file_size;
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;
+	}
 
 	direct = 1;
 	qdepth = 128;
@@ -481,16 +519,31 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 	}
 
 #if (RT_TEST_TYPE == MAX_TEST)
-	nr = statvfs_buf.f_bfree / 2;
+	
 #elif (RT_TEST_TYPE == QUICK_TEST)
-	nr = 100;
+	
 #elif (RT_TEST_TYPE == MILL_TEST)
-	nr = statvfs_buf.f_bfree / 2;
-	if (nr > 1000000)
-	{
-	    nr = 1000000;
-	}
+	
 #endif
+	switch (test_type)
+	{
+		case MAX_TEST:
+			nr = statvfs_buf.f_bfree / 2;
+			break;
+		case QUICK_TEST:
+			nr = 100;
+			break;
+		case MILL_TEST:
+			nr = statvfs_buf.f_bfree / 2;
+			if (nr > 1000000)
+			{
+				nr = 1000000;
+			}
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;			
+	}
 
 	printf(" # of files = %d \n", nr);
 
@@ -590,6 +643,30 @@ int main(int argc, char *argv[])
 	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;	
 	int ret = 0;
+
+	// if (argc == 1)
+	// {
+	// 	test_type = QUICK_TEST;
+	// 	printf(" Set QUICK TEST as default\n");
+	// }
+	// else
+	// {
+	// 	test_type = atoi(argv[1]);
+	// 	/*
+	// 	#define MAX_TEST    1
+	// 	#define QUICK_TEST  2
+	// 	#define MILL_TEST   3
+	// 	*/
+	// 	if(test_type < MAX_TEST || test_type > MILL_TEST)
+	// 	{
+	// 		fprintf(stderr, " Invalid test type = %d \n", test_type);
+	// 		return -1;
+	// 	}
+	// }
+	
+	test_type = MILL_TEST;
+
+	printf(" Perform test %s ... \n", rt_decode_test_type(test_type));
 
 	/* create nvfuse_handle with user spcified parameters */
 	nvh = nvfuse_create_handle(NULL, argc, argv);

@@ -109,7 +109,7 @@ struct nvfuse_ictx_manager {
 };
 
 
-int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb);
+int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size);
 void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb);
 
 struct nvfuse_buffer_cache *nvfuse_alloc_bc(void);

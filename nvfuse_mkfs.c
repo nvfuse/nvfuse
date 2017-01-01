@@ -595,8 +595,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	nvfuse_sb_disk->sb_last_update_usec = tv.tv_usec;
 
 	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, io_manager);
-
-	printf(" buffer pool size = %fMB\n",(float)(NVFUSE_BUFFER_SIZE * CLUSTER_SIZE)/(float)(1024*1024));	
+	
 	printf("\n NVFUSE capability\n");
 	printf(" max file size = %.3fTB\n", (double)MAX_FILE_SIZE / NVFUSE_TERA_BYTES);
 

@@ -182,7 +182,7 @@ int parse_and_execute(char *input)
 			} else if (!strcmp(arg[0],"type")) {
 				nvfuse_type(g_nvh, arg[1]);
 			} else if (!strcmp(arg[0],"mount")) {
-				nvfuse_mount(g_nvh);
+				nvfuse_mount(g_nvh, 0);
 			} else if (!strcmp(arg[0],"umount")) {
 				nvfuse_umount(g_nvh);
 			} else if (!strcmp(arg[0], "imark")) {

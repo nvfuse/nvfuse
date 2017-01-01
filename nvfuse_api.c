@@ -44,8 +44,9 @@ void usage(char *cmd)
 	printf("\t-d: device name (e.g., 01:00, /dev/nvme0n1, /home/file.dat, ramdisk)\n");	
 	printf("\t-f: nvfuse format\n");
 	printf("\t-m: nvfuse mount\n");
-	printf("\t-q: qdepth \n");
-	printf("\t-s: size (in MB) \n\n");
+	printf("\t-q: qdepth \n");	
+	printf("\t-b: buffer size (in MB)\n");
+	printf("\t-s: fs size (in MB) \n\n");
 
 	printf(" Example:\n");
 	printf(" #sudo %s -t spdk -d 01:00 -f -m\n", cmd);
@@ -65,7 +66,8 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 	s32 need_format;
 	s32 need_mount;
 	s32 qdepth = AIO_MAX_QDEPTH;
-	s32 dev_size; /* in MB units */
+	s32 dev_size = 0; /* in MB units */
+	s32 buffer_size = 0; /* in MB units */
 	s32 ret;	
 	s8 op;
 	s8 *cmd;
@@ -78,7 +80,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 	}
 	
 	/* f (format) and m (mount) don't have any argument. */
-	while ((op = getopt(argc, argv, "d:t:fmq:s:")) != -1) {
+	while ((op = getopt(argc, argv, "d:t:fmq:s:b:")) != -1) {
 		switch (op) {		
 		case 'd':		
 			devname = optarg;
@@ -90,15 +92,17 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 			need_mount = 1;
 			break;
 		case 't':			
-			//printf(" type = %s\n", optarg);
-		#ifdef SPDK_ENABLED
+			//printf(" type = %s\n", optarg);		
 			if (!strcmp("spdk", optarg))
 			{
+				#ifdef SPDK_ENABLED
 				io_manager_type = IO_MANAGER_SPDK;
+				#else
+				fprintf(stderr, "Please, rebuild with both DPDK_DIR and SPDK_ROOT_DIR paths.\n");
+				return NULL;
+				#endif
 			}		
-			else 
-		#endif			
-			if (!strcmp("block", optarg))
+			else if (!strcmp("block", optarg))
 			{
 				io_manager_type = IO_MANAGER_UNIXIO;
 			}
@@ -127,6 +131,13 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 			if (dev_size == 0)
 			{
 				fprintf( stderr, "Invalid dev size = %d MB)\n", dev_size);
+			}
+			break;
+		case 'b':
+			buffer_size = atoi(optarg);
+			if (buffer_size == 0)
+			{
+				fprintf( stderr, "Invalid buffer size = %d MB)\n", buffer_size);
 			}
 			break;
 		default:
@@ -193,7 +204,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 	/* file system mount */
 	if (need_mount) {
 		memset(&nvh->nvh_sb, 0x00, sizeof(struct nvfuse_superblock));
-		ret = nvfuse_mount(nvh);
+		ret = nvfuse_mount(nvh, buffer_size);
 		if (ret < 0) {
 			printf(" Error: mount() \n");
 			return NULL;

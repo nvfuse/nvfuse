@@ -28,6 +28,9 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "time.h"
+#ifdef SPDK_ENABLED
+#include "spdk/env.h"
+#endif
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 #include <windows.h>
@@ -86,7 +89,19 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 
 void nvfuse_aio_test_callback(void *arg)
 {
-	struct nvfuse_aio_ctx *actx = (struct nvfuse_aio_ctx *)arg;
+	struct nvfuse_aio_ctx *actx = (struct nvfuse_aio_ctx *)arg;	
+	struct nvfuse_aio_queue *aioq = actx->actx_queue;
+
+#ifdef SPDK_ENABLED
+	u64 latency_tsc;
+	latency_tsc = actx->actx_complete_tsc - actx->actx_submit_tsc;
+	aioq->aio_lat_total_tsc += latency_tsc;
+	aioq->aio_lat_total_count++;
+	aioq->aio_lat_min_tsc = MIN(latency_tsc, aioq->aio_lat_min_tsc);
+	aioq->aio_lat_max_tsc = MAX(latency_tsc, aioq->aio_lat_max_tsc);
+	aioq->aio_total_size += actx->actx_bytes;
+#endif
+
 	free(actx);
 }
 
@@ -240,7 +255,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 	}
 	
 CLOSE_FD:
-
+	nvfuse_aio_queue_deinit(&aioq);
 	nvfuse_free_aligned_buffer(user_buf);
 	nvfuse_fsync(nvh, fd);
 	nvfuse_closefile(nvh, fd);

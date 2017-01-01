@@ -343,11 +343,13 @@ struct nvfuse_buffer_cache *nvfuse_alloc_bc(){
 	return bc;
 }
 
-int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb){
+/* buffe_size in MB units */
+int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 	struct nvfuse_buffer_manager *bm;
 	struct nvfuse_buffer_cache *bc;
 	s32 i;
-		
+	s32 recommended_size;
+
 	bm = (struct nvfuse_buffer_manager *)nvfuse_malloc(sizeof(struct nvfuse_buffer_manager));
 	if (bm == NULL) {
 		printf(" nvfuse_malloc error \n");
@@ -366,17 +368,46 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb){
 		bm->bm_hash_count[i] = 0;
 	}
 
+	/* 0.1% buffer of device size is recommended for better performance. */
+	recommended_size = sb->io_manager->total_blkcount / SECTORS_PER_CLUSTER / 1000;
+	if (buffer_size == 0)
+	{
+		bm->bm_cache_size = recommended_size;
+	}
+	else
+	{
+		bm->bm_cache_size = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
+	}
+	assert(bm->bm_cache_size);
+	
+	if (bm->bm_cache_size < recommended_size)
+	{
+		printf(" Performance will degrade due to small buffer size (%.3fMB)\n", 
+				(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);		
+	} 
+	else 
+	{
+		printf(" Buffer cache size = %.3f MB\n", 
+			(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);
+	}
+	
 	/* alloc unsed list buffer cache */
-	for(i = 0;i < NVFUSE_BUFFER_SIZE;i++){			
+	for (i = 0;i < bm->bm_cache_size;i++)
+	{
 		bc = nvfuse_alloc_bc();
-		if (!bc) {
+		if (!bc)
+		{
 			return -1;
 		}
 
 		bc->bc_sb = sb;
 		bc->bc_buf = (s8 *)nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
-		if (bc->bc_buf == NULL) {
+		if (bc->bc_buf == NULL)
+		{
 			printf(" nvfuse_malloc error \n");
+		#ifdef SPDK_ENABLED
+			printf(" Please, increase # of huge pages in scripts/setup.sh\n");
+		#endif
 			return -1;
 		}
 
@@ -387,7 +418,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb){
 		bm->bm_hash_count[HASH_NUM]++;
 		bm->bm_list_count[BUFFER_TYPE_UNUSED]++;
 	}	
-
+	
 	return 0;
 }
 
@@ -411,10 +442,8 @@ void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb)
 			removed_count++;
 		}
 	}
-	assert(removed_count == NVFUSE_BUFFER_SIZE);
+	assert(removed_count == sb->sb_bm->bm_cache_size);
 }
-
-
 
 s32 nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh) 
 {

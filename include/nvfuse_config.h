@@ -47,22 +47,14 @@
 
 /* LRU Cache Size and Hash Size */
 #define NVFUSE_HASH_SIZE 100000
-
-#ifdef __linux__
-#	define NVFUSE_BUFFER_SIZE (2 * 1024*32) //256MB
-//#	define NVFUSE_BUFFER_SIZE (8*1024*32) //1024MB
-#else
-#	define NVFUSE_BUFFER_SIZE (32*1024) //128MB
-#endif
-
-#	define NVFUSE_ICTXC_SIZE (32*1024)
+/* Default Buffer Cache Size */
+#define NVFUSE_BUFFER_SIZE (2 * 1024*32) //256MB
+/* Default Inode Context Size */
+#define NVFUSE_ICTXC_SIZE (32*1024)
 
 #define NVFUSE_SYNC_TIME	30 /* seconds */
 //#define NVFUSE_SYNC_DIRTY_COUNT (1024) /* blocks */
 #define NVFUSE_SYNC_DIRTY_COUNT (256) /* blocks */
-
-/* Segment Summary Logging Size for SSR scheme */
-#define NVFUSE_SS_LOG_FLUSH	(4096* 4)
 
 /* Use Async Write */
 #define NVFUSE_USE_ASYNC_WRITER

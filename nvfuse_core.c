@@ -932,7 +932,7 @@ void nvfuse_write_statistics(struct nvfuse_superblock *sb){
 	fclose(fp);
 }
 
-s32 nvfuse_mount(struct nvfuse_handle *nvh) 
+s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 {
 	struct nvfuse_superblock *sb;
 	struct nvfuse_buffer_list *bh;
@@ -951,7 +951,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	
 	sb->io_manager = &nvh->nvh_iom;
 	
-	res = nvfuse_init_buffer_cache(sb);
+	res = nvfuse_init_buffer_cache(sb, buffer_size);
 	if (res < 0)
 	{
 		printf(" Error: initialization of buffer cache \n");

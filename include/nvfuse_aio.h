@@ -40,9 +40,11 @@ struct nvfuse_aio_ctx {
 	struct list_head actx_list; /* linked list */
 	struct list_head actx_bh_head; /* buffer head list */
 	s32 actx_bh_count;
-	void(*actx_cb_func)(void  *arg); /* callback function to process completion for each context */
+	void(*actx_cb_func)(void *arg); /* callback function to process completion for each context */
 	struct nvfuse_aio_queue *actx_queue; /* aio queue pointer */
 	struct nvfuse_superblock *actx_sb; /* superblock pointer */
+	u64 actx_submit_tsc; /* measurement of latency */
+	u64 actx_complete_tsc; /* measurement of latency */
 
 	void *tag1; /* keep track of temp pointer */
 	void *tag2; /* keep track of temp pointer */
@@ -61,9 +63,19 @@ struct nvfuse_aio_queue {
 	struct list_head acq_head; /* completion queue head */
 	s32 acq_max_depth; /* maximum completion queue depth */
 	s32 acq_cur_depth; /* current completion queue depth */
+	
+	u64 aio_start_tsc;
+	u64 aio_end_tsc;
+
+	u64 aio_lat_total_tsc;
+	u64 aio_lat_total_count;
+	u64 aio_lat_min_tsc;
+	u64 aio_lat_max_tsc;
+	u64 aio_total_size;
 };
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue *aioq, s32 max_depth);
+void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq);
 s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);
 s32 nvfuse_aio_queue_dequeue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);
 s32 nvfuse_aio_queue_move(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);

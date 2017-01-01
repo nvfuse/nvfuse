@@ -23,6 +23,9 @@
 #include "nvfuse_aio.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
+#ifdef SPDK_ENABLED
+#include "spdk/env.h"
+#endif
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
 {
@@ -41,7 +44,47 @@ s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
 	aioq->acq_cur_depth = 0;
 	aioq->acq_max_depth = max_depth > NVFUSE_MAX_AIO_DEPTH ? NVFUSE_MAX_AIO_DEPTH : max_depth;
 
+#ifdef SPDK_ENABLED
+	aioq->aio_start_tsc = spdk_get_ticks();
+#endif
+	aioq->aio_end_tsc = 0;
+
+	aioq->aio_lat_total_tsc = 0;
+	aioq->aio_lat_total_count = 0;
+	aioq->aio_lat_min_tsc = ~0;
+	aioq->aio_lat_max_tsc = 0;
+
+	aioq->aio_total_size = 0;
+
 	return 0;
+}
+
+void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq)
+{	
+	#ifdef SPDK_ENABLED
+	double io_per_second, mb_per_second;
+	double average_latency, min_latency, max_latency;
+	u64 tsc_rate = spdk_get_ticks_hz();
+	
+	aioq->aio_end_tsc = spdk_get_ticks();
+
+	io_per_second = (double)aioq->aio_lat_total_count / ((aioq->aio_end_tsc - aioq->aio_start_tsc) / tsc_rate);
+	mb_per_second = (double)aioq->aio_total_size / (1024 * 1024) / ((aioq->aio_end_tsc - aioq->aio_start_tsc) / tsc_rate);
+	average_latency = (double)(aioq->aio_lat_total_tsc / aioq->aio_lat_total_count) * 1000 * 1000 / tsc_rate;
+	min_latency = (double)aioq->aio_lat_min_tsc * 1000 * 1000 / tsc_rate;
+	max_latency = (double)aioq->aio_lat_max_tsc * 1000 * 1000 / tsc_rate;
+
+	printf("\n NVFUSE AIO Queue Perf Statistics. \n");
+	printf("------------------------------------\n");
+	printf(" iops = %.3f KIOPS\n", io_per_second / 1024);
+	printf(" bandwidth = %.3f MB/s\n", mb_per_second);
+	printf(" avg latency = %.3f us \n", average_latency);
+	printf(" min latency = %.3f us \n", min_latency);
+	printf(" max latency = %.3f us \n", max_latency);
+	printf("------------------------------------\n");
+	printf("\n");
+
+	#endif
 }
 
 s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx * actx, s32 qtype)
@@ -370,6 +413,10 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		
 		actx = (struct nvfuse_aio_ctx *)list_entry(ptr, struct nvfuse_aio_ctx, actx_list);
 		
+		#ifdef SPDK_ENABLED
+		actx->actx_submit_tsc = spdk_get_ticks();			
+		#endif
+
 		//printf(" aio ready queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
 		//	(long)actx->actx_bytes, actx->actx_opcode);
 		if (nvfuse_is_directio(&nvh->nvh_sb, actx->actx_fid))
@@ -503,6 +550,9 @@ s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_
 		else
 		{
 			//printf(" aio was done successfully with fid = %d offset = %ld\n", actx->actx_fid, (long)actx->actx_offset);
+			#ifdef SPDK_ENABLED
+			actx->actx_complete_tsc = spdk_get_ticks();			
+			#endif
 		}
 				
 		actx->actx_cb_func(actx);		
