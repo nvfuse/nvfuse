@@ -36,26 +36,111 @@
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
 
-void usage(char *cmd)
+void nvfuse_core_usage(char *cmd)
 {
 	printf("\n Usage: \n\n");
-	printf(" %s -d spdk [other options]\n", cmd);
+	printf(" %s [nvfuse core options] [application options]\n", cmd);
+	printf("\n");
+	printf(" Options for NVFUSE core:\n");
 	printf("\t-t: device type (e.g., spdk, block, file, ramdisk)\n");
 	printf("\t-d: device name (e.g., 01:00, /dev/nvme0n1, /home/file.dat, ramdisk)\n");	
 	printf("\t-f: nvfuse format\n");
 	printf("\t-m: nvfuse mount\n");
-	printf("\t-q: qdepth \n");	
+	printf("\t-q: driver qdepth \n");	
 	printf("\t-b: buffer size (in MB)\n");
-	printf("\t-s: fs size (in MB) \n\n");
-
-	printf(" Example:\n");
-	printf(" #sudo %s -t spdk -d 01:00 -f -m\n", cmd);
-	printf(" #sudo %s -t block -d /dev/nvme0n1 -f -m\n", cmd);
-	printf(" #sudo %s -t file -d /home/file.data -s 65536 -f -m\n", cmd);
-	printf(" #sudo %s -t ramdisk -s 8192 -f -m\n", cmd);
-	printf("\n");
+	printf("\t-s: fs size (in MB)\n");
 }
 
+void nvfuse_core_usage_example(char *cmd)
+{
+    printf(" Example:\n");
+    printf(" #sudo %s -t spdk -d 01:00 -f -m\n", cmd);
+    printf(" #sudo %s -t block -d /dev/nvme0n1 -f -m\n", cmd);
+    printf(" #sudo %s -t file -d /home/file.data -s 65536 -f -m\n", cmd);
+    printf(" #sudo %s -t ramdisk -s 8192 -f -m\n", cmd);
+}
+
+s8 *nvfuse_get_core_options()
+{
+	return "d:t:fmq:s:b:";
+}
+
+s32 nvfuse_is_core_option(s8 option)
+{
+	s8 *core_option_str = nvfuse_get_core_options();
+
+	while(*core_option_str)
+	{		
+		if (':' == *core_option_str)
+		{
+			core_option_str++;
+			continue;
+		}
+
+		if (option == *core_option_str++)
+			return 1;
+	}
+	
+	return 0;
+}
+
+void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
+											int *core_argcp, char **core_argv, 
+											int *app_argcp, char **app_argv)
+{
+	int i;
+	int core_argc = 0;
+	int app_argc = 0;
+
+	/*printf(" argc = %d \n", argc);
+	for (i = 0;i < argc; i++)
+	{
+		printf("[%d] %s\n", i, argv[i]);
+	}*/
+
+	app_argv[0] = argv[0];
+	app_argc++;
+	core_argv[0] = argv[0];
+	core_argc++;
+
+	for (i = 1;i < argc; )
+	{
+		if (argv[i][0] == '-')
+		{
+			if (nvfuse_is_core_option(argv[i][1]))
+			{
+				core_argv[core_argc++] = argv[i++];
+				while (i < argc && argv[i][0] != '-')
+					core_argv[core_argc++] = argv[i++];				
+			}
+			else
+			{
+				app_argv[app_argc++] = argv[i++];
+				while (i < argc && argv[i][0] != '-')
+					app_argv[app_argc++] = argv[i++];
+			}
+		}
+		else
+		{
+			i++;
+		}
+	}
+
+	*core_argcp = core_argc;
+	*app_argcp = app_argc;
+
+	/*printf(" App Args \n");
+	for (i = 0;i < app_argc; i++)
+	{
+		printf("%d %s\n", i, app_argv[i]);
+	}
+	
+	printf(" Core Args \n");
+	for (i = 0;i < core_argc; i++)
+	{
+		printf("%d %s\n", i, core_argv[i]);
+	}*/
+}
 struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc, char **argv)
 {
 	struct nvfuse_handle *nvh;
@@ -76,12 +161,18 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 
 	if (argc == 1) 
 	{
+		printf(" Invalid argc = %d \n", argc);
 		goto PRINT_USAGE;
 	}
 	
+	/* optind must be reset before using getopt() */
+	optind = 0;
 	/* f (format) and m (mount) don't have any argument. */
-	while ((op = getopt(argc, argv, "d:t:fmq:s:b:")) != -1) {
-		switch (op) {		
+	while ((op = getopt(argc, argv, nvfuse_get_core_options())) != -1) {
+		//printf("op = %c\n", op);
+		switch (op) {
+		case ' ':
+			continue;
 		case 'd':		
 			devname = optarg;
 			break;
@@ -141,6 +232,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 			}
 			break;
 		default:
+			fprintf(stderr, " Invalid op code %c in getopt()\n", op);
 			goto PRINT_USAGE;
 		}
 	}
@@ -213,7 +305,8 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 	return nvh;
 
 PRINT_USAGE:
-	usage(cmd);
+	nvfuse_core_usage(cmd);
+	nvfuse_core_usage_example(cmd);
 	return NULL;
 }
 

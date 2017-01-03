@@ -638,38 +638,54 @@ rt_ctx[] =
 	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0, 0}
 };
 
+void rt_usage(char *cmd)
+{
+	printf("\nOptions for NVFUSE application: \n");
+	printf("\t-T: test type (e.g., 1: max_test, 2: quick_test, 3: million test \n");	
+}
+
 int main(int argc, char *argv[])
 {
 	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;	
 	int ret = 0;
 
-	// if (argc == 1)
-	// {
-	// 	test_type = QUICK_TEST;
-	// 	printf(" Set QUICK TEST as default\n");
-	// }
-	// else
-	// {
-	// 	test_type = atoi(argv[1]);
-	// 	/*
-	// 	#define MAX_TEST    1
-	// 	#define QUICK_TEST  2
-	// 	#define MILL_TEST   3
-	// 	*/
-	// 	if(test_type < MAX_TEST || test_type > MILL_TEST)
-	// 	{
-	// 		fprintf(stderr, " Invalid test type = %d \n", test_type);
-	// 		return -1;
-	// 	}
-	// }
-	
-	test_type = MILL_TEST;
+	int core_argc = 0;
+	char *core_argv[128];		
+	int app_argc = 0;
+	char *app_argv[128];
+	char op;
+	if (argc == 1)
+	{
+		goto INVALID_ARGS;
+	}
 
+	/* distinguish cmd line into core args and app args */
+	nvfuse_distinguish_core_and_app_options(argc, argv, 
+											&core_argc, core_argv, 
+											&app_argc, app_argv);
+
+	/* optind must be reset before using getopt() */
+	optind = 0;
+	while ((op = getopt(app_argc, app_argv, "T:")) != -1) {
+		switch (op) {	
+		case 'T':
+			test_type = atoi(optarg);
+			if (test_type < MAX_TEST || test_type > MILL_TEST)
+			{
+				fprintf(stderr, " Invalid test type = %d", test_type);
+				goto INVALID_ARGS;
+			}
+			break;
+		default:
+			goto INVALID_ARGS;
+		}
+	}
+	
 	printf(" Perform test %s ... \n", rt_decode_test_type(test_type));
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(NULL, argc, argv);
+	nvh = nvfuse_create_handle(NULL, core_argc, core_argv);
 	if (nvh == NULL)
 	{
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
@@ -699,9 +715,12 @@ int main(int argc, char *argv[])
 
 RET:;
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-#if (NVFUSE_OS==NVFUSE_OS_WINDOWS)
-	printf(" Ctrl + C to exit.\n");
-	while (1);
-#endif
+
 	return ret;
+
+INVALID_ARGS:;
+	nvfuse_core_usage(argv[0]);
+	rt_usage(argv[0]);
+	nvfuse_core_usage_example(argv[0]);
+	return -1;
 }

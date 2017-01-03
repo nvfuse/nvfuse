@@ -40,6 +40,10 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc, char **argv);
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount);
 
+void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
+											int *core_argcp, char **core_argv, 
+											int *app_argcp, char **app_argv);
+
 s32 nvfuse_lookup(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx **file_ictx, struct nvfuse_dir_entry *file_entry,
 	const s8 *filename, const s32 cur_dir_ino);
 
@@ -117,5 +121,6 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count, nvfuse_off_t roffset, s32 sync_read);
 s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filename, struct nvfuse_dir_entry *direntry);
 s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, s32 *num_alloc);
+void nvfuse_core_usage(char *cmd);
 
 #endif
