@@ -105,31 +105,99 @@ void nvfuse_aio_test_callback(void *arg)
 	free(actx);
 }
 
+struct user_context{
+		s64 file_size;
+		s32 io_size;
+		s32 qdepth;
+		s32 is_read;		
+		s32 is_rand;
+
+		s32 fd;		
+		s64 io_remaining;
+		s64 io_curr;
+		s8 *user_buf;
+		s32 buf_ptr;
+};
+
+s32 nvfuse_aio_alloc_req(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, void *_user_ctx)
+{
+	struct nvfuse_aio_ctx *actx;
+	struct user_context *user_ctx;
+	s32 ret;
+
+	user_ctx = (struct user_context *)_user_ctx;
+
+	/* initialization of aio context */
+	actx = nvfuse_malloc(sizeof(struct nvfuse_aio_ctx));
+	memset(actx, 0x00, sizeof(struct nvfuse_aio_ctx));
+	actx->actx_fid = user_ctx->fd;
+	actx->actx_opcode = user_ctx->is_read ? READ : WRITE;
+	actx->actx_buf = user_ctx->user_buf + user_ctx->io_size * user_ctx->buf_ptr;
+	user_ctx->buf_ptr = (user_ctx->buf_ptr + 1) % user_ctx->qdepth;
+	if (!user_ctx->is_rand)
+	{	
+		actx->actx_offset = user_ctx->io_curr;
+	}
+	else
+	{
+		s64 blkno = (u64)nvfuse_rand() % (user_ctx->file_size / user_ctx->io_size);
+		actx->actx_offset = blkno * user_ctx->io_size;
+	}
+
+	assert(actx->actx_offset + user_ctx->io_size  <= user_ctx->file_size);
+
+	//printf(" aio offset = %ld\n", actx->actx_offset);
+
+	actx->actx_bytes = user_ctx->io_size;
+	actx->actx_error = 0;
+	INIT_LIST_HEAD(&actx->actx_list);
+	actx->actx_cb_func = nvfuse_aio_test_callback;
+	actx->actx_sb = &nvh->nvh_sb;
+
+	memset(actx->actx_buf, 0xaa, user_ctx->io_size);
+
+	/* enqueue actx to aio queue */
+	ret = nvfuse_aio_queue_enqueue(aioq, actx, NVFUSE_READY_QUEUE);
+	if (ret)
+	{
+		printf(" Error: Enqueue error = arq depth = %d\n", aioq->arq_cur_depth);
+		return -1;
+	}
+
+	user_ctx->io_curr += user_ctx->io_size;
+	user_ctx->io_remaining -= user_ctx->io_size;
+
+	return 0;
+}
+
+
 s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand)
 {
 	struct nvfuse_aio_queue aioq;
-	struct nvfuse_aio_ctx *actx;	
-	s32 fd;
-	s8 *user_buf;
 	s32 ret;
-	s32 i;
-	s64 io_remaining;
-	s64 io_curr;
+	s32 i;	
 	s32 last_progress = 0;
 	s32 curr_progress = 0;
 	s32 flags;
 	s64 file_allocated_size;
 	struct stat stat_buf;
 	struct timeval tv;
-
+	struct user_context user_ctx;
+	
+	user_ctx.file_size = file_size;
+	user_ctx.io_size = io_size;
+	user_ctx.qdepth = qdepth;
+	user_ctx.is_read = is_read;
+	user_ctx.is_rand = is_rand;
+		
 	printf(" aiotest %s filesize = %0.3fMB io_size = %d qdpeth = %d (%c) direct (%d)\n", str, (double)file_size/(1024*1024), io_size, qdepth, is_read ? 'R' : 'W', is_direct);
 
 	flags = O_RDWR | O_CREAT;
 	if (is_direct)
 		flags |= O_DIRECT;
 
-	fd = nvfuse_openfile_path(nvh, str, flags, 0);
-	if (fd < 0)
+	user_ctx.fd = nvfuse_openfile_path(nvh, str, flags, 0);
+	if (user_ctx.fd < 0)
 	{
 		printf(" Error: file open or create \n");
 		return -1;
@@ -163,79 +231,47 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		return -1;
 	}
 	
-	io_curr = 0;
-	io_remaining = file_size; 
+	user_ctx.io_curr = 0;
+	user_ctx.io_remaining = file_size; 
 
 	/* user data buffer allocation */
-	user_buf = nvfuse_alloc_aligned_buffer(io_size * qdepth);
-	if (user_buf == NULL)
+	user_ctx.user_buf = nvfuse_alloc_aligned_buffer(io_size * qdepth);
+	if (user_ctx.user_buf == NULL)
 	{
 	    printf(" Error: malloc()\n");
 	    return -1;
 	}
+	user_ctx.buf_ptr = 0;
 
 	gettimeofday(&tv, NULL);
-	while (io_remaining > 0)
-	{
-
-		for (i = 0; i < qdepth; i++)
+	while (user_ctx.io_remaining > 0 || aioq.aio_cur_depth)
+	{		
+		//printf(" total depth = %d arq depth = %d\n", aioq.aio_cur_depth, aioq.arq_cur_depth);
+		while (aioq.aio_cur_depth < qdepth && user_ctx.io_remaining > 0)
 		{
-			/* initialization of aio context */
-			actx = nvfuse_malloc(sizeof(struct nvfuse_aio_ctx));
-			memset(actx, 0x00, sizeof(struct nvfuse_aio_ctx));
-			actx->actx_fid = fd;
-			actx->actx_opcode = is_read ? READ : WRITE;
-			actx->actx_buf = user_buf + io_size * i;
-			if (!is_rand)
-			{	
-				actx->actx_offset = io_curr;
-			}
-			else
-			{
-				s64 blkno = (u64)nvfuse_rand() % (file_size / io_size);
-				actx->actx_offset = blkno * io_size;
-			}
-
-			assert(actx->actx_offset + io_size  <= file_size);
-
-			//printf(" aio offset = %ld\n", actx->actx_offset);
-
-			actx->actx_bytes = io_size;
-			actx->actx_error = 0;
-			INIT_LIST_HEAD(&actx->actx_list);
-			actx->actx_cb_func = nvfuse_aio_test_callback;
-			actx->actx_sb = &nvh->nvh_sb;
-
-			memset(actx->actx_buf, 0xaa, io_size);
-
-			/* enqueue actx to aio queue */
-			ret = nvfuse_aio_queue_enqueue(&aioq, actx, NVFUSE_READY_QUEUE);
-			if (ret)
-			{
-				printf(" Error: Enqueue error\n");
-				goto CLOSE_FD;
-			}
-
-			io_curr += io_size;
-			io_remaining -= io_size;
-			if (io_remaining <= 0)
+			ret = nvfuse_aio_alloc_req(nvh, &aioq, &user_ctx);
+			if (ret)		
 				break;
+
+			aioq.aio_cur_depth++;
 		}
 		
 		/* progress bar */
-		curr_progress = (io_curr * 100 / file_size);
+		curr_progress = (user_ctx.io_curr * 100 / file_size);
 		if (curr_progress != last_progress)
 		{
 			printf(".");
 			if (curr_progress % 10 == 0)
 			{
-			    printf("%d%% %.3fMB/s\n", curr_progress, (double)io_curr / NVFUSE_MEGA_BYTES / time_since_now(&tv));
+			    printf("%d%% %.3fMB avg req cpls per poll  = %.2f\n", curr_progress, 
+				(double)user_ctx.io_curr / NVFUSE_MEGA_BYTES / time_since_now(&tv), 
+				(double)aioq.aio_cc_sum/aioq.aio_cc_cnt);
 			}
 			fflush(stdout);
 			last_progress = curr_progress;
 		}
-
-		//printf(" submission \n");
+		
+		#if 1
 		/* aio submission */
 		ret = nvfuse_aio_queue_submission(nvh, &aioq);
 		if (ret)
@@ -243,22 +279,24 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			printf(" Error: queue submission \n");
 			goto CLOSE_FD;
 		}
+		#endif
 
-		//printf(" completion\n");
-		/* aio completion */
+		//printf(" Submission depth = %d\n", aioq.aio_cur_depth);
+		/* aio completion */		
 		ret = nvfuse_aio_queue_completion(&nvh->nvh_sb, &aioq);
 		if (ret)
 		{
 			printf(" Error: queue completion \n");
 			goto CLOSE_FD;
 		}
+		//printf(" completion depth = %d\n", aioq.aio_cur_depth);
 	}
-	
+
 CLOSE_FD:
 	nvfuse_aio_queue_deinit(&aioq);
-	nvfuse_free_aligned_buffer(user_buf);
-	nvfuse_fsync(nvh, fd);
-	nvfuse_closefile(nvh, fd);
+	nvfuse_free_aligned_buffer(user_ctx.user_buf);
+	nvfuse_fsync(nvh, user_ctx.fd);
+	nvfuse_closefile(nvh, user_ctx.fd);
 	
 	return 0;
 }

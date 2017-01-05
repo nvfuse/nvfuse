@@ -29,6 +29,8 @@
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
 {
+	memset(aioq, 0x00, sizeof(struct nvfuse_aio_queue));
+
 	/* Ready Queue */
 	INIT_LIST_HEAD(&aioq->arq_head);
 	aioq->arq_cur_depth = 0;
@@ -44,6 +46,9 @@ s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
 	aioq->acq_cur_depth = 0;
 	aioq->acq_max_depth = max_depth > NVFUSE_MAX_AIO_DEPTH ? NVFUSE_MAX_AIO_DEPTH : max_depth;
 
+	aioq->max_completions = NVFUSE_MAX_AIO_COMPLETION;
+	aioq->aio_cur_depth = 0;
+
 #ifdef SPDK_ENABLED
 	aioq->aio_start_tsc = spdk_get_ticks();
 #endif
@@ -53,8 +58,9 @@ s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
 	aioq->aio_lat_total_count = 0;
 	aioq->aio_lat_min_tsc = ~0;
 	aioq->aio_lat_max_tsc = 0;
-
 	aioq->aio_total_size = 0;
+	aioq->aio_cc_sum = 0;
+	aioq->aio_cc_cnt = 0;
 
 	return 0;
 }
@@ -85,6 +91,25 @@ void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq)
 	printf("\n");
 
 	#endif
+}
+
+s32 nvfuse_aio_get_queue_depth_total(struct nvfuse_aio_queue *aioq)
+{
+	return aioq->arq_cur_depth + aioq->asq_cur_depth + aioq->acq_cur_depth;
+}
+
+s32 nvfuse_aio_get_queue_depth_type(struct nvfuse_aio_queue *aioq, s32 qtype)
+{
+	switch (qtype) {
+		case NVFUSE_READY_QUEUE:
+			return aioq->arq_cur_depth;			
+		case NVFUSE_SUBMISSION_QUEUE:		
+			return aioq->asq_cur_depth;			
+		case NVFUSE_COMPLETION_QUEUE:			
+			return aioq->acq_cur_depth;
+		default:
+			return 0;
+	}	
 }
 
 s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx * actx, s32 qtype)
@@ -208,7 +233,7 @@ void nvfuse_aio_gen_dev_cpls_buffered(void *arg)
 	}
 
 	/* move actx to comletion queue*/
-	nvfuse_aio_queue_move(actx->actx_queue, actx, NVFUSE_COMPLETION_QUEUE);
+	nvfuse_aio_queue_enqueue(actx->actx_queue, actx, NVFUSE_COMPLETION_QUEUE);
 }
 
 void nvfuse_aio_gen_dev_cpls_directio(void *arg)
@@ -219,7 +244,7 @@ void nvfuse_aio_gen_dev_cpls_directio(void *arg)
 	actx = (struct nvfuse_aio_ctx *)arg;
 		
 	/* move actx to comletion queue*/
-	nvfuse_aio_queue_move(actx->actx_queue, actx, NVFUSE_COMPLETION_QUEUE);
+	nvfuse_aio_queue_enqueue(actx->actx_queue, actx, NVFUSE_COMPLETION_QUEUE);
 }
 
 s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx)
@@ -258,7 +283,7 @@ s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse
 		(*(jobs + count)).req_type = (actx->actx_opcode == READ) ? READ : WRITE;
 		(*(jobs + count)).buf = bc->bc_buf;
 		(*(jobs + count)).complete = 0;
-		(*(jobs + count)).tag = (void *)actx;
+		(*(jobs + count)).tag1 = (void *)actx;
 
 		iocb[count] = &((*(jobs + count)).iocb);
 		count++;
@@ -350,7 +375,7 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		(*(jobs + req_count)).req_type = (actx->actx_opcode == READ) ? READ : WRITE;
 		(*(jobs + req_count)).buf = actx->actx_buf + count * CLUSTER_SIZE;
 		(*(jobs + req_count)).complete = 0;
-		(*(jobs + req_count)).tag = (void *)actx;
+		(*(jobs + req_count)).tag1 = (void *)actx;
 
 		iocb[req_count] = &((*(jobs + req_count)).iocb);
 		assert(iocb[req_count] != NULL);
@@ -406,6 +431,7 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 	u32 bytes;
 	s32 res;
 
+	/* Ready Queue */
 	head = &aioq->arq_head;
 
 	/* copy user data to buffer cache */
@@ -439,7 +465,10 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		}
 
 		if (bytes == actx->actx_bytes)
+		{
+			/* move to submission queue */
 			nvfuse_aio_queue_move(aioq, actx, NVFUSE_SUBMISSION_QUEUE);
+		}
 		else
 		{
 			printf(" submission error\n ");
@@ -447,14 +476,12 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		}
 	}
 
-	nvfuse_aio_resetnextsjob(nvh->nvh_sb.io_manager);
-
 	/* collect buffer */
 	head = &aioq->asq_head;
 	list_for_each_safe(ptr, temp, head) {
 		actx = (struct nvfuse_aio_ctx *)list_entry(ptr, struct nvfuse_aio_ctx, actx_list);
-		INIT_LIST_HEAD(&actx->actx_bh_head);
 
+		INIT_LIST_HEAD(&actx->actx_bh_head);
 		//printf(" aio submission queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", actx->actx_fid, (long)actx->actx_offset,
 		//	(long)actx->actx_bytes, actx->actx_opcode);
 
@@ -467,27 +494,31 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 			}
 			nvfuse_aio_gen_dev_reqs_buffered(&nvh->nvh_sb, actx);
 		}
-		else
+		else /* in case of direct I/O */
 		{/* direct i/o without buffer head */
 			actx->actx_bh_count = NVFUSE_SIZE_TO_BLK(actx->actx_bytes);
 			res = nvfuse_aio_gen_dev_reqs_directio(&nvh->nvh_sb, actx);
 			if (res < 0)
 			    return -1;
-		}	
+		}
+				
+		nvfuse_aio_queue_dequeue(aioq, actx, NVFUSE_SUBMISSION_QUEUE);
 	}
 	
 	return 0;
 }
 
-s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb)
+s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq)
 {
 	struct nvfuse_aio_ctx *actx;
 	struct io_job *job;
 	int cc = 0; // completion count
-
-	nvfuse_aio_resetnextcjob(sb->io_manager);
+	
 	cc = nvfuse_aio_complete(sb->io_manager);
 	sb->io_manager->queue_cur_count -= cc;
+	
+	aioq->aio_cc_sum += cc;
+	aioq->aio_cc_cnt ++;
 
 	while (cc--) 
 	{
@@ -495,7 +526,7 @@ s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb)
 
 		job->complete = 1;
 
-		actx = (struct nvfuse_aio_ctx *)job->tag;
+		actx = (struct nvfuse_aio_ctx *)job->tag1;
 		actx->actx_bh_count--;
 
 		if (job->ret != job->bytes) {
@@ -515,7 +546,11 @@ s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb)
 			}
 			free(actx->tag1); // free job 
 			free(actx->tag2); // free iocb 
-		}
+		} 
+		// else 
+		// {			
+		// 	//printf(" actx has sub reqs = %d, type = %d \n", actx->actx_bh_count, actx->actx_status);
+		// }
 	}
 
 	return 0;
@@ -526,20 +561,22 @@ s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_
 	struct list_head *head, *ptr, *temp;
 	struct nvfuse_aio_ctx *actx;
 
-	while (sb->io_manager->queue_cur_count) 
+	while (aioq->acq_cur_depth < aioq->max_completions)
 	{
 		/* busy wating here*/
 #if (NVFUSE_OS==NVFUSE_OS_LINUX)
-		nvfuse_aio_wait_dev_cpls(sb);
+		nvfuse_aio_wait_dev_cpls(sb, aioq);
 #endif
 	}
-		
-	head = &aioq->acq_head;
+	
+	//printf(" completion queue depth = %d", aioq->acq_cur_depth);
 
+	head = &aioq->acq_head;
 	/* copy user data to buffer cache */
 	list_for_each_safe(ptr, temp, head) {
 		actx = (struct nvfuse_aio_ctx *)list_entry(ptr, struct nvfuse_aio_ctx, actx_list);
 
+		assert(actx->actx_bh_count == 0);
 		nvfuse_aio_queue_dequeue(aioq, actx, actx->actx_status);
 		
 		if (actx->actx_error) 
@@ -551,11 +588,11 @@ s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_
 		{
 			//printf(" aio was done successfully with fid = %d offset = %ld\n", actx->actx_fid, (long)actx->actx_offset);
 			#ifdef SPDK_ENABLED
-			actx->actx_complete_tsc = spdk_get_ticks();			
+			actx->actx_complete_tsc = spdk_get_ticks();
 			#endif
 		}
-				
-		actx->actx_cb_func(actx);		
+		aioq->aio_cur_depth--;
+		actx->actx_cb_func(actx);
 	}
 	
 	return 0;

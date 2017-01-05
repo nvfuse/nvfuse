@@ -107,9 +107,13 @@ struct io_job{
     int req_type; // is read 
     char *buf;
     int complete;
-    void *tag;
+    void *tag1;
+    void *tag2;
 };
 
+#define SPDK_QUEUE_SYNC 0
+#define SPDK_QUEUE_AIO  1
+#define SPDK_QUEUE_NUM  2
 
 struct nvfuse_io_manager {	
     pthread_mutex_t io_lock;
@@ -127,18 +131,19 @@ struct nvfuse_io_manager {
     io_context_t io_ctx;
     struct io_event events[AIO_MAX_QDEPTH];
 
-    struct spdk_nvme_qpair *spdk_queue;
+    struct spdk_nvme_qpair *spdk_queue[SPDK_QUEUE_NUM];
 #endif
     int queue_cur_count;
 
     // submit job
-    struct io_job *io_job_subq[AIO_MAX_QDEPTH];
-    int io_job_subq_count;
+    //struct io_job *io_job_subq[AIO_MAX_QDEPTH];
+    //int io_job_subq_count;
 
     // complete job
     struct io_job *cjob[AIO_MAX_QDEPTH];
-    int cur_cjob; //cur complete job
-    int num_cjob; //num complete jobs
+    int cjob_head; // head ptr
+    int cjob_tail; // tail ptr
+    int cjob_cnt;
 
     int iodepth;
 
@@ -168,10 +173,17 @@ struct nvfuse_io_manager {
 #define nvfuse_aio_prep(b, io_manager) io_manager->aio_prep(io_manager, b)
 
 #define nvfuse_aio_submit(b, n, io_manager) io_manager->aio_submit(io_manager, b, n);
+
+/* reset submission job */
 #define nvfuse_aio_resetnextsjob(io_manager) \
 	if (io_manager->aio_resetnextsjob) \
 		io_manager->aio_resetnextsjob(io_manager);
-#define nvfuse_aio_resetnextcjob(io_manager) io_manager->aio_resetnextcjob(io_manager);
+
+/* reset completion job */
+#define nvfuse_aio_resetnextcjob(io_manager) \
+    if (io_manager->aio_resetnextcjob) \
+    io_manager->aio_resetnextcjob(io_manager);
+
 #define nvfuse_aio_complete(io_manager) io_manager->aio_complete(io_manager);
 #define nvfuse_aio_getnextcjob(io_manager) io_manager->aio_getnextcjob(io_manager);
 #define nvfuse_aio_cancel(b, io_manager) io_manager->aio_cancel(io_manager, b);
@@ -185,4 +197,25 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path, int iodepth);
 void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *path, int dev_size);
 void nvfuse_init_memio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth);
+
+static inline s32 cjob_empty(struct nvfuse_io_manager *io_manager)
+{
+    return io_manager->cjob_head == io_manager->cjob_head;
+}
+ 
+static inline s32 cjob_full(struct nvfuse_io_manager *io_manager)
+{
+    if (io_manager->cjob_tail <= io_manager->cjob_head)
+        return (io_manager->cjob_head - io_manager->cjob_tail) == (io_manager->iodepth - 1);
+    else
+        return (io_manager->cjob_head + 1) == io_manager->cjob_tail;
+}
+
+static inline s32 cjob_size(struct nvfuse_io_manager *io_manager)
+{
+    if (io_manager->cjob_tail <= io_manager->cjob_head)
+        return io_manager->cjob_head - io_manager->cjob_tail;
+    else
+        return io_manager->iodepth - io_manager->cjob_tail + io_manager->cjob_head;
+}
 #endif 

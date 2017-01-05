@@ -20,7 +20,7 @@
 #define __NVFUSE_AIO_H
 
 #define NVFUSE_MAX_AIO_DEPTH		1024
-
+#define NVFUSE_MAX_AIO_COMPLETION	1
 #define NVFUSE_READY_QUEUE			0
 #define NVFUSE_SUBMISSION_QUEUE		1
 #define NVFUSE_COMPLETION_QUEUE		2
@@ -64,6 +64,10 @@ struct nvfuse_aio_queue {
 	s32 acq_max_depth; /* maximum completion queue depth */
 	s32 acq_cur_depth; /* current completion queue depth */
 	
+	s32 aio_cur_depth;
+
+	s32 max_completions;
+
 	u64 aio_start_tsc;
 	u64 aio_end_tsc;
 
@@ -72,6 +76,9 @@ struct nvfuse_aio_queue {
 	u64 aio_lat_min_tsc;
 	u64 aio_lat_max_tsc;
 	u64 aio_total_size;
+
+	u64 aio_cc_sum; /* average cpl count per poll*/
+	u64 aio_cc_cnt;
 };
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue *aioq, s32 max_depth);
@@ -86,6 +93,10 @@ void nvfuse_aio_gen_dev_cpls_buffered(void *arg);
 void nvfuse_aio_gen_dev_cpls_directio(void *arg);
 s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx);
 s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse_aio_ctx *actx);
-s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb);
+s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq);
+
+s32 nvfuse_aio_get_queue_depth_total(struct nvfuse_aio_queue *aioq);
+s32 nvfuse_aio_get_queue_depth_type(struct nvfuse_aio_queue *aioq, s32 qtype);
+s32 nvfuse_aio_alloc_req(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, void *user_ctx);
 
 #endif

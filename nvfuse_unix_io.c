@@ -195,8 +195,8 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 		job  = (struct io_job *)container_of(iocb, struct io_job, iocb);
 
 		job->ret = event->res; // return value
-		io_manager->cjob[i] = job;
-		io_manager->num_cjob++;
+		io_manager->cjob[io_manager->cjob_head] = job;
+		io_manager->cjob_head++;
 	}
 
 	return cc;
@@ -204,33 +204,24 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 
 static struct io_job *libaio_getnextcjob(struct nvfuse_io_manager *io_manager)
 {
-	assert(io_manager->cur_cjob < io_manager->num_cjob);
-	return io_manager->cjob[io_manager->cur_cjob++];
+	struct io_job *cur_job;
+    
+    assert(!cjob_empty(io_manager));
+
+    cur_job = io_manager->cjob[io_manager->cjob_tail];
+    io_manager->cjob[io_manager->cjob_tail] = NULL;
+    
+    io_manager->cjob_tail = (io_manager->cjob_tail + 1) % io_manager->iodepth;
 }
 
 static void libaio_resetnextsjob(struct nvfuse_io_manager *io_manager)
 {
-    int i;
 
-    for (i = 0; i < AIO_MAX_QDEPTH; i++)
-    {
-	io_manager->io_job_subq[i] = NULL;
-    }
-
-    io_manager->io_job_subq_count = 0;
 }
 
 static void libaio_resetnextcjob(struct nvfuse_io_manager *io_manager)
 {
-    int i;
 
-    for (i = 0; i < AIO_MAX_QDEPTH; i++)
-    {
-	io_manager->cjob[i] = NULL;
-    }
-
-    io_manager->num_cjob = 0;
-    io_manager->cur_cjob = 0;
 }
 
 static int libaio_cancel(struct nvfuse_io_manager *io_manager, struct io_job *job)
@@ -249,6 +240,7 @@ static int libaio_cancel(struct nvfuse_io_manager *io_manager, struct io_job *jo
 void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth)
 {
 	int len;
+	int i;
 
 	len = strlen(path)+1;
 
@@ -267,9 +259,15 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->io_read = unix_read_blk;
 	io_manager->io_write = unix_write_blk;
 
-	io_manager->cur_cjob = 0;
-	io_manager->num_cjob = 0;
+	io_manager->cjob_head = 0;
+	io_manager->cjob_tail = 0;
 	io_manager->iodepth = AIO_MAX_QDEPTH;
+	io_manager->queue_cur_count = 0;
+	
+   	for (i = 0; i < AIO_MAX_QDEPTH; i++)
+    {        
+        io_manager->cjob[i] = NULL;
+    }
 
 	/* Linux AIO Function Pointers */
 	io_manager->aio_init = libaio_init;
@@ -278,7 +276,6 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->aio_submit = libaio_submit;
 	io_manager->aio_complete = libaio_complete;
 	io_manager->aio_getnextcjob = libaio_getnextcjob;
-	io_manager->aio_resetnextsjob = libaio_resetnextsjob;
 	io_manager->aio_resetnextcjob = libaio_resetnextcjob;
 	io_manager->aio_cancel = libaio_cancel;
 	io_manager->dev_format = NULL;

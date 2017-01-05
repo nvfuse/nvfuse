@@ -17,10 +17,10 @@ include spdk_config.mk
 
 LIB_NVFUSE = nvfuse.a
 SRCS   = nvfuse_buffer_cache.o \
-nvfuse_core.o nvfuse_unix_io.o nvfuse_gettimeofday.o \
+nvfuse_core.o nvfuse_gettimeofday.o \
 nvfuse_bp_tree.o nvfuse_dirhash.o \
 nvfuse_misc.o nvfuse_mkfs.o nvfuse_malloc.o nvfuse_indirect.o \
-nvfuse_spdk.o nvfuse_file_io.o nvfuse_ramdisk_io.o \
+nvfuse_spdk.o nvfuse_unix_io.o nvfuse_file_io.o nvfuse_ramdisk_io.o \
 nvfuse_api.o nvfuse_aio.o \
 rbtree.o
 

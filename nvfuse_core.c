@@ -767,19 +767,25 @@ s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct io_job *jobq
 	unsigned int bcount;
 	int cc = 0; // completion count
 
-	nvfuse_aio_resetnextcjob(sb->io_manager);
-	cc = nvfuse_aio_complete(sb->io_manager);
-	sb->io_manager->queue_cur_count -= cc;
+	//nvfuse_aio_resetnextcjob(sb->io_manager);
+	while (sb->io_manager->queue_cur_count)
+	{
+		cc = nvfuse_aio_complete(sb->io_manager);
+		sb->io_manager->queue_cur_count -= cc;
+		assert(sb->io_manager->queue_cur_count >= 0);
+	
+		while (cc--) {
+			job = nvfuse_aio_getnextcjob(sb->io_manager);
 
-	//printf(" tid = %d cc = %d \n", th_p->tid, cc);
-	while (cc--) {
-		job = nvfuse_aio_getnextcjob(sb->io_manager);
+			if (job->ret != job->bytes) {
+				printf(" Error: IO \n");
+			}
 
-		if(job->ret!=job->bytes){
-			printf(" IO error \n");
+			job->complete = 1;
 		}
 
-		job->complete = 1;
+		//printf(" spdk cjob size = %d, cnt = %d\n", cjob_size(sb->io_manager), sb->io_manager->cjob_cnt);
+		//printf(" queue count = %d \n", sb->io_manager->queue_cur_count);
 	}
 
 	// TODO: io cancel 

@@ -106,35 +106,6 @@ register_ns(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
 	       spdk_nvme_ns_get_size(ns) / 1000000000);
 }
 
-#if 0
-static bool
-probe_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr_opts *opts)
-{
-	if (spdk_pci_device_has_non_uio_driver(dev)) {
-		/*
-		 * If an NVMe controller is found, but it is attached to a non-uio
-		 *  driver (i.e. the kernel NVMe driver), we will not try to attach
-		 *  to it.
-		 */
-		fprintf(stderr, "non-uio kernel driver attached to NVMe\n");
-		fprintf(stderr, " controller at PCI address %04x:%02x:%02x.%02x\n",
-			spdk_pci_device_get_domain(dev),
-			spdk_pci_device_get_bus(dev),
-			spdk_pci_device_get_dev(dev),
-			spdk_pci_device_get_func(dev));
-		fprintf(stderr, " skipping...\n");
-		return false;
-	}
-
-	printf("Attaching to %04x:%02x:%02x.%02x\n",
-	       spdk_pci_device_get_domain(dev),
-	       spdk_pci_device_get_bus(dev),
-	       spdk_pci_device_get_dev(dev),
-	       spdk_pci_device_get_func(dev));
-
-	return true;
-}
-#else
 static bool
 probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	 struct spdk_nvme_ctrlr_opts *opts)
@@ -143,50 +114,7 @@ probe_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 
 	return true;
 }
-#endif
 
-#if 0
-static void
-attach_cb(void *cb_ctx, struct spdk_pci_device *dev, struct spdk_nvme_ctrlr *ctrlr,
-	  const struct spdk_nvme_ctrlr_opts *opts)
-{
-	int nsid, num_ns;
-	struct ctrlr_entry *entry;
-	const struct spdk_nvme_ctrlr_data *cdata = spdk_nvme_ctrlr_get_data(ctrlr);
-
-	entry = malloc(sizeof(struct ctrlr_entry));
-	if (entry == NULL) {
-		perror("ctrlr_entry malloc");
-		exit(1);
-	}
-
-	printf("Attached to %04x:%02x:%02x.%02x\n",
-	       spdk_pci_device_get_domain(dev),
-	       spdk_pci_device_get_bus(dev),
-	       spdk_pci_device_get_dev(dev),
-	       spdk_pci_device_get_func(dev));
-
-	snprintf(entry->name, sizeof(entry->name), "%-20.20s (%-20.20s)", cdata->mn, cdata->sn);
-
-	entry->ctrlr = ctrlr;
-	entry->next = g_controllers;
-	g_controllers = entry;
-
-	/*
-	 * Each controller has one of more namespaces.  An NVMe namespace is basically
-	 *  equivalent to a SCSI LUN.  The controller's IDENTIFY data tells us how
-	 *  many namespaces exist on the controller.  For Intel(R) P3X00 controllers,
-	 *  it will just be one namespace.
-	 *
-	 * Note that in NVMe, namespace IDs start at 1, not 0.
-	 */
-	num_ns = spdk_nvme_ctrlr_get_num_ns(ctrlr);
-	printf("Using controller %s with %d namespaces.\n", entry->name, num_ns);
-	for (nsid = 1; nsid <= num_ns; nsid++) {
-		register_ns(ctrlr, spdk_nvme_ctrlr_get_ns(ctrlr, nsid));
-	}
-}
-#else
 static void
 attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 	  struct spdk_nvme_ctrlr *ctrlr, const struct spdk_nvme_ctrlr_opts *opts)
@@ -223,12 +151,24 @@ attach_cb(void *cb_ctx, const struct spdk_nvme_transport_id *trid,
 		register_ns(ctrlr, spdk_nvme_ctrlr_get_ns(ctrlr, nsid));
 	}
 }
-#endif
+
+s8 *spdk_qname_decode(s32 qid)
+{
+    switch (qid)
+    {
+        case SPDK_QUEUE_SYNC:
+            return "SPDK_QUEUE_SYNC";
+        case SPDK_QUEUE_AIO:
+            return "SPDK_QUEUE_AIO";
+    }
+    return "SPDK_QUEUE_UNKOWN";
+}
 
 static int spdk_init(struct nvfuse_io_manager *io_manager)
 {
     struct ns_entry *ns_entry = g_namespaces;
     int rc = 0;
+    int i;
 
     printf(" called: spdk init \n");
 
@@ -238,30 +178,22 @@ static int spdk_init(struct nvfuse_io_manager *io_manager)
         return -1;
     }
 
-    io_manager->spdk_queue = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, 0);
-    if (io_manager->spdk_queue == NULL) {
-        printf("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
-        return -1;
+    for (i = 0 ;i < SPDK_QUEUE_NUM; i++)
+    {
+        printf(" Alloc NVMe Queue = %d (%s)\n", i, spdk_qname_decode(i));
+
+        io_manager->spdk_queue[i] = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, 0);
+        if (io_manager->spdk_queue[i] == NULL) {
+            printf("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
+            return -1;
+        }
     }
+    
     printf(" alloc io qpair for nvme \n");
 
     return rc;
 }
 
-#if 0
-int spdk_cleanup(struct nvfuse_io_manager *io_manager)
-{
-    /*
-     * Free the I/O qpair.  This typically is done when an application exits.
-     *  But SPDK does support freeing and then reallocating qpairs during
-     *  operation.  It is the responsibility of the caller to ensure all
-     *  pending I/O are completed before trying to free the qpair.
-     */
-    spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue);
-
-    return 0;
-}
-#else
 int spdk_cleanup(struct nvfuse_io_manager *io_manager)
 {
 	struct ns_entry *ns_entry = g_namespaces;
@@ -283,20 +215,41 @@ int spdk_cleanup(struct nvfuse_io_manager *io_manager)
 
 	return 0;
 }
-#endif
 
 static int spdk_prep(struct nvfuse_io_manager *io_manager, struct io_job *job)
 {
     job->complete = 0;
+    job->tag2 = (void *)io_manager;
     return 0;
 }
 
-static void
-spdk_callback(void *arg, const struct spdk_nvme_cpl *completion)
+/* spdk aio queue callback function */
+static void spdk_callback(void *arg, const struct spdk_nvme_cpl *cpl)
 {
     struct io_job *job = (struct io_job *)arg;
+    struct nvfuse_io_manager *io_manager = (struct nvfuse_io_manager *)job->tag2;
 
     job->complete = 1;
+
+    if (!spdk_nvme_cpl_is_error(cpl))
+    {
+        job->ret = job->bytes;
+    }
+    else
+    {
+        job->ret = -1;
+    }
+
+    //printf(" spdk callback()\n");
+
+    assert(!spdk_cjob_full(io_manager));
+    
+    //printf(" cjob head = %d \n", io_manager->cjob_head);
+
+    io_manager->cjob[io_manager->cjob_head] = job;
+    /* point to next location */
+    io_manager->cjob_head = (io_manager->cjob_head + 1) % io_manager->iodepth;
+    io_manager->cjob_cnt++;
 }
 
 static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, int qcnt)
@@ -307,19 +260,19 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
     int ret = 0;
 
     for(i = 0;i < qcnt;i++){
-	struct iocb *iocb = ioq[i];
-	job  = (struct io_job *)container_of(iocb, struct io_job, iocb);
+        struct iocb *iocb = ioq[i];
+        job  = (struct io_job *)container_of(iocb, struct io_job, iocb);
 
         if(job->req_type==READ)
         {
-            ret = spdk_nvme_ns_cmd_read(ns_entry->ns, io_manager->spdk_queue, job->buf,
+            ret = spdk_nvme_ns_cmd_read(ns_entry->ns, io_manager->spdk_queue[SPDK_QUEUE_AIO], job->buf,
                     job->offset / 512, /* LBA start */
                     job->bytes / 512, /* number of LBAs */
                     spdk_callback, job, 0);
         }
         else
         {
-            ret = spdk_nvme_ns_cmd_write(ns_entry->ns, io_manager->spdk_queue, job->buf,
+            ret = spdk_nvme_ns_cmd_write(ns_entry->ns, io_manager->spdk_queue[SPDK_QUEUE_AIO], job->buf,
                     job->offset / 512, /* LBA start */
                     job->bytes / 512, /* number of LBAs */
                     spdk_callback, job, 0);
@@ -328,9 +281,6 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
             fprintf(stderr, "starting write I/O failed\n");
             exit(1);
         }
-
-        io_manager->io_job_subq[io_manager->io_job_subq_count] = job;
-        io_manager->io_job_subq_count ++;
     }
 
     //printf(" spdk: %d jobs submitted total count = %d\n", qcnt, io_manager->io_job_subq_count);
@@ -340,73 +290,40 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
 
 static int spdk_complete(struct nvfuse_io_manager *io_manager)
 {
-    struct io_job *cur_job;
-    int max_nr = io_manager->queue_cur_count;
-    int cc = 0; // completion count
-    int job_id;
+    s32 max_completions = 0;
 
-    while(cc < max_nr) {
-        cc = 0;
-        job_id = 0;
-        while(job_id < max_nr){
-            cur_job = io_manager->io_job_subq[job_id];
+    /* Polling */
+    while(cjob_size(io_manager) == 0)    
+        spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_AIO], max_completions);
 
-            while (!cur_job->complete)
-                spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
+    //printf(" spdk cjob size = %d, cnt = %d\n", cjob_size(io_manager), io_manager->cjob_cnt);
 
-            if(cur_job->complete)
-                cc++;
-
-            job_id++;
-	        //printf(" job id = %d \n", job_id);
-        }
-    }
-
-    //printf(" %s: complete ios = %d \n", __FUNCTION__, cc);
-    for(job_id = 0; job_id < cc; job_id++){
-        struct io_job *job;
-        
-        job = io_manager->io_job_subq[job_id];        
-        job->ret = job->bytes; 
-
-        io_manager->cjob[job_id] = job;
-        io_manager->num_cjob++;
-        io_manager->io_job_subq_count--;
-	    io_manager->io_job_subq[job_id] = NULL;
-    }
-
-    return cc;
+    return cjob_size(io_manager);
 }
 
 static struct io_job *spdk_getnextcjob(struct nvfuse_io_manager *io_manager)
 {
-    assert(io_manager->cur_cjob < io_manager->num_cjob);
-    return io_manager->cjob[io_manager->cur_cjob++];
+    struct io_job *cur_job;
+    
+    assert(!spdk_cjob_empty(io_manager));
+
+    cur_job = io_manager->cjob[io_manager->cjob_tail];
+    io_manager->cjob[io_manager->cjob_tail] = NULL;
+    
+    io_manager->cjob_tail = (io_manager->cjob_tail + 1) % io_manager->iodepth;
+    io_manager->cjob_cnt--;
+
+    return cur_job;
 }
 
 static void spdk_resetnextsjob(struct nvfuse_io_manager *io_manager)
 {
-    int i;
 
-    for (i = 0; i < AIO_MAX_QDEPTH; i++)
-    {
-	    io_manager->io_job_subq[i] = NULL;
-    }
-
-    io_manager->io_job_subq_count = 0;
 }
 
 static void spdk_resetnextcjob(struct nvfuse_io_manager *io_manager)
 {
-    int i;
 
-    for (i = 0; i < AIO_MAX_QDEPTH; i++)
-    {
-	    io_manager->cjob[i] = NULL;
-    }
-
-    io_manager->num_cjob = 0;
-    io_manager->cur_cjob = 0;
 }
 
 struct spdk_job {
@@ -432,7 +349,7 @@ read_complete(void *arg, const struct spdk_nvme_cpl *completion)
 #endif
 
 static void
-write_complete(void *arg, const struct spdk_nvme_cpl *completion)
+sync_req_complete(void *arg, const struct spdk_nvme_cpl *completion)
 {
 	struct spdk_job *job = arg;
 
@@ -458,10 +375,10 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
     /*if ( block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
 	printf(" ss read: block = %ld count = %d \n", block, count);*/
 
-    res = spdk_nvme_ns_cmd_read(ns_entry->ns, io_manager->spdk_queue, job.buf,
+    res = spdk_nvme_ns_cmd_read(ns_entry->ns, io_manager->spdk_queue[SPDK_QUEUE_SYNC], job.buf,
 	    (uint64_t)block * 8, /* LBA start */
 	    count * 8, /* number of LBAs */
-	    write_complete, &job, 0);
+	    sync_req_complete, &job, 0);
 
     if (res != 0) {
 		fprintf(stderr, "starting read I/O failed\n");
@@ -469,7 +386,7 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
     }
 
     while (!job.is_completed) {
-    	spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
+    	spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_SYNC], 0);
     }
 
     rbytes = count * CLUSTER_SIZE;
@@ -491,10 +408,10 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
     job.is_completed = 0;
     job.ns_entry = ns_entry;
 
-    res = spdk_nvme_ns_cmd_write(ns_entry->ns, io_manager->spdk_queue, job.buf,
+    res = spdk_nvme_ns_cmd_write(ns_entry->ns, io_manager->spdk_queue[SPDK_QUEUE_SYNC], job.buf,
 	    (uint64_t)block * 8, /* LBA start */
 	    count * 8, /* number of LBAs */
-	    write_complete, &job, 0);
+	    sync_req_complete, &job, 0);
 
     if (res != 0) {
 		fprintf(stderr, "starting write I/O failed\n");
@@ -502,10 +419,11 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
     }
 
     while (!job.is_completed) {
-		spdk_nvme_qpair_process_completions(io_manager->spdk_queue, 0);
+		spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_SYNC], 0);
     }
 
     wbytes = count * CLUSTER_SIZE;
+
     return wbytes;
 }
 
@@ -519,7 +437,13 @@ int spdk_close(struct nvfuse_io_manager *io_manager)
 {
 	struct ns_entry *ns_entry = g_namespaces;
 	struct ctrlr_entry *ctrlr_entry = g_controllers;
+    int i;
 
+    for (i = 0;i < SPDK_QUEUE_NUM; i++)
+    {
+        spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue[i]);
+    }
+    
 	while (ns_entry) {
 		struct ns_entry *next = ns_entry->next;
 		free(ns_entry);
@@ -596,6 +520,7 @@ static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
     u32 ns_id = 1;
     int ret = 0;
 
+#if 0
     printf(" nvme format: started\n");
     format.lbaf	= 0; /* LBA format (e.g., 512, 512 + 8, 4096, 4096 + 8 */
     format.ms	= 0; /* metadata setting */
@@ -609,6 +534,9 @@ static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
         return -1;
     }
     printf(" nvme format: completed\n");
+#else
+    printf(" nvme format: skipped \n");
+#endif
 
     return 0;
 }
@@ -635,13 +563,13 @@ void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char
     io_manager->io_read = spdk_read_blk;
     io_manager->io_write = spdk_write_blk;
 
-    io_manager->cur_cjob = 0;
-    io_manager->num_cjob = 0;
+    io_manager->cjob_head = 0;
+    io_manager->cjob_tail = 0;
     io_manager->iodepth = AIO_MAX_QDEPTH;
+    io_manager->queue_cur_count = 0;
 
-    for (i = 0; i < AIO_MAX_QDEPTH; i++)
+    for (i = 0; i < io_manager->iodepth; i++)
     {
-        io_manager->io_job_subq[i] = NULL;
         io_manager->cjob[i] = NULL;
     }
 
@@ -652,7 +580,6 @@ void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char
     io_manager->aio_submit = spdk_submit;
     io_manager->aio_complete = spdk_complete;
     io_manager->aio_getnextcjob = spdk_getnextcjob;
-    io_manager->aio_resetnextsjob = spdk_resetnextsjob;
     io_manager->aio_resetnextcjob = spdk_resetnextcjob;
     io_manager->aio_cancel = spdk_cancel;
     io_manager->dev_format = spdk_dev_format;

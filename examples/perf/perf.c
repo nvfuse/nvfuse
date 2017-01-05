@@ -117,6 +117,11 @@ int main(int argc, char *argv[])
 			break;
 		case 'B':
 			block_size = atoi(optarg);
+			if (block_size % CLUSTER_SIZE)
+			{
+				printf(" Error: block size (%d) is not alinged with 4KB\n", block_size);
+				goto INVALID_ARGS;
+			}
 			break;
 		case 'E':
 			if (!strcmp(optarg, "libaio"))
