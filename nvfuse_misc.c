@@ -171,7 +171,8 @@ s32 nvfuse_aio_alloc_req(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aio
 }
 
 
-s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand)
+s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size,
+						u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand, s32 runtime)
 {
 	struct nvfuse_aio_queue aioq;
 	s32 ret;
@@ -281,6 +282,7 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		}
 		#endif
 
+RETRY_WAIT_COMPLETION:
 		//printf(" Submission depth = %d\n", aioq.aio_cur_depth);
 		/* aio completion */		
 		ret = nvfuse_aio_queue_completion(&nvh->nvh_sb, &aioq);
@@ -290,7 +292,17 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 			goto CLOSE_FD;
 		}
 		//printf(" completion depth = %d\n", aioq.aio_cur_depth);
+		if (runtime && time_since_now(&tv) >= (double)runtime)
+		{
+		    if (aioq.aio_cur_depth)
+		    {
+			goto RETRY_WAIT_COMPLETION;
+		    }
+		    break;
+		}
 	}
+
+	assert(aioq.aio_cur_depth==0);
 
 CLOSE_FD:
 	nvfuse_aio_queue_deinit(&aioq);
@@ -314,7 +326,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, 0 /* sequential */);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, 0 /* sequential */, 0);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
@@ -335,7 +347,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, 0 /* sequential */);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, 0 /* sequential */, 0);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");

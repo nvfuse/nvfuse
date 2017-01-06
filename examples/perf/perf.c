@@ -35,7 +35,7 @@
 #define RANDOM		1
 #define SEQUENTIAL	0
 
-int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 is_read, s32 direct, s32 qdepth)
+int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 is_read, s32 direct, s32 qdepth, s32 runtime)
 {	
 	struct timeval tv;
 	char str[FNAME_SIZE];
@@ -45,13 +45,12 @@ int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_ra
 
 	gettimeofday(&tv, NULL);
 	
-	res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, is_read ? READ : WRITE, direct, is_rand);
+	res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, is_read ? READ : WRITE, direct, is_rand, runtime);
 	if (res < 0)
 	{
 		printf(" Error: aio write test \n");
 		goto AIO_ERROR;
 	}
-	printf(" nvfuse aio write through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
 
 AIO_ERROR:
 	res = nvfuse_rmfile_path(nvh, str);
@@ -91,6 +90,7 @@ int main(int argc, char *argv[])
 	int is_rand = 0; /* sequential set to as default */
 	int direct_io = 0; /* buffered I/O set to as default */
 	int is_write = 0; /* write workload set to as default */
+	int runtime = 0; /* runtime in seconds */
 	char op;
 		
 	int core_argc = 0;
@@ -110,7 +110,7 @@ int main(int argc, char *argv[])
 	
 	/* optind must be reset before using getopt() */
 	optind = 0;
-	while ((op = getopt(app_argc, app_argv, "S:B:E:Q:RDW")) != -1) {
+	while ((op = getopt(app_argc, app_argv, "S:B:E:Q:RDWT:")) != -1) {
 		switch (op) {		
 		case 'S':		
 			file_size = atoi(optarg);
@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
 			block_size = atoi(optarg);
 			if (block_size % CLUSTER_SIZE)
 			{
-				printf(" Error: block size (%d) is not alinged with 4KB\n", block_size);
+				printf("\n Error: block size (%d) is not alinged with 4KB\n", block_size);
 				goto INVALID_ARGS;
 			}
 			break;
@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
 			}
 			else
 			{
-				fprintf( stderr, " Invalid ioengine type = %s", optarg);
+				fprintf( stderr, "\n Invalid ioengine type = %s", optarg);
 				goto INVALID_ARGS;
 			}
 			break;
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
 			qdepth = atoi(optarg);
 			if (qdepth == 0)
 			{
-				fprintf(stderr, " Invalid qdepth = %d\n", qdepth);
+				fprintf(stderr, "\n Invalid qdepth = %d\n", qdepth);
 				goto INVALID_ARGS;
 			}
 			break;
@@ -154,6 +154,14 @@ int main(int argc, char *argv[])
 			break;
 		case 'W':
 			is_write = 1;
+			break;
+		case 'T':
+			runtime = atoi(optarg);
+			if (runtime == 0)
+			{
+			    fprintf(stderr, "\n Invalid runtime = %d\n", runtime);
+			    goto INVALID_ARGS;
+			}
 			break;
 		default:
 			goto INVALID_ARGS;
@@ -172,7 +180,7 @@ int main(int argc, char *argv[])
 
 	if (ioengine == AIO)
 	{
-		ret = perf_aio(nvh, ((s64)file_size * MB), block_size, is_rand, is_write ? WRITE : READ, direct_io, qdepth);
+		ret = perf_aio(nvh, ((s64)file_size * MB), block_size, is_rand, is_write ? WRITE : READ, direct_io, qdepth, runtime);
 	}
 	else
 	{
