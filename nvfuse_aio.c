@@ -82,7 +82,7 @@ void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq)
 
 	printf("\n NVFUSE AIO Queue Perf Statistics. \n");
 	printf("------------------------------------\n");
-	printf(" iops = %.3f KIOPS\n", io_per_second / 1024);
+	printf(" iops = %.0f IOPS (%.3f KIOPS)\n", io_per_second, io_per_second / 1024);
 	printf(" bandwidth = %.3f MB/s\n", mb_per_second);
 	printf(" avg latency = %.3f us \n", average_latency);
 	printf(" min latency = %.3f us \n", min_latency);

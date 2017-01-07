@@ -30,7 +30,7 @@ do
 	fi
 
 	echo $FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60
-	$FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60 --output=${OUTPUT_PATH}/kernel_ext2_q_${qdepth}_block_${block_size}_workload_${workload}.log
+	$FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60 --minimal --output=${OUTPUT_PATH}/kernel_ext2_q_${qdepth}_block_${block_size}_workload_${workload}.log
 
     done
 done

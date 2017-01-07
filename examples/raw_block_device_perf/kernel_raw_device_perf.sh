@@ -19,7 +19,8 @@ do
 	else
 	    block_size=$((4096))
 	fi
-	echo $FIO_PERF_PATH --name=test --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60
-	$FIO_PERF_PATH --name=test --filename=/dev/nvme0n1 --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --time_based --runtime=60 --output=${OUTPUT_PATH}/kernel_q_${qdepth}_block_${block_size}_workload_${workload}.log
+
+	echo $FIO_PERF_PATH --name=test --filename=/dev/nvme0n1 --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --direct=1 --time_based --runtime=60
+	$FIO_PERF_PATH --name=test --filename=/dev/nvme0n1 --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --direct=1 --time_based --runtime=60 --minimal --output=${OUTPUT_PATH}/kernel_q_${qdepth}_block_${block_size}_workload_${workload}.log
     done
 done
