@@ -10,6 +10,7 @@ addons:
     packages:      
       - libaio-dev
       - libfuse-dev
+      - cloc
 
 before_install:
   - make
