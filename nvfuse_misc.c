@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <assert.h>
+#include <dirent.h>
 
 #include "nvfuse_core.h"
 #include "nvfuse_buffer_cache.h"
@@ -28,6 +29,8 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "time.h"
+
+
 #ifdef SPDK_ENABLED
 #include "spdk/env.h"
 #endif
@@ -170,9 +173,7 @@ s32 nvfuse_aio_alloc_req(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aio
 	return 0;
 }
 
-
-s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size,
-						u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand, s32 runtime)
+s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size, u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand)
 {
 	struct nvfuse_aio_queue aioq;
 	s32 ret;
@@ -282,7 +283,6 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 		}
 		#endif
 
-RETRY_WAIT_COMPLETION:
 		//printf(" Submission depth = %d\n", aioq.aio_cur_depth);
 		/* aio completion */		
 		ret = nvfuse_aio_queue_completion(&nvh->nvh_sb, &aioq);
@@ -292,17 +292,7 @@ RETRY_WAIT_COMPLETION:
 			goto CLOSE_FD;
 		}
 		//printf(" completion depth = %d\n", aioq.aio_cur_depth);
-		if (runtime && time_since_now(&tv) >= (double)runtime)
-		{
-		    if (aioq.aio_cur_depth)
-		    {
-			goto RETRY_WAIT_COMPLETION;
-		    }
-		    break;
-		}
 	}
-
-	assert(aioq.aio_cur_depth==0);
 
 CLOSE_FD:
 	nvfuse_aio_queue_deinit(&aioq);
@@ -311,6 +301,353 @@ CLOSE_FD:
 	nvfuse_closefile(nvh, user_ctx.fd);
 	
 	return 0;
+}
+
+#define IS_NOTHING      0
+#define IS_OPEN_CLOSE   1
+#define IS_READDIR      2
+#define IS_UNLINK       3
+#define IS_CREATE       4
+#define IS_RENAME       5
+#define IS_MKDIR        6
+#define IS_RMDIR        7
+#define IS_OP           8
+
+#define DEBUG 0
+#define DEBUG_TIME 1
+#define DEBUG_FSYNC 0
+
+char *op_list[IS_OP] = {"nothing", "open_close","readdir", "unlink","creat", "rename", "mkdir", "rmdir"};
+
+static int print_timeval(struct timeval *tv, struct timeval *tv_end, int op_index){
+
+    double tv_s = tv->tv_sec + (tv->tv_usec / 1000000.0);
+    double tv_e = tv_end->tv_sec + (tv_end->tv_usec / 1000000.0);
+#if DEBUG_TIME
+    printf("    %s start : %lf  micro seconds \n",op_list[op_index],tv_s);
+    printf("    %s end   : %lf  micro seconds \n",op_list[op_index],tv_e);
+#endif
+    printf("    %s : %lf              seconds \n", op_list[op_index],tv_e -tv_s);
+}
+
+s32 nvfuse_metadata_test(struct nvfuse_handle *nvh, s8 *str,s32 meta_check, s32 count)
+{
+	struct timeval tv,tv_end;
+    struct dirent cur_dirent;
+
+	s32 flags_create, flags_rdwr, state, fid, par_ino,i;
+    
+    char *path_dir = "test_direcpty";
+    char *path_file = "test_file.txt";
+    char *path_cur = ".";
+    off_t offset=0;
+
+    char buf[20] = {0,};
+    char rename_buf[20] = {0,};
+
+    flags_create = O_WRONLY | O_CREAT | O_TRUNC;
+    flags_rdwr = O_RDWR;
+
+#if DEBUG
+    int test_val = 0;
+    printf("nvfuse_metadata_test %d \n",test_val++);
+#endif
+
+    if(meta_check != IS_NOTHING){
+
+        switch(meta_check){
+            /* measure the open/close operation to exisisting file */
+            case IS_OPEN_CLOSE :
+                printf("metadata operation - open_close operation ...\n");
+                
+                fid = nvfuse_openfile_path(nvh,path_file,flags_create,0644);
+                if(fid == NVFUSE_ERROR){
+                    printf("\tError in meta check(IS_OPEN_CLOSE) : %s file create error (before open/close) \n",path_file);
+                    return NVFUSE_ERROR;
+                }
+                state = nvfuse_writefile(nvh, fid, str, sizeof(str), 0);
+                if(state == NVFUSE_ERROR){
+                    printf("\tError in meta check(IS_OPEN_CLOSE) : file write error (before open/close) \n");
+                    return NVFUSE_ERROR;
+                }
+#if DEBUG_FSYNC
+                nvfuse_fsync(nvh,fid);
+#endif
+                nvfuse_closefile(nvh, fid);
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+                for(i=0; i < count ; i++){
+                    fid = nvfuse_openfile_path(nvh,path_file,flags_rdwr,0644);
+                    if (fid < 0){
+                        printf("\tError in meta check(IS_OPEN_CLOSE) : file open error (measuring open/close) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    nvfuse_closefile(nvh,fid);
+                }
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+                state = nvfuse_unlink(nvh, path_file);
+                if(state == NVFUSE_ERROR){
+                    printf("\tError in meta check(IS_OPEN_CLOSE) : %s  file delelte error (after open/close) \n",path_file);
+                    return NVFUSE_ERROR;
+                }
+
+                print_timeval(&tv, &tv_end,IS_OPEN_CLOSE);
+                break;
+
+                /* measure the readdir operation to existing directory */
+            case IS_READDIR :
+                printf("metadata operation - readdir operation ...\n");
+                state = nvfuse_mkdir_path(nvh, path_dir, 0755);
+                if(state == NVFUSE_ERROR){
+                    printf("\tError in meta check(IS_READDIR) : %s  directory create error (before readdir) \n", path_dir);
+                    return NVFUSE_ERROR;
+                }
+
+                for(i=0; i < 3 ; i++){
+                    sprintf(buf,"%s/%d.txt",path_dir,i);
+                    fid = nvfuse_openfile_path(nvh,buf,flags_create,0644);
+                    if (fid == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_READDIR) : %s file create error (before readdir) \n",buf);
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+#if DEBUG_FSYNC
+                    nvfuse_fsync(fd);
+#endif                    
+                    close(fid);
+                }
+                s32 par_ino = nvfuse_opendir(nvh,path_dir);
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+                for(i=0; i < count ; i++){
+                    while(nvfuse_readdir(nvh,par_ino,&cur_dirent,offset)){
+                        offset = offset + 1;
+                    }
+                }
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+
+                for(i=0; i < 3 ; i++){
+                    sprintf(buf,"%s/%d.txt",path_dir,i);
+                    state = nvfuse_unlink(nvh,buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_READDIR) : %s unlink error (after readdir) \n",buf);
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+                state = nvfuse_rmdir_path(nvh, path_dir);
+                if(state == NVFUSE_ERROR){
+                    printf("Error in meta check(IS_READDIR) : %s  directory delete error (after readdir) \n",path_dir);
+                    return NVFUSE_ERROR;
+                }
+                print_timeval(&tv, &tv_end,IS_READDIR);
+                break;
+
+                /* measure the unlink operation to empty file */
+            case IS_UNLINK :
+                printf("metadata operation - unlink operation ...\n");
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d.txt",i);
+                    fid = nvfuse_openfile_path(nvh,buf,flags_create,0644);
+                    if(fid == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_UNLINK) : %s  file create error (before unlink) \n",buf);
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+#if DEBUG_FSYNC
+                    nvfuse_fsync(nvh,fid);
+#endif              
+                    nvfuse_closefile(nvh,fid);
+                }
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d.txt",i);
+                    state = nvfuse_unlink(nvh, buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_UNLINK) : %s  file unlink error (measuring unlink) \n",buf);
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+                print_timeval(&tv, &tv_end, IS_UNLINK);
+                break;
+
+                /* measure the create operation to empty file */
+            case IS_CREATE :
+                printf("metadata operation - create operation ...\n");
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d.txt",i);
+                    fid = nvfuse_openfile_path(nvh,buf,flags_create,0644);
+                    if(fid == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_CREATE) : file create error (measuring create) \n");
+                        return NVFUSE_ERROR;
+                    }
+
+                    memset(buf,0x0,sizeof(buf));
+#if DEBUG_FSYNC
+                    nvfuse_fsync(nvh,fd);
+#endif              
+                    nvfuse_closefile(nvh,fid);
+                }
+
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d.txt",i);
+                    state = nvfuse_unlink(nvh, buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_CREATE) : file delelte error (after create) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+                print_timeval(&tv,&tv_end,IS_CREATE);
+                break;
+
+                /* measure the rename operation to existing file */
+            case IS_RENAME :
+                printf("metadata operation - rename operation ...\n");
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d.txt",i);
+                    fid = nvfuse_openfile_path(nvh,buf,flags_create,0664);
+                    if(fid == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_RENAME) : file create error (before rename) \n");
+                        return NVFUSE_ERROR;
+                    }
+#if DEBUG_FSYNC
+                    nvfuse_fsync(nvh,fid);
+#endif              
+                    nvfuse_closefile(nvh,fid);
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d.txt",i);
+                    sprintf(rename_buf, "%d_rename.txt",i);
+                    state = nvfuse_rename_path(nvh, buf, rename_buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_RENAME) : rename error (measuring rename) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                    memset(rename_buf,0x0,sizeof(rename_buf));
+                }
+
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+                for(i=0; i < count ; i++){
+                    sprintf(rename_buf, "%d_rename.txt",i);
+                    state = nvfuse_rmfile_path(nvh,rename_buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_RENAME) : file delelte error (after rename) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(rename_buf,0x0,sizeof(rename_buf));
+                }
+
+                print_timeval(&tv,&tv_end,IS_RENAME);
+                break;
+
+                /* measure the mkdir operation */
+            case IS_MKDIR :
+                printf("metadata operation - mkdir operation ...\n");
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d",i);
+                    state = nvfuse_mkdir_path(nvh,buf, 0755);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_MKDIR) : directory create error (measuring mkdir) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d",i);
+                    state = nvfuse_rmdir_path(nvh, buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_MKDIR) : directory delete error (after mkdir) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+                print_timeval(&tv,&tv_end,IS_MKDIR);               
+                break;
+
+            case IS_RMDIR :
+                printf("metadata operation - rmdir operation ...\n");
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d",i);
+                    state = nvfuse_mkdir_path(nvh, buf, 0755);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_RMDIR) : directory create error (before rmdir) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"%d",i);
+                    state = nvfuse_rmdir_path(nvh, buf);
+                    if(state == NVFUSE_ERROR){
+                        printf("Error in meta check(IS_RMDIR) : directory delete error (measuring rmdir) \n");
+                        return NVFUSE_ERROR;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+                    
+                /* measure point  */
+                gettimeofday(&tv_end,NULL);
+
+                print_timeval(&tv,&tv_end,IS_RMDIR);               
+                break;
+            default:
+                printf("Invalid metadata type setting  Error\n");
+                break;
+
+        }     
+    }else{
+        printf("\t metadata option is not selected \n");
+    }
+   
+    nvfuse_sync(nvh);
+    return NVFUSE_SUCCESS;
+
+CLOSE_META:
+    
+	return NVFUSE_ERROR;
 }
 
 s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
@@ -326,7 +663,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, 0 /* sequential */, 0);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, WRITE, direct, 0 /* sequential */);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");
@@ -347,7 +684,7 @@ s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
 		sprintf(str, "file%d", i);
 		file_size = (s64)8 * 1024 * 1024 * 1024;
 		gettimeofday(&tv, NULL);
-		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, 0 /* sequential */, 0);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, 4096, AIO_MAX_QDEPTH, READ, direct, 0 /* sequential */);
 		if (res < 0)
 		{
 			printf(" Error: aio write test \n");

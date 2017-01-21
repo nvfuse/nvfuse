@@ -18,14 +18,19 @@ NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
 include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 
-TARGET = perf 
+TARGET_NVFUSE = test_nvfuse/perf 
+TARGET_KERNEL = test_kernel/perf_kernel
+
 SRCS   = perf.o
+SRCS_KERNEL = perf_kernel.o
 
 LDFLAGS += -lm -lpthread -laio -lrt
 CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE
 CFLAGS += -w
 
-OBJS=$(SRCS:.c=.o)
+OBJS_NVFUSE=$(SRCS:.c=.o)
+OBJS_KERNEL=$(SRCS_KERNEL:.c=.o)
+
 
 CC=gcc
 
@@ -38,18 +43,25 @@ CC=gcc
 	@$(RM) $@
 	$(CC) -O2 -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
-$(TARGET)	:	$(OBJS)
-	$(CC) -g -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
-all:  $(TARGET) 
+$(TARGET_NVFUSE)	:	$(OBJS_NVFUSE)
+	mkdir test_nvfuse
+	$(CC) -g -o $(TARGET_NVFUSE) $(OBJS_NVFUSE) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
+
+$(TARGET_KERNEL)	:	$(OBJS_KERNEL)
+	mkdir test_kernel
+	$(CC) -g -o $(TARGET_KERNEL) $(OBJS_KERNEL)
+
+all:  $(TARGET_NVFUSE) $(TARGET_KERNEL)
 
 
 clean:
-	rm -f *.o *.a *~ $(TARGET)
+	rm -f *.o *.a *~ $(TARGET_NVFUSE) $(TARGET_KERNEL)
+	rm -rf test_nvfuse test_kernel
 
 distclean:
-	rm -f Makefile.bak *.o *.a *~ .depend $(TARGET)
+	rm -f Makefile.bak *.o *.a *~ .depend $(TARGET_NVFUSE)
 install: 
-	chmod 755 $(TARGET)
+	chmod 755 $(TARGET_NVFUSE)
 uninstall:
 
 dep:    depend
