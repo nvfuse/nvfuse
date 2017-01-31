@@ -25,9 +25,11 @@ before_install:
   - make install DESTDIR=.
   - export DPDK_DIR=$PWD/usr/local/share/dpdk/x86_64-native-linuxapp-gcc
   - popd
-  - make DPDK_DIR=./dpdk-16.11/x86_64-native-linuxapp-gcc
+  - ls
+  - make DPDK_DIR=$PWD/dpdk-16.11/x86_64-native-linuxapp-gcc
   - popd
-  - make SPDK_ROOT_DIR=spdk DPDK_DIR=spdk/dpdk-16.11/x86_64-native-linuxapp-gcc 
+  - ls
+  - make SPDK_ROOT_DIR=$PWD/spdk DPDK_DIR=$PWD/spdk/dpdk-16.11/x86_64-native-linuxapp-gcc 
   - chmod +x unittest.sh
 
 script: ./unittest.sh
