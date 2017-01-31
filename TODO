@@ -47,3 +47,6 @@ Test Script
 +Miscellaneous
 	+ Debug message print
 	+ Error handleing and status code
+	+ Optimization of bitmap operations with gcc __builtin_function
+	+ deffered directory shrink
+	+ redudant directory lookup 

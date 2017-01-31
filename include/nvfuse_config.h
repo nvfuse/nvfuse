@@ -18,6 +18,8 @@
 
 #define NVFUSE_VERSION "0.1"
 
+#define SPDK_NUM_CORES  16
+
 #define NVFUSE_OS_WINDOWS 1
 #define NVFUSE_OS_LINUX 2
 
@@ -48,9 +50,11 @@
 /* LRU Cache Size and Hash Size */
 #define NVFUSE_HASH_SIZE 100000
 /* Default Buffer Cache Size */
-#define NVFUSE_BUFFER_SIZE (2 * 1024*32) //256MB
+#define NVFUSE_BUFFER_SIZE (16) //16MB
 /* Default Inode Context Size */
 #define NVFUSE_ICTXC_SIZE (32*1024)
+/* RATIO SEGMENT TO BUFFER Cache */
+#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001)
 
 #define NVFUSE_SYNC_TIME	30 /* seconds */
 //#define NVFUSE_SYNC_DIRTY_COUNT (1024) /* blocks */

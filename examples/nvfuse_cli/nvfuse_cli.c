@@ -78,8 +78,11 @@ int mini_main(int argc, char *argv[]){
 	printf(" Caution!: all data stored in your divice is removed permanently. \n");
 	printf("\n");
 
+	printf(" This example is currently not supported.\n");
+	return -1;
+
 	/* create nvfuse_handle with user spcified parameters */
-	g_nvh = nvfuse_create_handle(NULL, argc, argv);
+	g_nvh = nvfuse_create_handle(NULL, NULL, NULL);
 	if (g_nvh == NULL)
 	{
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
@@ -182,7 +185,7 @@ int parse_and_execute(char *input)
 			} else if (!strcmp(arg[0],"type")) {
 				nvfuse_type(g_nvh, arg[1]);
 			} else if (!strcmp(arg[0],"mount")) {
-				nvfuse_mount(g_nvh, 0);
+				nvfuse_mount(g_nvh);
 			} else if (!strcmp(arg[0],"umount")) {
 				nvfuse_umount(g_nvh);
 			} else if (!strcmp(arg[0], "imark")) {

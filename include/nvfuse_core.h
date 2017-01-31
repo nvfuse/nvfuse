@@ -12,10 +12,9 @@
 * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
 * more details.
 */
-
 #include "nvfuse_config.h"
-#include "nvfuse_types.h"
 #include "nvfuse_io_manager.h"
+#include "nvfuse_types.h"
 #include "nvfuse_bp_tree.h"
 #include "list.h"
 #include "rbtree.h"
@@ -135,6 +134,11 @@
 #define NVFUSE_MEGA_BYTES (1024*1024)
 #define NVFUSE_KILO_BYTES (1024)
 
+#define TB ((u64)1024*1024*1024*1024)
+#define GB (1024*1024*1024)
+#define MB (1024*1024)
+#define KB (1024)
+
 /* # OF MAX OPEN FILE */
 #define START_OPEN_FILE	3 /* STDIN, STDOUT, STDERR*/
 #define MAX_OPEN_FILE	16
@@ -153,32 +157,37 @@
 #define NVFUSE_MAX_DIR_BITS 32
 #define NVFUSE_MAX_FILE_BITS 32
 
+struct nvfuse_app_superblock {
+	s32 asb_root_seg_id;
+	s32 asb_free_inodes;
+	s64 asb_free_blocks;
+	s64 asb_no_of_used_blocks;
+	s32 asb_core_id;
+};
+
 struct nvfuse_superblock_common {
 	u32 sb_signature; //RDONLY	
-	s64	sb_no_of_sectors;//RDONLY	
-	s64	sb_no_of_blocks;//RDONLY	
-	s64	sb_no_of_used_blocks;
+	s64 sb_no_of_sectors;//RDONLY	
+	s64 sb_no_of_blocks;//RDONLY	
+	s64 sb_no_of_used_blocks; /* FS view*/
 
 	u32 sb_no_of_inodes_per_seg;
 	u32 sb_no_of_blocks_per_seg;
 
-	u32	sb_root_ino;/* RDONLY */
-	s32 sb_free_inodes;
-	s64 sb_free_blocks;
+	u32 sb_root_ino;/* RDONLY */
+	s32 sb_free_inodes; /* FS view */
+	s64 sb_free_blocks; /* FS view */
 
-	s32	sb_segment_num; /*RDONLY*/
-	s32	sb_free_segment_num;
+	s32 sb_segment_num; /*RDONLY*/	
 
-	u32	sb_umount;/* SYNC TIME*/
+	u32 sb_umount;/* SYNC TIME*/
 	s32 sb_mount_cnt;
 
-	s32	sb_max_file_num;
-	s32	sb_max_dir_num;
-	s32	sb_max_inode_num;
+	s32 sb_max_file_num;
+	s32 sb_max_dir_num;
+	s32 sb_max_inode_num;
 
-	/* Check Point Time */
-	u32	sb_last_update_sec; /* SYNC TIME */
-	u32	sb_last_update_usec; /* SYNC TIME */
+	struct nvfuse_app_superblock asb;
 };
 
 /* Super Block Structure */
@@ -187,31 +196,30 @@ struct nvfuse_superblock{
 		u32 sb_signature; //RDONLY	
 		s64	sb_no_of_sectors;//RDONLY	
 		s64	sb_no_of_blocks;//RDONLY	
-		s64	sb_no_of_used_blocks;
+		s64	sb_no_of_used_blocks; /* FS view*/
 
 		u32 sb_no_of_inodes_per_seg;
 		u32 sb_no_of_blocks_per_seg;
 
 		u32	sb_root_ino;/* RDONLY */
-		s32 sb_free_inodes;
-		s64 sb_free_blocks;
+		s32 sb_free_inodes; /* FS view */
+		s64 sb_free_blocks; /* FS view */
 
-		s32	sb_segment_num; /*RDONLY*/
-		s32	sb_free_segment_num;
+		s32	sb_segment_num; /*RDONLY*/	
 
 		u32	sb_umount;/* SYNC TIME*/
 		s32 sb_mount_cnt;
 
 		s32	sb_max_file_num;
 		s32	sb_max_dir_num;
-		s32	sb_max_inode_num; 
-		
-		/* Check Point Time */
-		u32	sb_last_update_sec; /* SYNC TIME */
-		u32	sb_last_update_usec; /* SYNC TIME */
+		s32	sb_max_inode_num;
+
+		struct nvfuse_app_superblock asb;
 	};
 
 	struct {
+		struct control_plane_context *sb_control_plane_ctx;		
+		s32 sb_control_plane_buffer_size;
 		s32	sb_next_segment; /* SYNC TIME or BACKGROUND CLEANING*/
 		s32	sb_cur_segment; /* SYNC TIME or BACKGROUND CLEANING*/
 		s32	sb_cur_clu; /* SYNC TIME or BACKGROUND CLEANING*/
@@ -222,10 +230,8 @@ struct nvfuse_superblock{
 		struct nvfuse_io_manager *io_manager;
 
 		struct nvfuse_segment_summary *sb_ss; /* SYNC TIME*/
-		struct nvfuse_finfo *sb_ss_nfinfo; /* SYNC TIME*/
-	
-		/* Segment Buffer */
-		struct nvfuse_segment_buffer	*sb_sb; /* SYNC TIME*/
+		struct nvfuse_handle *sb_nvh;
+		
 		s32 sb_sb_cur;
 		s32 sb_sb_flush;
 		
@@ -236,20 +242,26 @@ struct nvfuse_superblock{
 		struct nvfuse_ictx_manager *sb_ictxc;
 						
 		struct nvfuse_file_table *sb_file_table; /* INCLUDING FINE GRAINED LOCK */
-		pthread_mutex_t sb_file_table_lock; /* COARSE LOCK */
-		pthread_mutex_t sb_prefetch_lock;
-		pthread_cond_t sb_prefetch_cond;
-		s32 sb_prefetch_cur;
+		//pthread_mutex_t sb_file_table_lock; /* COARSE LOCK */
 
 		struct timeval sb_last_update;	/* SUPER BLOCK in memory UPDATE TIME */
 		struct timeval sb_sync_time; /* LAST SYNC TIME */
 
-		pthread_mutex_t sb_iolock;
+		//pthread_mutex_t sb_iolock;
 
-		pthread_mutex_t sb_request_lock;
+		//pthread_mutex_t sb_request_lock;
 		s32 sb_request_count;
 
 		s32 sb_dirty_sync_policy;
+
+		struct list_head sb_seg_list;
+		s32 sb_seg_list_count;
+		struct list_head *sb_seg_search_ptr_for_inode;
+		struct list_head *sb_seg_search_ptr_for_data;
+
+		//struct list_head *sb_seg_cur_ptr; /* hint */
+
+		s32 sb_is_primary_process;
 		
 		/* Read and Write statistics*/
 		u64 sb_write_blocks;
@@ -266,6 +278,11 @@ struct nvfuse_superblock{
 		struct timeval sb_time_end;
 		struct timeval sb_time_total;
 	};
+};
+
+struct seg_node{
+ struct list_head list;
+ u32 seg_id;
 };
 
 struct nvfuse_file_table{	
@@ -297,6 +314,7 @@ struct nvfuse_dir_entry{
 
 struct nvfuse_segment_summary{
 	u32 ss_magic;
+	u32 ss_owner;
 	u32 ss_id;
 	u32 ss_seg_start;
 	u32 ss_summary_start;
@@ -386,9 +404,54 @@ struct iovec{
 #define nvfuse_dirname fat_dirname
 #define nvfuse_filename fat_filename
 
+struct control_plane_context;
+struct nvfuse_params {
+	s8 appname[128];
+	s8 cpu_core_mask;
+	s32 buffer_size; /* in MB units */
+	s32 qdepth;
+	s32 need_format;
+	s32 need_mount;
+};
+
+/* IPC Ring Queue Name */
+#define NVFUSE_SEC_TO_PRI_NAME "SEC_2_PRI"
+#define NVFUSE_PRI_TO_SEC_NAME "PRI_2_SEC"
+/* Mempool Name */
+#define NVFUSE_MSG_POOL_NAME "MSG_POOL"
+
+struct nvfuse_ipc_context {
+	/* IPC Ring Queue Name */
+	char _SEC_2_PRI[SPDK_NUM_CORES][64];
+	char _PRI_2_SEC[SPDK_NUM_CORES][64];
+	
+	/* IPC Ring Structure */
+	struct rte_ring *send_ring[SPDK_NUM_CORES];
+	struct rte_ring *recv_ring[SPDK_NUM_CORES];
+	
+	/* ID Gen Ring */
+	char ID_GEN[64];
+	struct rte_ring *id_gen;
+
+	/* MSG Mempool Name*/
+	char _MSG_POOL[64];;
+
+	/* MSG Mempool Structure */
+	struct rte_mempool *message_pool;
+
+	/* Stat Ring and Mempool */
+	struct rte_ring *stat_ring;
+	struct rte_mempool *stat_pool;
+
+	int my_channel_id;
+};
+
 struct nvfuse_handle {
 	struct nvfuse_superblock nvh_sb;
 	struct nvfuse_io_manager nvh_iom;
+	struct nvfuse_params nvh_params;
+	struct nvfuse_ipc_context nvh_ipc_ctx;
+
 	u32 nvh_cwd_ino;
 	u32 nvh_root_dir;
 	u32 nvh_root_ino;
@@ -453,7 +516,7 @@ void nvfuse_test(struct nvfuse_handle *nvh);
 s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str);
 bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno,bkey_t *key,u32 type);
 u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type);
-s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size);
+s32 nvfuse_mount(struct nvfuse_handle *nvh);
 
 s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_size);
 s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, nvfuse_off_t trunc_size);
@@ -484,5 +547,21 @@ s32 nvfuse_make_jobs(struct io_job **jobs, int numjobs);
 
 void nvfuse_release_ibitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 ino);
 s32 nvfuse_is_directio(struct nvfuse_superblock *sb, s32 fid);
+
+s32 nvfuse_alloc_container_from_primary_process(struct nvfuse_handle *nvh, s32 type);
+s32 nvfuse_dealloc_container_from_primary_process(struct nvfuse_superblock *sb, u32 seg_id);
+u32 nvfuse_get_curr_seg_id(struct nvfuse_superblock *sb, s32 is_inode);
+u32 nvfuse_get_next_seg_id(struct nvfuse_superblock *sb, s32 is_inode);
+void nvfuse_move_curr_seg_id(struct nvfuse_superblock *sb, s32 seg_id, s32 is_inode);
+
+s32 nvfuse_add_seg(struct nvfuse_superblock *sb, u32 seg_id);
+s32 nvfuse_remove_seg(struct nvfuse_superblock *sb, u32 seg_id);
+
+void nvfuse_update_sb_with_ss_info(struct nvfuse_superblock *sb, s32 seg_id, s32 is_root_container, s32 increament);
+
+s32 nvfuse_check_free_inode(struct nvfuse_superblock *sb);
+s32 nvfuse_check_free_block(struct nvfuse_superblock *sb, u32 num_blocks);
+void nvfuse_print_seg_list(struct nvfuse_superblock *sb);
+void nvfuse_update_owner_in_ss(struct nvfuse_superblock *sb, s32 seg_id);
 
 #endif /* NVFUSE_HEADER_H*/

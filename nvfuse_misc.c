@@ -95,11 +95,11 @@ void nvfuse_aio_test_callback(void *arg)
 #ifdef SPDK_ENABLED
 	u64 latency_tsc;
 	latency_tsc = actx->actx_complete_tsc - actx->actx_submit_tsc;
-	aioq->aio_lat_total_tsc += latency_tsc;
-	aioq->aio_lat_total_count++;
-	aioq->aio_lat_min_tsc = MIN(latency_tsc, aioq->aio_lat_min_tsc);
-	aioq->aio_lat_max_tsc = MAX(latency_tsc, aioq->aio_lat_max_tsc);
-	aioq->aio_total_size += actx->actx_bytes;
+	aioq->stat.aio_lat_total_tsc += latency_tsc;
+	aioq->stat.aio_lat_total_count++;
+	aioq->stat.aio_lat_min_tsc = MIN(latency_tsc, aioq->stat.aio_lat_min_tsc);
+	aioq->stat.aio_lat_max_tsc = MAX(latency_tsc, aioq->stat.aio_lat_max_tsc);
+	aioq->stat.aio_total_size += actx->actx_bytes;
 #endif
 
 	free(actx);
@@ -169,7 +169,6 @@ s32 nvfuse_aio_alloc_req(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aio
 
 	return 0;
 }
-
 
 s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size,
 						u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand, s32 runtime)
@@ -305,7 +304,7 @@ RETRY_WAIT_COMPLETION:
 	assert(aioq.aio_cur_depth==0);
 
 CLOSE_FD:
-	nvfuse_aio_queue_deinit(&aioq);
+	nvfuse_aio_queue_deinit(nvh, &aioq);
 	nvfuse_free_aligned_buffer(user_ctx.user_buf);
 	nvfuse_fsync(nvh, user_ctx.fd);
 	nvfuse_closefile(nvh, user_ctx.fd);

@@ -14,6 +14,7 @@
 */
 #include "pthread.h"
 #include "nvfuse_types.h"
+#include "nvfuse_ipc_ring.h"
 #include "list.h"
 
 #ifndef __NVFUSE_AIO_H
@@ -68,21 +69,14 @@ struct nvfuse_aio_queue {
 
 	s32 max_completions;
 
-	u64 aio_start_tsc;
-	u64 aio_end_tsc;
-
-	u64 aio_lat_total_tsc;
-	u64 aio_lat_total_count;
-	u64 aio_lat_min_tsc;
-	u64 aio_lat_max_tsc;
-	u64 aio_total_size;
+	struct perf_stat_aio stat;
 
 	u64 aio_cc_sum; /* average cpl count per poll*/
 	u64 aio_cc_cnt;
 };
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue *aioq, s32 max_depth);
-void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq);
+void nvfuse_aio_queue_deinit(struct nvfuse_handle *nvh, struct nvfuse_aio_queue * aioq);
 s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);
 s32 nvfuse_aio_queue_dequeue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);
 s32 nvfuse_aio_queue_move(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);

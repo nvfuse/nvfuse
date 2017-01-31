@@ -82,8 +82,9 @@ int nvfuse_init(int format, s8 *devname)
 		};
 	int argc = 2;
 
+	/*FIXME: */
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(NULL, argc, argv);
+	nvh = nvfuse_create_handle(NULL, NULL, NULL);
 	if (nvh == NULL)
 	{
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
@@ -678,7 +679,11 @@ static struct fuse_operations xmp_oper = {
 int main(int argc, char *argv[])
 {
 	int ret;
+	
+	printf(" fuse_example is currently not supported.\n");
 
+	return -1;
+	
 	if (argc < 3) {
 		printf("\n");
 		printf("Usage: \n");

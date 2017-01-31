@@ -22,12 +22,13 @@ nvfuse_bp_tree.o nvfuse_dirhash.o \
 nvfuse_misc.o nvfuse_mkfs.o nvfuse_malloc.o nvfuse_indirect.o \
 nvfuse_spdk.o nvfuse_unix_io.o nvfuse_file_io.o nvfuse_ramdisk_io.o \
 nvfuse_api.o nvfuse_aio.o \
-rbtree.o
+rbtree.o \
+nvfuse_ipc_ring.o nvfuse_control_plane.o
 
 LDFLAGS += -lm -lpthread -laio -lrt
 CFLAGS = $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 #CFLAGS = -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
-CFLAGS += -m64
+CFLAGS += -march=native -m64
 
 OBJS=$(SRCS:.c=.o)
 
@@ -42,7 +43,7 @@ CC=gcc
 	@$(RM) $@
 	$(CC) -O2 -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
-all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test perf
+all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test perf control_plane_proc
 
 $(LIB_NVFUSE)	:	$(OBJS)
 	$(AR) rcv $@ $(OBJS)
@@ -62,6 +63,9 @@ regression_test:
 perf:
 	make -C examples/perf
 
+control_plane_proc:
+	make -C examples/control_plane_proc
+
 clean:
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
 	make -C examples/helloworld/ clean
@@ -69,6 +73,7 @@ clean:
 	make -C examples/libfuse/ clean
 	make -C examples/regression_test/ clean
 	make -C examples/perf/ clean
+	make -C examples/control_plane_proc/ clean
 
 distclean:
 	rm -f Makefile.bak *.o *.a *~ .depend $(LIB_NVFUSE)

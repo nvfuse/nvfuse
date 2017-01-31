@@ -143,6 +143,7 @@ typedef u32 lbno_t;//logical block num
 #define NVFUSE_TYPE_META 1
 
 #define CEIL(x, y)  ((x + y - 1) / y)
+#define DIV_UP(x, y)  ((x + y - 1) / y * y)
 #define	MAX(x,y)	((x) > (y) ? (x) : (y))
 #define	MIN(x,y)	((x) < (y) ? (x) : (y))
 #endif 

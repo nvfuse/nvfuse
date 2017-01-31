@@ -13,7 +13,6 @@
 * more details.
 */
 
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -21,21 +20,19 @@
 #ifndef __linux__
 	#include <windows.h>
 #endif
-
+#ifdef SPDK_ENABLED
+#include "spdk/env.h"
+#endif
 #include "nvfuse_core.h"
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_indirect.h"
 
-static u32 bp_memalloc_size = 0;
-
-void *bp_malloc(u32 size) {
-	bp_memalloc_size++;
+void *bp_malloc(u32 size) {	
 	return malloc(size);
 }
 
-void bp_free(void *ptr) {
-	bp_memalloc_size--;
+void bp_free(void *ptr) {	
 	free(ptr);
 }
 
@@ -300,6 +297,7 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	struct nvfuse_inode *inode;
 	struct nvfuse_buffer_head *bh;
 	s32 ret;
+	
 	ictx = nvfuse_alloc_ictx(sb);
 	if (ictx == NULL)
 		return -1;
@@ -310,6 +308,12 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 		printf(" It runs out of free inodes.");
 		return -1;
 	}
+	#if 0
+	if (spdk_process_is_primary())
+	{
+		printf(" allocated inode for bptree.\n");
+	}
+	#endif
 
 	ictx = nvfuse_read_inode(sb, ictx, ino);
 	nvfuse_insert_ictx(sb, ictx);
@@ -353,7 +357,7 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	return 0;
 }
 
-void bp_init_root(master_node_t *master)
+void 	bp_init_root(master_node_t *master)
 {
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;

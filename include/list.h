@@ -29,6 +29,10 @@ struct hlist_node {
 
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 
+#ifdef LIST_HEAD
+#undef LIST_HEAD
+#endif
+
 #define LIST_HEAD(name) \
 	struct list_head name = LIST_HEAD_INIT(name)
 

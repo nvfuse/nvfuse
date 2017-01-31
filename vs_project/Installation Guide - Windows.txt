@@ -1,3 +1,0 @@
-1. Pthread Win32 Installation
-
-  Move vs_project\Pthread_DLL\*.dll to c:\windows\System32 (if you use Windows 64Bit, *.dll must be moved to c:\windows\SysWOW64.)

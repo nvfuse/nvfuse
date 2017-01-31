@@ -37,7 +37,9 @@ struct dirent {
 s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset);
 s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count, nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count);
 
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc, char **argv);
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager, 
+											struct nvfuse_ipc_context *ipc_ctx, 
+											struct nvfuse_params *params);
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount);
 
 void nvfuse_distinguish_core_and_app_options(int argc, char **argv,

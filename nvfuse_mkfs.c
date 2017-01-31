@@ -215,6 +215,7 @@ void nvfuse_make_segment_summary(struct nvfuse_segment_summary *ss, u32 seg_id, 
 {
 	u32 bits_per_bitmap;
 
+	ss->ss_owner		= 0;
 	ss->ss_id		= seg_id;
 	ss->ss_seg_start	= 0;
 	ss->ss_summary_start	= NVFUSE_SUMMARY_OFFSET;
@@ -576,6 +577,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	printf(" blocks per seg = %d \n", nvfuse_sb_disk->sb_no_of_blocks_per_seg);
 
 	nvfuse_sb_disk->sb_root_ino = ROOT_INO;
+	nvfuse_sb_disk->asb.asb_root_seg_id = 0;
 
 	nvfuse_sb_disk->sb_segment_num = NVFUSE_SEG_NUM(nvfuse_sb_disk->sb_no_of_blocks, seg_size_bits - CLUSTER_SIZE_BITS);
 	
@@ -583,16 +585,10 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	nvfuse_sb_disk->sb_no_of_sectors = (nvfuse_sb_disk->sb_segment_num) * seg_p_clu * (CLUSTER_SIZE / SECTOR_SIZE);
 		
 	nvfuse_sb_disk->sb_umount = 1;
-
-	nvfuse_sb_disk->sb_free_segment_num = nvfuse_sb_disk->sb_segment_num - 1;
 	
 	nvfuse_sb_disk->sb_max_inode_num = (u32)~0 >> (NVFUSE_MAX_BITS - NVFUSE_MAX_INODE_BITS);
 	nvfuse_sb_disk->sb_max_file_num = (u32)~0 >> (NVFUSE_MAX_BITS - NVFUSE_MAX_FILE_BITS);
 	nvfuse_sb_disk->sb_max_dir_num = (u32)~0 >> (NVFUSE_MAX_BITS - NVFUSE_MAX_DIR_BITS);
-
-	gettimeofday(&tv, NULL);
-	nvfuse_sb_disk->sb_last_update_sec = tv.tv_sec;
-	nvfuse_sb_disk->sb_last_update_usec = tv.tv_usec;
 
 	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, io_manager);
 	

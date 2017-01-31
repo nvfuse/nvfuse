@@ -19,20 +19,32 @@
 #include "nvfuse_api.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
+#include "nvfuse_aio.h"
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
 int main(int argc, char *argv[])
 {
-	struct nvfuse_handle *nvh;	
+	struct nvfuse_io_manager io_manager;
+	struct nvfuse_ipc_context ipc_ctx;
+	struct nvfuse_params params;
+	struct nvfuse_handle *nvh;
 	int ret;
 	int fd;
 	int count;
 	char *buf;
 	
+	ret = nvfuse_parse_args(argc, argv, &params);
+	if (ret < 0)
+		return -1;
+	
+	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	if (ret < 0)
+		return -1;
+
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(NULL, argc, argv);
+	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
 	if (nvh == NULL)
 	{
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
@@ -87,6 +99,6 @@ int main(int argc, char *argv[])
 RET:;
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-	
+	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);
 	return 0;
 }

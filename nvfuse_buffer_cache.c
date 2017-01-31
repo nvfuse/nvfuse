@@ -13,14 +13,18 @@
 * more details.
 */
 
+#include "spdk/env.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+
 #include "nvfuse_core.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_malloc.h"
+#include "nvfuse_ipc_ring.h"
+#include "nvfuse_control_plane.h"
 #include "list.h"
 #include "rbtree.h"
 
@@ -343,56 +347,16 @@ struct nvfuse_buffer_cache *nvfuse_alloc_bc(){
 	return bc;
 }
 
-/* buffe_size in MB units */
-int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
-	struct nvfuse_buffer_manager *bm;
+int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
+{
+	struct nvfuse_buffer_manager *bm = sb->sb_bm;
 	struct nvfuse_buffer_cache *bc;
-	s32 i;
-	s32 recommended_size;
-
-	bm = (struct nvfuse_buffer_manager *)nvfuse_malloc(sizeof(struct nvfuse_buffer_manager));
-	if (bm == NULL) {
-		printf(" nvfuse_malloc error \n");
-		return -1;
-	}
-	memset(bm, 0x00, sizeof(struct nvfuse_buffer_manager));
-	sb->sb_bm = bm;
-
-	for (i = BUFFER_TYPE_UNUSED; i < BUFFER_TYPE_NUM; i++) {
-		INIT_LIST_HEAD(&bm->bm_list[i]);
-		bm->bm_list_count[i] = 0;
-	}
-		
-	for (i = 0; i < HASH_NUM + 1; i++) {
-		INIT_HLIST_HEAD(&bm->bm_hash[i]);
-		bm->bm_hash_count[i] = 0;
-	}
-
-	/* 0.1% buffer of device size is recommended for better performance. */
-	recommended_size = sb->io_manager->total_blkcount / SECTORS_PER_CLUSTER / 1000;
-	if (buffer_size == 0)
-	{
-		bm->bm_cache_size = recommended_size;
-	}
-	else
-	{
-		bm->bm_cache_size = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
-	}
-	assert(bm->bm_cache_size);
 	
-	if (bm->bm_cache_size < recommended_size)
-	{
-		printf(" Performance will degrade due to small buffer size (%.3fMB)\n", 
-				(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);		
-	} 
-	else 
-	{
-		printf(" Buffer cache size = %.3f MB\n", 
-			(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);
-	}
+	assert (nr > 0);
 	
-	/* alloc unsed list buffer cache */
-	for (i = 0;i < bm->bm_cache_size;i++)
+	//printf(" Add buffer cache (%d 4K pages) to process\n", nr);
+
+	while (nr--)
 	{
 		bc = nvfuse_alloc_bc();
 		if (!bc)
@@ -417,16 +381,92 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 		hlist_add_head(&bc->bc_hash, &bm->bm_hash[HASH_NUM]);
 		bm->bm_hash_count[HASH_NUM]++;
 		bm->bm_list_count[BUFFER_TYPE_UNUSED]++;
+		bm->bm_cache_size++;
+	}	
+
+	return 0;
+}
+
+/* buffe_size in MB units */
+int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
+	struct nvfuse_buffer_manager *bm;
+	s32 i;
+	s32 recommended_size;
+	s32 buffer_size_in_4k;
+
+	bm = (struct nvfuse_buffer_manager *)nvfuse_malloc(sizeof(struct nvfuse_buffer_manager));
+	if (bm == NULL) {
+		printf(" nvfuse_malloc error \n");
+		return -1;
+	}
+	memset(bm, 0x00, sizeof(struct nvfuse_buffer_manager));
+	sb->sb_bm = bm;
+
+	for (i = BUFFER_TYPE_UNUSED; i < BUFFER_TYPE_NUM; i++) {
+		INIT_LIST_HEAD(&bm->bm_list[i]);
+		bm->bm_list_count[i] = 0;
+	}
+		
+	for (i = 0; i < HASH_NUM + 1; i++) {
+		INIT_HLIST_HEAD(&bm->bm_hash[i]);
+		bm->bm_hash_count[i] = 0;
+	}
+
+#if 0
+	/* 0.1% buffer of device size is recommended for better performance. */
+	recommended_size = sb->io_manager->total_blkcount / SECTORS_PER_CLUSTER / 1000;
+	if (buffer_size == 0)
+	{
+		bm->bm_cache_size = recommended_size;
+	}
+	else
+	{
+		bm->bm_cache_size = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
+	}
+	if (bm->bm_cache_size < recommended_size)
+	{
+		printf(" Performance will degrade due to small buffer size (%.3fMB)\n", 
+				(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);		
+	} 
+	else 
+	{
+		printf(" Buffer cache size = %.3f MB\n", 
+			(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);
+	}
+#else
+	buffer_size_in_4k = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
+	printf(" Set Default Buffer Cache = %dMB\n", buffer_size);
+#endif
+	assert(buffer_size_in_4k);	
+	
+	if (!spdk_process_is_primary())
+	{
+		buffer_size_in_4k = nvfuse_send_alloc_buffer_req(sb->sb_nvh, buffer_size_in_4k);
+		if (buffer_size_in_4k < 0)
+			return -1;
+	}
+
+	/* alloc unsed list buffer cache */
+	for (i = 0;i < buffer_size_in_4k;i++)
+	{
+		s32 res;
+
+		res = nvfuse_add_buffer_cache(sb, 1);
+		if (res < 0)
+		{
+			printf(" Error: buffer cannot be allocated. \n");
+			break;
+		}
 	}	
 	
 	return 0;
 }
 
-void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb)
+void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 {	
 	struct list_head *head;
 	struct list_head *ptr, *temp;
-	struct nvfuse_buffer_cache *bh;
+	struct nvfuse_buffer_cache *bc;
 	s32 type;
 	s32 removed_count = 0;
 
@@ -434,15 +474,19 @@ void nvfuse_free_buffer_cache(struct nvfuse_superblock *sb)
 	for (type = BUFFER_TYPE_UNUSED; type < BUFFER_TYPE_NUM; type++) {
 		head = &sb->sb_bm->bm_list[type];
 		list_for_each_safe(ptr, temp, head) {
-			bh = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
-			assert(!bh->bc_dirty);
-			list_del(&bh->bc_list);
-			nvfuse_free_aligned_buffer(bh->bc_buf);
-			nvfuse_free(bh);
+			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+			assert(!bc->bc_dirty);
+			list_del(&bc->bc_list);
+			nvfuse_free_aligned_buffer(bc->bc_buf);
+			nvfuse_free(bc);
 			removed_count++;
 		}
 	}
 	assert(removed_count == sb->sb_bm->bm_cache_size);
+	if (!spdk_process_is_primary())
+	{
+		nvfuse_send_dealloc_buffer_req(sb->sb_nvh, removed_count);
+	}
 }
 
 s32 nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh) 
@@ -1079,7 +1123,7 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 }
 
 /* uninitialization of inode context cache manager */
-void nvfuse_free_ictx_cache(struct nvfuse_superblock *sb)
+void nvfuse_deinit_ictx_cache(struct nvfuse_superblock *sb)
 {
 	struct list_head *head;
 	struct list_head *ptr, *temp;

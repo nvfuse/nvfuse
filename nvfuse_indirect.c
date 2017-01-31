@@ -54,6 +54,7 @@
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_gettimeofday.h"
+#include "nvfuse_ipc_ring.h"
 
 typedef struct {
 	u32 *p;
@@ -225,39 +226,75 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	s32 ret = 0;
 	u32 seg_id;
 	u32 next_id;	
-	u32 cnt = 0;	
+	u32 cnt = 0;
+	u32 once = 1;
 	
+	//printf(" current free blocks = %ld \n", sb->asb.asb_free_blocks);
+
+	if (!nvfuse_check_free_block(sb, num_blocks))
+	{
+		s32 container_id;
+		s32 nr_buffers;
+
+		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
+		if (container_id > 0) {
+			
+			/* insert allocated container to process */
+			nvfuse_add_seg(sb, container_id);
+
+			/* try to allocate buffers from primary process */			
+			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
+			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
+			if (nr_buffers > 0)
+			{
+				nvfuse_add_buffer_cache(sb, nr_buffers);
+			}
+			assert (nvfuse_check_free_block(sb, num_blocks) == 1);
+		} else
+			assert(0);
+	}
+
 	seg_id = inode->i_ino / sb->sb_no_of_inodes_per_seg;
 	if (seg_id != sb->sb_last_allocated_sid && inode->i_ino == sb->sb_last_allocated_sid_by_ino)
 	{
 	    seg_id = sb->sb_last_allocated_sid;
 	}
+	
+	next_id = seg_id;
 
-	seg_id = (seg_id + sb->sb_segment_num - 1) % sb->sb_segment_num;
-	next_id = (seg_id + 1) % sb->sb_segment_num;
-
-	while (next_id != seg_id) {
-		if (nvfuse_get_free_blocks(sb, next_id)) 
+	do {
+		if (nvfuse_get_free_blocks(sb, seg_id)) 
 		{
-			ret = nvfuse_alloc_dbitmap(sb, next_id, alloc_blks + cnt, num_blocks);
+			ret = nvfuse_alloc_dbitmap(sb, seg_id, alloc_blks + cnt, num_blocks);
 			num_blocks -= ret;
 			cnt += ret;
 
 			/* retain hint information to rapidly find free blocks */
-			sb->sb_last_allocated_sid = next_id;			
-			sb->sb_last_allocated_sid_by_ino = inode->i_ino;			
+			sb->sb_last_allocated_sid = seg_id;
+			sb->sb_last_allocated_sid_by_ino = inode->i_ino;
 
 			if (!num_blocks)
-			{				
+			{
 			    break;
-			}			
+			}
 		}
-		next_id = (next_id + 1) % sb->sb_segment_num;
-	}
-	
+
+		//printf("1. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
+		if (once)
+		{
+			nvfuse_move_curr_seg_id(sb, seg_id, 0 /* data type */);
+			once--;
+		}
+		//printf("2. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
+		seg_id = nvfuse_get_next_seg_id(sb, 0 /* data type */);
+		//printf("3. alloc block: cur seg = %d, next_seg = %d \n", seg_id, next_id);
+	} while (seg_id != next_id);
+
 	if (!cnt)
 	{
 		printf(" Warning: it runs out of free blocks.\n");
+		nvfuse_print_seg_list(sb);
+		assert(0);
 	}
 
 	return cnt;
@@ -287,6 +324,8 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 		new_blocks[0] = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
 		if (new_blocks[0] != total_blocks) {
 			printf(" Warning: it runs out of free blocks.\n");
+			nvfuse_print_seg_list(sb);
+			assert(0);
 			if (error) {
 				*error = -1;				
 				goto RELEASE_FREE;
@@ -303,7 +342,11 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 	{
 		new_blocks[1] = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
 		if (new_blocks[1] != total_blocks) {
-			printf(" Warning: it runs out of free blocks.\n");
+			printf(" Warning: it runs out of free blocks. (requested = %d, allocated = %d)\n", 
+			total_blocks, new_blocks[1]);
+			printf(" current free blocks = %ld \n", sb->asb.asb_free_blocks);			
+			nvfuse_print_seg_list(sb);
+			assert(0);
 			if (error) {
 				*error = -1;
 				goto RELEASE_FREE;

@@ -24,13 +24,20 @@
 
 #include <rte_config.h>
 #include <rte_eal.h>
+#include <rte_lcore.h>
 
 #include "spdk/nvme.h"
 #include "spdk/env.h"
+#include "spdk/string.h"
 
-#include "nvfuse_core.h"
+#include "nvfuse_types.h"
 #include "nvfuse_config.h"
 #include "nvfuse_io_manager.h"
+#include "nvfuse_core.h"
+#include "nvfuse_malloc.h"
+#include "nvfuse_ipc_ring.h"
+
+
 //#ifdef LIST_HEAD
 //#undef LIST_HEAD
 //#endif
@@ -164,21 +171,12 @@ s8 *spdk_qname_decode(s32 qid)
     return "SPDK_QUEUE_UNKOWN";
 }
 
-static int spdk_init(struct nvfuse_io_manager *io_manager)
+int spdk_alloc_qpair(struct nvfuse_io_manager *io_manager)
 {
     struct ns_entry *ns_entry = g_namespaces;
-    int rc = 0;
     int i;
-
-    printf(" called: spdk init \n");
-
-    if (ns_entry == NULL)
-    {
-        printf(" spdk init failed. \n");
-        return -1;
-    }
-
-    for (i = 0 ;i < SPDK_QUEUE_NUM; i++)
+        
+    for (i = 0;i < SPDK_QUEUE_NUM;i++)
     {
         printf(" Alloc NVMe Queue = %d (%s)\n", i, spdk_qname_decode(i));
 
@@ -188,6 +186,63 @@ static int spdk_init(struct nvfuse_io_manager *io_manager)
             return -1;
         }
     }
+
+    return 0;
+}
+
+void spdk_release_qpair(struct nvfuse_io_manager *io_manager)
+{
+    int i;
+	int ret;
+
+	fprintf(stdout, " Release NVMe I/O Q pair.\n");
+
+    for (i = 0;i < SPDK_QUEUE_NUM; i++)
+    {
+        ret = spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue[i]);
+		if (ret < 0)
+		{
+			fprintf(stderr, " Error: release NVMe I/O Q pair.\n");
+			break;
+		}
+    }
+}
+
+static int spdk_init(struct nvfuse_io_manager *io_manager)
+{
+    struct ns_entry *ns_entry = g_namespaces;
+    int rc = 0;
+    int i;
+    int core;
+
+    printf(" called: spdk init \n");
+
+    if (ns_entry == NULL)
+    {
+        printf(" spdk init failed. \n");
+        return -1;
+    }
+
+#if 0
+    for (i = 0 ;i < SPDK_QUEUE_NUM; i++)
+    {
+        for (core = 0;core < SPDK_NUM_CORES; core++)
+        {
+            printf(" Alloc NVMe Queue = %d (%s)\n", i, spdk_qname_decode(i));
+
+            io_manager->spdk_queue[core][i] = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, 0);
+            if (io_manager->spdk_queue[core][i] == NULL) {
+                printf("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
+                return -1;
+            }
+        }        
+    }
+#else
+    for (i = 0 ;i < SPDK_QUEUE_NUM; i++)
+    {
+        io_manager->spdk_queue[i] = NULL;
+    }
+#endif
     
     printf(" alloc io qpair for nvme \n");
 
@@ -257,7 +312,7 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
     struct ns_entry *ns_entry = g_namespaces;
     struct io_job *job;
     int i;
-    int ret = 0;
+    int ret = 0;   
 
     for(i = 0;i < qcnt;i++){
         struct iocb *iocb = ioq[i];
@@ -290,8 +345,8 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
 
 static int spdk_complete(struct nvfuse_io_manager *io_manager)
 {
-    s32 max_completions = 0;
-
+    s32 max_completions = 0;    
+ 
     /* Polling */
     while(cjob_size(io_manager) == 0)    
         spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_AIO], max_completions);
@@ -365,8 +420,8 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
     struct ns_entry *ns_entry;
     struct spdk_job job;
     int rbytes = 0;
-    int res;
-
+    int res;    
+   
     ns_entry = g_namespaces;
     job.buf = buf;
     job.is_completed = 0;
@@ -399,7 +454,7 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
     struct spdk_job job;
     int wbytes = 0;
     int res;
-
+      
     /*if (block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
 	printf(" ss write: block = %ld count = %d \n", block, count);*/
 
@@ -438,11 +493,15 @@ int spdk_close(struct nvfuse_io_manager *io_manager)
 	struct ns_entry *ns_entry = g_namespaces;
 	struct ctrlr_entry *ctrlr_entry = g_controllers;
     int i;
+    int core;
 
-    for (i = 0;i < SPDK_QUEUE_NUM; i++)
-    {
-        spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue[i]);
-    }
+    // for (i = 0;i < SPDK_QUEUE_NUM; i++)
+    // {
+    //     for (core = 0; core < SPDK_NUM_CORES; core++)
+    //     {
+    //         spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue[core][i]);
+    //     }        
+    // }
     
 	while (ns_entry) {
 		struct ns_entry *next = ns_entry->next;
@@ -461,9 +520,11 @@ int spdk_close(struct nvfuse_io_manager *io_manager)
     return 0;
 }
 
-static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
+int spdk_eal_init(s32 core_mask)
 {
-    int rc;
+     char core_mask_str[128];
+     int ret = 0;
+
     /*
      * By default, the SPDK NVMe driver uses DPDK for huge page-based
      *  memory management and NVMe request buffer pools.  Huge pages can
@@ -474,12 +535,41 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
      * So first we must initialize DPDK.  "-c 0x1" indicates to only use
      *  core 0.
      */
-    rc = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), ealargs);
-    if (rc < 0) {
-        fprintf(stderr, "could not initialize dpdk\n");
-        return 1;
+
+    if (core_mask) 
+    {
+        sprintf(core_mask_str, "0x%x", core_mask);
+    }
+    else
+    {
+        sprintf(core_mask_str, "0x1");
     }
 
+    ealargs[1] = spdk_sprintf_alloc("-c %s", core_mask_str);
+    if (ealargs[1] == NULL) {
+        perror("ealargs spdk_sprintf_alloc");
+        ret = -1;
+        goto RET;
+    }
+        
+    printf(" NVFUSE: ealargs[1] = %s\n", ealargs[1]);
+    
+    ret = rte_eal_init(sizeof(ealargs) / sizeof(ealargs[0]), ealargs);
+    if (ret < 0) {
+        fprintf(stderr, "could not initialize dpdk\n");
+        ret = -1;
+        goto RET;
+    }
+
+RET:
+    free(ealargs[1]);
+    return ret;
+}
+
+static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
+{
+    int rc;
+   
     printf("Initializing NVMe Controllers\n");
     /*
      * Start the SPDK NVMe enumeration process.  probe_cb will be called
@@ -509,6 +599,18 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
     io_manager->aio_init(io_manager);
 
     printf(" spdk init: Ok\n");
+    #ifdef SPDK_BASIC_TEST
+    {
+        char *buf = (char *)nvfuse_alloc_aligned_buffer(4096);
+        printf(" buf = %p\n", buf);
+        while(1)
+        {
+            spdk_read_blk(io_manager, 0, 1, buf);            
+        }
+        nvfuse_free_aligned_buffer(buf);
+    }
+    #endif
+    
     return 0;
 }
 

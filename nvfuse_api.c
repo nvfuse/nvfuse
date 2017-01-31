@@ -26,6 +26,12 @@
 #include <sys/uio.h>
 #endif 
 
+#ifdef SPDK_ENABLED
+#include "spdk/nvme.h"
+#include "spdk/env.h"
+#include <rte_lcore.h>
+#endif
+
 #include "nvfuse_core.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_buffer_cache.h"
@@ -35,34 +41,31 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
+#include "nvfuse_ipc_ring.h"
 
 void nvfuse_core_usage(char *cmd)
 {
 	printf("\n Usage: \n\n");
 	printf(" %s [nvfuse core options] [application options]\n", cmd);
 	printf("\n");
-	printf(" Options for NVFUSE core:\n");
-	printf("\t-t: device type (e.g., spdk, block, file, ramdisk)\n");
-	printf("\t-d: device name (e.g., 01:00, /dev/nvme0n1, /home/file.dat, ramdisk)\n");	
-	printf("\t-f: nvfuse format\n");
-	printf("\t-m: nvfuse mount\n");
+	printf(" Options for NVFUSE core:\n");	
+	printf("\t-f: nvfuse format for primary process \n");
+	printf("\t-m: nvfuse mount for primary process \n");
 	printf("\t-q: driver qdepth \n");	
-	printf("\t-b: buffer size (in MB)\n");
-	printf("\t-s: fs size (in MB)\n");
+	printf("\t-b: buffer size (in MB) for primary process\n");	
+	printf("\t-c: CPU core mask (e.g., 0x1 (default), 0x2, 0x4\n");
+	printf("\t-a: Application name (e.g., rocksdb, fiebenc, redis\n");
 }
 
 void nvfuse_core_usage_example(char *cmd)
 {
     printf(" Example:\n");
-    printf(" #sudo %s -t spdk -d 01:00 -f -m\n", cmd);
-    printf(" #sudo %s -t block -d /dev/nvme0n1 -f -m\n", cmd);
-    printf(" #sudo %s -t file -d /home/file.data -s 65536 -f -m\n", cmd);
-    printf(" #sudo %s -t ramdisk -s 8192 -f -m\n", cmd);
+    printf(" #sudo %s -f -m -q 256 -b 2048 -c 0x4 -a rocksdb\n", cmd); 
 }
 
 s8 *nvfuse_get_core_options()
 {
-	return "d:t:fmq:s:b:";
+	return "a:c:fmq:s:b:";
 }
 
 s32 nvfuse_is_core_option(s8 option)
@@ -85,8 +88,8 @@ s32 nvfuse_is_core_option(s8 option)
 }
 
 void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
-											int *core_argcp, char **core_argv, 
-											int *app_argcp, char **app_argv)
+						int *core_argcp, char **core_argv, 
+						int *app_argcp, char **app_argv)
 {
 	int i;
 	int core_argc = 0;
@@ -141,19 +144,42 @@ void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
 		printf("%d %s\n", i, core_argv[i]);
 	}*/
 }
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc, char **argv)
+
+s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx, s32 cpu_core_mask, s32 qdepth)
 {
-	struct nvfuse_handle *nvh;
-	struct nvfuse_io_manager *io_manager;	
-	s8 *devname; /* e.g., /dev/nvme0n1, /home/filedisk.dat, 01:00 */
-	s32 init_iom = 1;
-	s32 io_manager_type;
-	s32 need_format;
-	s32 need_mount;
+	s32 ret;
+
+	ret = spdk_eal_init(cpu_core_mask);
+	if (ret < 0)
+		return -1;
+
+	/* Initialize IO Manager */		
+	io_manager->type = IO_MANAGER_SPDK;
+	io_manager->cpu_core_mask = cpu_core_mask;
+
+	nvfuse_init_spdk(io_manager, "SPDK", "SPDK", qdepth);
+
+	/* open I/O manager */	
+	io_manager->io_open(io_manager, 0);
+
+	printf(" total blks = %ld \n", (long)io_manager->total_blkcount);
+		
+	ret = nvfuse_ipc_init(ipc_ctx);
+	if (ret < 0) {
+		printf(" Error: ipc_init()\n");
+		return -1;
+	}
+}
+
+s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
+{
+	s32 cpu_core_mask = 0x1; /* 1 core set to as default */
+	s8 *appname = NULL; /* e.g., rocksdb */
+	s32 need_format = 0;
+	s32 need_mount = 1;
 	s32 qdepth = AIO_MAX_QDEPTH;
 	s32 dev_size = 0; /* in MB units */
 	s32 buffer_size = 0; /* in MB units */
-	s32 ret;	
 	s8 op;
 	s8 *cmd;
 
@@ -161,10 +187,10 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 
 	if (argc == 1) 
 	{
-		printf(" Invalid argc = %d \n", argc);
+		fprintf(stderr, " Invalid argc = %d \n", argc);
 		goto PRINT_USAGE;
 	}
-	
+
 	/* optind must be reset before using getopt() */
 	optind = 0;
 	/* f (format) and m (mount) don't have any argument. */
@@ -173,8 +199,8 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 		switch (op) {
 		case ' ':
 			continue;
-		case 'd':		
-			devname = optarg;
+		case 'c': 
+			cpu_core_mask = atoi(optarg);		
 			break;
 		case 'f':		
 			need_format = 1;
@@ -182,6 +208,11 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 		case 'm':
 			need_mount = 1;
 			break;
+		case 'a':
+			appname = optarg;
+			break;
+
+		#if 0
 		case 't':			
 			//printf(" type = %s\n", optarg);		
 			if (!strcmp("spdk", optarg))
@@ -210,6 +241,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 				goto PRINT_USAGE;
 			}
 			break;
+		#endif
 		case 'q':
 			qdepth = atoi(optarg);
 			if (qdepth == 0 || qdepth > AIO_MAX_QDEPTH)
@@ -236,78 +268,113 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_handle *a_nvh, int argc
 			goto PRINT_USAGE;
 		}
 	}
+	
+	if (!spdk_process_is_primary() && appname == NULL) {
+		fprintf(stderr, "\n Application name with -a option is required.\n");
+		goto PRINT_USAGE;
+	}
 
-	if (a_nvh == NULL) 
-	{
-		nvh = malloc(sizeof(struct nvfuse_handle));
-		if (nvh == NULL)
-		{
-			printf(" Error: nvfuse_create_handle due to lack of free memory \n");
-			return NULL;
-		}
-		memset(nvh, 0x00, sizeof(struct nvfuse_handle));
-	}
-	else 
-	{
-		nvh = a_nvh;
-	}
-	
-	
-	/* Initialize IO Manager */
-	if (init_iom) {
-		//printf(" io_manager_type = %d\n", io_manager_type);
-		io_manager = &nvh->nvh_iom;
-		io_manager->type = io_manager_type;
-		switch (io_manager_type)
-		{
-		case IO_MANAGER_RAMDISK:
-			nvfuse_init_memio(io_manager, "RAMDISK", "RAM", dev_size);
-			break;
-		case IO_MANAGER_FILEDISK:
-			nvfuse_init_fileio(io_manager, "FILE", devname, dev_size);
-			break;
-		case IO_MANAGER_UNIXIO:
-			nvfuse_init_unixio(io_manager, "SSD", devname, qdepth);
-			break;
-#	ifdef SPDK_ENABLED
-		case IO_MANAGER_SPDK:
-			nvfuse_init_spdk(io_manager, "SPDK", devname, qdepth);
-			break;
-#	endif
-		default:
-			printf(" Error: Invalid IO Manager Type = %d", io_manager_type);
-			return NULL;
-		}
-		/* open I/O manager */
-		io_manager->io_open(io_manager, 0);
-		printf(" total blks = %ld \n", (long)io_manager->total_blkcount);
-	}
-	
-	/* file system format */
-	if (need_format)
-	{
-		ret = nvfuse_format(nvh);
-		if (ret < 0) {
-			printf(" Error: format() \n");
-			return NULL;
-		}
-	}
-	
-	/* file system mount */
-	if (need_mount) {
-		memset(&nvh->nvh_sb, 0x00, sizeof(struct nvfuse_superblock));
-		ret = nvfuse_mount(nvh, buffer_size);
-		if (ret < 0) {
-			printf(" Error: mount() \n");
-			return NULL;
-		}
-	}	
-	return nvh;
+	/* configure parametres received from cmmand line */
+	if (appname)	
+		strcpy(params->appname, appname);
+	else
+		strcpy(params->appname, "primary");
+
+	params->cpu_core_mask	= cpu_core_mask;
+	params->buffer_size		= buffer_size;
+	params->qdepth			= qdepth;
+	params->need_format		= need_format; /* no allowed for secondary processes */
+	params->need_mount		= need_mount;
+#if 1
+	printf(" appname = %s\n", appname);
+	printf(" cpu core mask = %x\n", cpu_core_mask);
+	printf(" qdepth = %d \n", qdepth);
+	printf(" buffer size = %d MB\n", buffer_size);
+	printf(" need format = %d \n", need_format);
+	printf(" need mount = %d \n", need_mount);
+#endif
+
+	return 0;
 
 PRINT_USAGE:
 	nvfuse_core_usage(cmd);
 	nvfuse_core_usage_example(cmd);
-	return NULL;
+	return -1;
+}
+
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager, 
+											struct nvfuse_ipc_context *ipc_ctx, 
+											struct nvfuse_params *params)
+{
+	struct nvfuse_handle *nvh;		
+	s32 ret;	
+		
+	/* allocation of nvfuse handle */
+	nvh = malloc(sizeof(struct nvfuse_handle));
+	if (nvh == NULL)
+	{
+		printf(" Error: nvfuse_create_handle due to lack of free memory \n");
+		return NULL;
+	}
+	memset(nvh, 0x00, sizeof(struct nvfuse_handle));
+	
+	/* copy instance of io_manager */
+	memcpy(&nvh->nvh_iom, io_manager, sizeof(struct nvfuse_io_manager));
+	
+	/* copy instance of ipc_ctx */
+	memcpy(&nvh->nvh_ipc_ctx, ipc_ctx, sizeof(struct nvfuse_ipc_context));
+	
+	/* copy instance of ipc_ctx */
+	memcpy(&nvh->nvh_params, params, sizeof(struct nvfuse_params));
+
+	nvh->nvh_iom.ipc_ctx = &nvh->nvh_ipc_ctx;
+
+	ret = spdk_alloc_qpair(&nvh->nvh_iom);
+	if (ret < 0) {
+		fprintf(stderr, " Error: alloc qpair \n");
+		return NULL;
+	}
+
+	/* file system format */
+	if (nvh->nvh_params.need_format)
+	{		
+		if (spdk_process_is_primary())
+		{
+			ret = nvfuse_format(nvh);
+			if (ret < 0) {
+				printf(" Error: format() \n");
+				return NULL;
+			}
+		}
+		else
+		{
+			fprintf(stdout, " format skipped due to secondary process!\n");
+		}
+		
+	}
+	
+	/* file system mount */
+	if (nvh->nvh_params.need_mount) {		
+		memset(&nvh->nvh_sb, 0x00, sizeof(struct nvfuse_superblock));
+		nvh->nvh_sb.sb_nvh = nvh; /* temporary */
+		ret = nvfuse_mount(nvh);
+		if (ret < 0) {
+			printf(" Error: mount() \n");
+			return NULL;
+		}		
+	}
+	
+	nvh->nvh_sb.sb_control_plane_buffer_size = nvh->nvh_params.buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
+	nvh->nvh_sb.sb_is_primary_process = spdk_process_is_primary() ? 1 : 0;	
+
+	return nvh;
+}
+
+void nvfuse_deinit_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx)
+{
+	io_manager->io_close(io_manager);
+
+	nvfuse_ipc_exit(ipc_ctx);
 }
 
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount)
@@ -325,13 +392,8 @@ void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_u
 			printf(" Error: umount() \n");
 		}
 	}
-	
-	/* close I/O manager */
-	if (deinit_iom)
-	{
-		io_manager->io_close(io_manager);
-	}
-	
+
+	spdk_release_qpair(io_manager);
 }
 /* 
 * namespace lookup function with given file name and paraent inode number
@@ -601,7 +663,7 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		}
 		else {
 			res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
-			printf("cannot read or create file \n");
+			//printf("cannot read or create file \n");
 			fid = -1;
 			goto RES;
 		}
@@ -665,7 +727,7 @@ s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags,
 		return res;
 
 	if (dir_entry.d_ino == 0) {
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		fd = -1;
 	} else {
 		fd = nvfuse_openfile(sb, dir_entry.d_ino, filename, flags, mode);
@@ -721,7 +783,6 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	struct nvfuse_file_table *ft;
 
-	pthread_mutex_lock(&sb->sb_file_table_lock);
 	ft = sb->sb_file_table + fid;
 
 	pthread_mutex_lock(&ft->ft_lock);	
@@ -732,8 +793,6 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 	ft->prefetch_cur = 0;
 	ft->flags = 0;
 	pthread_mutex_unlock(&ft->ft_lock);
-
-	pthread_mutex_unlock(&sb->sb_file_table_lock);
 
 	nvfuse_release_super(sb);
 
@@ -1254,7 +1313,12 @@ find:
 			printf(" It runs out of free inodes.");
 			return -1;
 		}
-
+		#if 0
+		if (spdk_process_is_primary())
+		{
+			printf(" allocated inode for createfile.\n");
+		}
+		#endif
 		set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
 		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
 		nvfuse_insert_ictx(sb, new_ictx);
@@ -1463,7 +1527,7 @@ s32 nvfuse_rmfile_path(struct nvfuse_handle *nvh, const char *path)
 		return res;
 
 	if (dir_entry.d_ino == 0) {
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 	} else {		
 		res = nvfuse_rmfile(sb, dir_entry.d_ino, filename);
@@ -1612,7 +1676,7 @@ s32 nvfuse_rmdir_path(struct nvfuse_handle *nvh, const char *path)
 		return res;
 
 	if (dir_entry.d_ino == 0) {
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 	}
 	else {
@@ -1631,7 +1695,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 	struct nvfuse_inode_ctx *new_ictx, *dir_ictx;
 	struct nvfuse_inode *new_inode = NULL, *dir_inode = NULL;
 
-	struct nvfuse_buffer_head *dir_bh = NULL;	
+	struct nvfuse_buffer_head *dir_bh = NULL;
 	s32 i = 0, flag = 0;
 	u32 new_entry = 0;
 	u32 search_lblock = 0, search_entry = 0;
@@ -1746,6 +1810,12 @@ find:
 			printf(" It runs out of free inodes.");
 			return -1;
 		}
+		#if 0
+		if (spdk_process_is_primary())
+		{
+			printf(" allocated inode = %d for mkdir.\n", ino);
+		}
+		#endif
 		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
 		nvfuse_insert_ictx(sb, new_ictx);
 	}
@@ -1944,7 +2014,7 @@ s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t
 		return res;
 	
 	if (dir_entry.d_ino == 0) {
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 	}
 	else 
@@ -1980,7 +2050,7 @@ s32 nvfuse_mkdir_path(struct nvfuse_handle *nvh, const char *path, mode_t mode)
 		return res;
 
 	if (dir_entry.d_ino == 0) {
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 	}
 	else {
@@ -2007,7 +2077,7 @@ s32 nvfuse_truncate_path(struct nvfuse_handle *nvh, const char *path, nvfuse_off
 		return res;
 
 	if (dir_entry.d_ino == 0) {
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 	}
 	else {
@@ -2151,7 +2221,7 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 			return res;
 
 		if (dir_entry.d_ino == 0) {
-			printf("invalid path\n");
+			printf(" %s: invalid path\n", __FUNCTION__);
 			res = -ENOENT;
 			goto RET;
 		} else {
@@ -2162,7 +2232,7 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 			}
 			
 			inode = ictx->ictx_inode;
-
+			stbuf->st_ino	= inode->i_ino;
 			stbuf->st_mode	= inode->i_mode;
 			stbuf->st_nlink	= inode->i_links_count;
 			stbuf->st_size	= inode->i_size;
@@ -2245,7 +2315,7 @@ s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask)
 			return res;
 
 		if (dir_entry.d_ino == 0) {
-			printf("invalid path\n");
+			printf(" %s: invalid path\n", __FUNCTION__);
 			res = -1;
 			goto RET;
 		} else {
@@ -2310,7 +2380,7 @@ s32 nvfuse_readlink(struct nvfuse_handle *nvh, const char *path, char *buf, size
 		}
 
 		if (cur_dir.d_ino == 0) {
-			printf("invalid path\n");
+			printf(" %s: invalid path\n", __FUNCTION__);
 			res = -1;
 			goto RET;
 		} else {
@@ -2368,7 +2438,7 @@ s32 nvfuse_chmod_path(struct nvfuse_handle *nvh, const char *path, mode_t mode)
 			return res;
 
 		if (dir_entry.d_ino == 0) {
-			printf("invalid path\n");
+			printf(" %s: invalid path\n", __FUNCTION__);
 			res = -1;
 			goto RET;
 		} else {
@@ -2410,7 +2480,7 @@ s32 nvfuse_chown(struct nvfuse_handle *nvh, const char *path, uid_t uid, gid_t g
 			return res;
 
 		if (dir_entry.d_ino == 0) {
-			printf("invalid path\n");
+			printf(" %s: invalid path\n", __FUNCTION__);
 			res = -1;
 			goto RET;
 		} else {
@@ -2451,7 +2521,7 @@ s32 nvfuse_utimens(struct nvfuse_handle *nvh, const char *path, const struct tim
 			return res;
 
 		if (dir_entry.d_ino == 0) {
-			printf("invalid path\n");
+			printf(" %s: invalid path\n", __FUNCTION__);
 			res = -1;
 			goto RET;
 		} else {
@@ -2697,7 +2767,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 
 	if (dir_entry.d_ino == 0) 
 	{
-		printf("invalid path\n");
+		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 		goto RET;
 	} 

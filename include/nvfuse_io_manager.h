@@ -17,12 +17,14 @@
 #include <pthread.h>
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 #include <Windows.h>
-
 struct iocb;
 typedef struct io_context io_context_t;
 struct io_event;
-
 #endif 
+#include "nvfuse_types.h"
+
+#ifndef __IO_MANAGER__
+#define __IO_MANAGER__
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #include <libaio.h>
@@ -125,13 +127,16 @@ struct nvfuse_io_manager {
     int dev;
 
     int blk_size; /* 512B, 4KB */
+    long start_blk; /* start block (512B)*/
     long total_blkcount; /* number of sectors (512B) */
-
+    int cpu_core_mask; /* cpu core mask for SPDK */
+    
 #if NVFUSE_OS == NVFUSE_OS_LINUX
     io_context_t io_ctx;
     struct io_event events[AIO_MAX_QDEPTH];
 
     struct spdk_nvme_qpair *spdk_queue[SPDK_QUEUE_NUM];
+    struct nvfuse_ipc_context *ipc_ctx;
 #endif
     int queue_cur_count;
 
@@ -219,3 +224,8 @@ static inline s32 cjob_size(struct nvfuse_io_manager *io_manager)
         return io_manager->iodepth - io_manager->cjob_tail + io_manager->cjob_head;
 }
 #endif 
+
+int spdk_eal_init(s32 core_mask);
+int spdk_alloc_qpair(struct nvfuse_io_manager *io_manager);
+void spdk_release_qpair(struct nvfuse_io_manager *io_manager);
+#endif

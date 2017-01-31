@@ -13,7 +13,18 @@ addons:
       - cloc
 
 before_install:
+  - git clone https://github.com/spdk/spdk.git
+  - pushd spdk
+  - wget http://fast.dpdk.org/rel/dpdk-16.11.tar.xz
+  - tar xf dpdk-16.11.tar.xz
+  - pushd dpdk-16.11
+  - make config T=x86_64-native-linuxapp-$CC
   - make
+  - make install DESTDIR=.
+  - popd
+  - make DPDK_DIR=./dpdk-16.11/x86_64-native-linuxapp-gcc
+  - popd
+  - make SPDK_ROOT_DIR=spdk DPDK_DIR=spdk/dpdk-16.11/x86_64-native-linuxapp-gcc 
   - chmod +x unittest.sh
 
 script: ./unittest.sh

@@ -23,6 +23,22 @@
 #include <sys/uio.h>
 #endif 
 
+#include "spdk/env.h"
+
+#include <rte_common.h>
+#include <rte_memory.h>
+#include <rte_memzone.h>
+#include <rte_launch.h>
+#include <rte_eal.h>
+#include <rte_per_lcore.h>
+#include <rte_lcore.h>
+#include <rte_debug.h>
+#include <rte_atomic.h>
+#include <rte_branch_prediction.h>
+#include <rte_ring.h>
+#include <rte_log.h>
+#include <rte_mempool.h>
+
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_core.h"
 #include "nvfuse_io_manager.h"
@@ -33,6 +49,7 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
+#include "nvfuse_ipc_ring.h"
 
 struct nvfuse_superblock * nvfuse_read_super(struct nvfuse_handle *nvh)
 {		
@@ -160,6 +177,20 @@ s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_ino
 	return 0;
 }
 
+void nvfuse_update_owner_in_ss(struct nvfuse_superblock *sb, s32 seg_id)
+{
+	struct nvfuse_segment_summary *ss = NULL;
+	struct nvfuse_buffer_head *ss_bh;	
+
+	ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
+	ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+	ss->ss_owner = sb->asb.asb_core_id;
+
+	//printf(" Update seg id = %d, owner = %d\n", seg_id, ss->ss_owner);
+		
+	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
+}
+
 u32 nvfuse_scan_free_ibitmap(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 seg_id, u32 hint_free_inode)
 {
 	struct nvfuse_segment_summary *ss = NULL;
@@ -208,26 +239,184 @@ u32 nvfuse_scan_free_ibitmap(struct nvfuse_superblock *sb, struct nvfuse_inode_c
 	return free_inode;
 }
 
+u32 nvfuse_get_next_seg_id(struct nvfuse_superblock *sb, s32 is_inode)
+{
+	u32 next_seg_id;
+
+	if (!spdk_process_is_primary())
+	{
+		struct list_head *first_node;
+		struct seg_node *seg_node;
+		
+		if (is_inode)
+		{
+			first_node = sb->sb_seg_search_ptr_for_inode;			
+		}
+		else
+		{
+			first_node = sb->sb_seg_search_ptr_for_data;
+		}
+
+		//if (first_node->next == )
+		if (list_is_last(first_node, &sb->sb_seg_list))		
+		{
+			printf(" list_is_last ..!! %s\n", is_inode?"inode":"data");
+			first_node = &sb->sb_seg_list;
+		}
+
+		if (is_inode)
+		{
+			sb->sb_seg_search_ptr_for_inode = first_node->next;
+			first_node = sb->sb_seg_search_ptr_for_inode;
+		}
+		else
+		{
+			sb->sb_seg_search_ptr_for_data = first_node->next;
+			first_node = sb->sb_seg_search_ptr_for_data;
+		}
+						
+		seg_node = container_of(first_node, struct seg_node, list);
+
+		next_seg_id = seg_node->seg_id;
+		assert(next_seg_id != 0);
+	}
+	else
+	{
+		next_seg_id = 0; /* primary process only utilizes the first container. */
+	}
+
+	return next_seg_id;	
+}
+
+void nvfuse_move_curr_seg_id(struct nvfuse_superblock *sb, s32 seg_id, s32 is_inode)
+{
+	u32 curr_seg_id;
+
+	if (!spdk_process_is_primary())
+	{
+		struct list_head *first_node;
+		struct seg_node *seg_node;
+
+		if (is_inode)		
+			first_node = sb->sb_seg_search_ptr_for_inode;			
+		else
+			first_node = sb->sb_seg_search_ptr_for_data;
+		
+		assert(first_node != NULL);
+		assert(first_node != &sb->sb_seg_list);
+
+		do {		
+			seg_node = container_of(first_node, struct seg_node, list);
+			if (seg_node->seg_id == seg_id)
+			{
+				if (is_inode)
+					sb->sb_seg_search_ptr_for_inode = first_node;				
+				else
+					sb->sb_seg_search_ptr_for_data = first_node;
+				
+				//printf(" set seg id = %d for %s\n", seg_id, is_inode ? "inode" : "data");
+				
+				assert(seg_id != 0);
+				break;
+			}
+			
+			/* seg 0 is reserved for control plane */
+			assert(seg_id != 0);
+
+			/* skip list head */
+			do {
+				first_node = first_node->next;
+			} while(first_node == &sb->sb_seg_list);
+
+		} while(1);
+	}
+	else
+	{	
+		assert(0);
+	}
+}
+
+u32 nvfuse_get_curr_seg_id(struct nvfuse_superblock *sb, s32 is_inode)
+{
+	u32 curr_seg_id;
+
+	if (!spdk_process_is_primary())
+	{
+		struct list_head *first_node;
+		struct seg_node *seg_node;
+
+		if (is_inode)
+		{
+			first_node = sb->sb_seg_search_ptr_for_inode;			
+		}
+		else
+		{
+			first_node = sb->sb_seg_search_ptr_for_data;
+		}
+
+		assert(first_node != NULL);
+		assert(first_node != &sb->sb_seg_list);
+
+		seg_node = container_of(first_node, struct seg_node, list);
+		curr_seg_id = seg_node->seg_id;
+		assert(curr_seg_id != 0);
+	}
+	else
+	{
+		curr_seg_id = 0; /* primary process only utilizes the first container. */
+	}
+
+	return curr_seg_id;	
+}
+
 u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 last_ino)
 {
 	u32 new_ino = 0;
-	u32 hint_ino;
-	s32 ret = 0;
+	u32 hint_ino;	
 	u32 seg_id;
-	u32 next_id;
-
-	seg_id = last_ino / sb->sb_no_of_inodes_per_seg;
-	next_id = seg_id % sb->sb_segment_num;
-	seg_id = (seg_id - 1 + sb->sb_segment_num) % sb->sb_segment_num;
+	u32 last_id;
+	s32 ret = 0;
+	/* debug info */
+	s32 count = 0;
+	s32 start_seg = 0;
+	if (!spdk_process_is_primary())
+		seg_id = nvfuse_get_curr_seg_id(sb, 1 /*inode type*/);		
+	else
+		seg_id = last_ino / sb->sb_no_of_inodes_per_seg;
+	
+	last_id = seg_id;
 
 	hint_ino = last_ino % sb->sb_no_of_inodes_per_seg;
-
-	while (next_id != seg_id) {
-		new_ino = nvfuse_scan_free_ibitmap(sb, ictx, next_id, hint_ino);
+	
+	start_seg = seg_id;
+	do {
+		new_ino = nvfuse_scan_free_ibitmap(sb, ictx, seg_id, hint_ino);
 		if (new_ino)
 			break;
-		next_id = (next_id + 1) % sb->sb_segment_num;
+		
+		seg_id = nvfuse_get_next_seg_id(sb, 1 /*inode type*/);
 		hint_ino = 0;
+		count++;
+		//printf(" seg_id = %d \n", seg_id);
+	} while (seg_id != last_id);
+	
+	if (new_ino)
+	{
+		//printf(" Found free inode = %d, seg = %d \n", new_ino, new_ino / sb->sb_no_of_inodes_per_seg);
+	}
+	else
+	{
+		printf(" Unavailable free inodes!!! app free inode = %d\n", sb->asb.asb_free_inodes);
+		printf(" loop count = %d \n", count);		
+		printf(" seg list count = %d \n", sb->sb_seg_list_count);
+		printf(" start seg = %d cur seg = %d \n", start_seg, seg_id);
+		nvfuse_print_seg_list(sb);
+		
+		seg_id = 1;
+		new_ino = nvfuse_scan_free_ibitmap(sb, ictx, seg_id, hint_ino);
+		printf(" alloc inode = %d \n", new_ino);
+
+		assert(0);
 	}
 
 	return new_ino;
@@ -274,9 +463,12 @@ void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 
 	ss->ss_free_inodes++;
 	sb->sb_free_inodes++;
+	if (!spdk_process_is_primary())
+	{
+		sb->asb.asb_free_inodes++;
+	}	
 	assert(ss->ss_free_inodes <= ss->ss_max_inodes);
-	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
-	
+	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);	
 }
 
 void nvfuse_dec_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
@@ -292,6 +484,10 @@ void nvfuse_dec_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 
 	ss->ss_free_inodes--;
 	sb->sb_free_inodes--;
+	if (!spdk_process_is_primary())
+	{
+		sb->asb.asb_free_inodes--;
+	}
 	assert(ss->ss_free_inodes >= 0);
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
@@ -310,10 +506,20 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 	ss->ss_free_blocks += cnt;
 	sb->sb_free_blocks += cnt;
 	sb->sb_no_of_used_blocks -= cnt;
+	if (!spdk_process_is_primary())
+		sb->asb.asb_free_blocks += cnt;
 
 	assert(ss->ss_free_blocks <= ss->ss_max_blocks);
 	assert(sb->sb_free_blocks <= sb->sb_no_of_blocks);
+	if (!spdk_process_is_primary())
+		assert(sb->asb.asb_free_blocks <= sb->sb_no_of_blocks);
 	assert(sb->sb_no_of_used_blocks >= 0);
+
+	/* removal of unused segment to primary process (e.g., control plane)*/
+	if (ss->ss_free_blocks + ss->ss_dtable_start == ss->ss_max_blocks)
+	{
+		nvfuse_remove_seg(sb, seg_id);
+	}
 
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
@@ -331,9 +537,15 @@ void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 
 	ss->ss_free_blocks -= cnt;
 	sb->sb_free_blocks -= cnt;
+	
+	if (!spdk_process_is_primary())
+		sb->asb.asb_free_blocks -= cnt;
+
 	sb->sb_no_of_used_blocks += cnt;
 	assert(ss->ss_free_blocks >= 0);
 	assert(sb->sb_free_blocks >= 0);
+	if (!spdk_process_is_primary())
+		assert(sb->asb.asb_free_blocks >= 0);
 	assert(sb->sb_no_of_used_blocks <= sb->sb_no_of_blocks);
 
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
@@ -363,6 +575,26 @@ u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id)
 	return free_blocks;
 }
 
+s32 nvfuse_check_free_inode(struct nvfuse_superblock *sb)
+{
+	if (!spdk_process_is_primary())
+		return sb->asb.asb_free_inodes ? 1 : 0;
+	else
+		return sb->sb_free_inodes ? 1 : 0;
+}
+
+s32 nvfuse_check_free_block(struct nvfuse_superblock *sb, u32 num_blocks)
+{
+	s32 ret;
+
+	if (!spdk_process_is_primary())
+		ret = (sb->asb.asb_free_blocks >= (s64)num_blocks) ? 1 : 0;
+	else
+		ret = (sb->sb_free_blocks >= (s64)num_blocks) ? 1 : 0;
+	
+	return ret;
+}
+
 inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
 {
 	struct nvfuse_buffer_head *bh;	
@@ -372,8 +604,32 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 	inode_t alloc_ino = 0;
 	inode_t hint_ino = 0;
 	inode_t last_allocated_ino = 0;
-	u32 block, ifile_num;	
+	u32 block, ifile_num;
+	s32 nr_buffers;
 	s32 i, j;
+	s32 container_id;
+
+	if (!nvfuse_check_free_inode(sb))
+	{
+		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
+		if (container_id > 0) 
+		{			
+			/* insert allocated container to process */
+			nvfuse_add_seg(sb, container_id);
+			/* try to allocate buffers from primary process */
+			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);			
+			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
+			if (nr_buffers > 0)
+			{
+				nvfuse_add_buffer_cache(sb, nr_buffers);
+			}
+			assert (nvfuse_check_free_inode(sb) == 1);
+		}
+		else
+		{
+			assert(0);
+		}
+	}
 
 	last_allocated_ino = sb->sb_last_allocated_ino;
 	hint_ino = nvfuse_find_free_inode(sb, ictx, last_allocated_ino);
@@ -428,7 +684,15 @@ RES:;
 	nvfuse_release_bh(sb, bh, 0, DIRTY);
 
 	/* keep hit information to rapidly find a free inode */
-	sb->sb_last_allocated_ino = alloc_ino + 1;
+	if (!spdk_process_is_primary()) 
+	{
+		sb->sb_last_allocated_ino = alloc_ino + 1;
+	} 
+
+	if (spdk_process_is_primary())
+	{
+		printf(" allocated ino = %d\n", alloc_ino);
+	}
 
 	return alloc_ino;
 }
@@ -938,7 +1202,276 @@ void nvfuse_write_statistics(struct nvfuse_superblock *sb){
 	fclose(fp);
 }
 
-s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
+void nvfuse_update_sb_with_ss_info(struct nvfuse_superblock *sb, s32 seg_id, s32 is_root_container, s32 increament)
+{
+	if (!is_root_container)
+	{
+		struct nvfuse_segment_summary *ss = nvfuse_get_segment_summary(sb, seg_id);
+		if (increament)
+		{
+			sb->asb.asb_free_blocks += ss->ss_free_blocks;
+			sb->asb.asb_free_inodes += ss->ss_free_inodes;
+			sb->asb.asb_no_of_used_blocks += 0;
+		}
+		else
+		{
+			sb->asb.asb_free_blocks -= ss->ss_free_blocks;
+			sb->asb.asb_free_inodes -= ss->ss_free_inodes;
+			sb->asb.asb_no_of_used_blocks += 0;
+		}		
+	}
+	else
+	{
+		struct nvfuse_segment_summary *ss;
+		struct nvfuse_buffer_head *ss_bh, *bh;
+		ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
+		ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+		if (increament)
+		{
+			sb->asb.asb_free_blocks += ss->ss_free_blocks;
+			sb->asb.asb_free_inodes += ss->ss_free_inodes;
+			sb->asb.asb_no_of_used_blocks += (sb->sb_no_of_blocks_per_seg - ss->ss_free_blocks);
+		}
+		else
+		{
+			sb->asb.asb_free_blocks -= ss->ss_free_blocks;
+			sb->asb.asb_free_inodes -= ss->ss_free_inodes;
+			sb->asb.asb_no_of_used_blocks -= (sb->sb_no_of_blocks_per_seg - ss->ss_free_blocks);
+		}
+		nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
+	}
+
+	//printf(" %s: sb_free_blocks = %ld, sb_free_inodes = %d\n", 
+	//		__FUNCTION__, sb->asb.asb_free_blocks, sb->asb.asb_free_inodes);
+}
+
+s32 nvfuse_add_seg(struct nvfuse_superblock *sb, u32 seg_id)
+{
+	struct list_head *head = &sb->sb_seg_list;
+	struct seg_node *new_node;
+	s32 root_container = 0;
+
+	new_node = nvfuse_malloc(sizeof(struct seg_node));
+	new_node->seg_id = seg_id;
+	list_add_tail(&new_node->list, head);
+	sb->sb_seg_list_count++;
+
+	if (sb->sb_seg_list_count == 1)
+	{
+		sb->sb_seg_search_ptr_for_inode = sb->sb_seg_list.next;
+		sb->sb_seg_search_ptr_for_data = sb->sb_seg_list.next;
+		root_container = 1;
+	}
+
+	if (!spdk_process_is_primary())
+	{
+		nvfuse_update_sb_with_ss_info(sb, seg_id, root_container, 1 /* inc*/);
+	}
+
+	nvfuse_update_owner_in_ss(sb, seg_id);
+	//printf(" core %d adds segment %d (total %d)\n", rte_lcore_id(), seg_id, sb->sb_seg_list_count);	
+}
+
+s32 nvfuse_remove_seg(struct nvfuse_superblock *sb, u32 seg_id)
+{
+	struct list_head *head = &sb->sb_seg_list;
+	struct list_head *next;
+	struct seg_node *node, *temp;	
+	s32 root_container = 0;
+	s32 ret;
+
+	if (seg_id == sb->asb.asb_root_seg_id)
+		return 0;
+
+	list_for_each_entry_safe(node, temp, head, list) {
+		if (node->seg_id == seg_id) {			
+			if (&node->list == sb->sb_seg_search_ptr_for_inode)
+			{
+				next = node->list.next;
+				while(next == &sb->sb_seg_list)
+					next = next->next;
+				sb->sb_seg_search_ptr_for_inode = next;
+			}
+
+			if (&node->list == sb->sb_seg_search_ptr_for_data)
+			{
+				next = node->list.next;
+				while(next == &sb->sb_seg_list)
+					next = next->next;
+				sb->sb_seg_search_ptr_for_inode = next;
+			}
+
+			list_del(&node->list);
+			break;	
+		}
+	}
+
+	assert(node->seg_id == seg_id);
+	/* deallocation of memory */
+	free(node);
+	sb->sb_seg_list_count--;
+
+	if (!spdk_process_is_primary())
+	{
+		nvfuse_update_sb_with_ss_info(sb, seg_id, root_container, 0/* dec */);
+	}
+
+	ret = nvfuse_dealloc_container_from_primary_process(sb, seg_id);
+	if (ret < 0)
+		return ret;
+
+	//printf(" core %d removes segment %d (total %d)\n", rte_lcore_id(), seg_id, sb->sb_seg_list_count);
+	return 0;
+}
+
+void nvfuse_print_seg_list(struct nvfuse_superblock *sb)
+{
+	struct list_head *head = &sb->sb_seg_list;	
+	struct seg_node *node;
+
+	list_for_each_entry(node, head, list){
+		struct nvfuse_segment_summary *ss = NULL;
+		struct nvfuse_buffer_head *ss_bh;	
+		s32 seg_id = node->seg_id;
+
+		ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, seg_id, READ, NVFUSE_TYPE_META);
+		ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+		assert(ss->ss_id == seg_id);
+		printf(" seg = %d, free inodes = %d blocks = %d \n", seg_id, ss->ss_free_inodes, 
+		ss->ss_free_blocks);
+		nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
+	}
+}
+
+s32 nvfuse_alloc_container_from_primary_process(struct nvfuse_handle *nvh, s32 type)
+{
+	struct nvfuse_superblock *sb = &nvh->nvh_sb;
+	union nvfuse_ipc_msg *ipc_msg;
+	struct rte_ring *send_ring, *recv_ring;
+	struct rte_mempool *mempool;	
+	s32 ret;
+	s32 container_id;
+
+	/* INITIALIZATION OF TX/RX RING BUFFERS */
+	send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+	recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+	
+	/* INITIALIZATION OF MEMORY POOL */
+	mempool = nvfuse_ipc_mempool(&nvh->nvh_ipc_ctx);
+	/*
+	* ALLOCATION OF CONTAINER 
+	*/
+	if (rte_mempool_get(mempool, (void **)&ipc_msg) < 0)
+	{
+		rte_panic("Failed to get message buffer\n");
+		return -1;
+	}
+	memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
+	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
+	ipc_msg->container_alloc_req.type = type;
+
+	/* SEND CONTAINER_ALLOC_REQ TO PRIMARY CORE */
+	ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, CONTAINER_ALLOC_REQ);
+	if (ret == 0)
+	{
+		fprintf(stderr, "Failed to get new container (lcore = %d)\n", rte_lcore_id());
+		return 0;
+	}
+	else 
+	{
+		//printf(" allocated container = %d \n", ret);
+		container_id = ret;
+	}
+	rte_mempool_put(mempool, ipc_msg);
+
+	return container_id;
+}
+
+s32 nvfuse_dealloc_container_from_primary_process(struct nvfuse_superblock *sb, u32 seg_id)
+{
+	struct nvfuse_handle *nvh = sb->sb_nvh;
+	struct rte_ring *send_ring, *recv_ring;
+	struct rte_mempool *mempool;		
+	union nvfuse_ipc_msg *ipc_msg;
+	s32 ret;
+
+	/* INITIALIZATION OF TX/RX RING BUFFERS */
+	send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+	recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+
+	/* initialization of memory pool */
+	mempool = nvfuse_ipc_mempool(&nvh->nvh_ipc_ctx);
+
+	/*
+	* DEALLOCATION OF CONTAINER 
+	*/
+	if (rte_mempool_get(mempool, (void **)&ipc_msg) < 0)
+	{
+			rte_panic("Failed to get message buffer\n");
+			return -1;
+	}
+	memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
+	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
+	ipc_msg->container_release_req.container_id = seg_id;
+
+	/* SEND CONTAINER_RELEASE_REQ TO PRIMARY CORE */
+	ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, CONTAINER_RELEASE_REQ);
+	if (ret < 0)
+	{
+			rte_panic("Failed to get new container\n");
+			return -1;
+	}		
+	rte_mempool_put(mempool, ipc_msg);
+	
+	return 0;
+}
+
+void nvfuse_send_health_check_msg_to_primary_process(struct nvfuse_handle *nvh)
+{
+	struct rte_ring *send_ring, *recv_ring;
+	struct rte_mempool *mempool;		
+	union nvfuse_ipc_msg *ipc_msg;
+	u64 tsc_rate = spdk_get_ticks_hz();
+	u64 start_tsc, end_tsc;
+	u64 sum_tsc = 0;
+	s32 count;
+	s32 ret;
+
+	/* INITIALIZATION OF TX/RX RING BUFFERS */
+	send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+	recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+	
+	/* initialization of memory pool */
+	mempool = nvfuse_ipc_mempool(&nvh->nvh_ipc_ctx);
+	/*
+	* UNREGISTRATION OF HOST ID
+	*/
+	if (rte_mempool_get(mempool, (void **)&ipc_msg) < 0)
+	{
+			rte_panic("Failed to get message buffer\n");
+			return;
+	}
+	memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
+	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
+	count = 1000;
+	while(count--) {
+		start_tsc = spdk_get_ticks();
+		/* SEND APP_UNREGISTER_REQ TO PRIMARY CORE */
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, HEALTH_CHECK_REQ);
+		end_tsc = spdk_get_ticks();
+		sum_tsc += (end_tsc - start_tsc);
+	}
+	if (ret)
+	{
+			return;
+	}
+		
+	printf(" IPC latency = %f usec (from secondary to primary). \n", (double)(sum_tsc / 1000) * 1000 * 1000 / tsc_rate);	
+
+	rte_mempool_put(mempool, ipc_msg);	
+}
+
+s32 nvfuse_mount(struct nvfuse_handle *nvh)
 {
 	struct nvfuse_superblock *sb;
 	struct nvfuse_buffer_list *bh;
@@ -949,15 +1482,22 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 	void *buf;
 	s32 i, j, res = 0;
 	
+	fprintf(stdout, "start %s\n", __FUNCTION__);
 	nvfuse_lock_init();
 	
 	sb = nvfuse_read_super(nvh);
-	
-	memset(sb, 0x00, sizeof(struct nvfuse_superblock));
-	
+			
 	sb->io_manager = &nvh->nvh_iom;
-	
-	res = nvfuse_init_buffer_cache(sb, buffer_size);
+	sb->io_manager->ipc_ctx = &nvh->nvh_ipc_ctx;
+	sb->sb_nvh = nvh;
+
+	if (!spdk_process_is_primary())
+	{
+		nvh->nvh_ipc_ctx.my_channel_id = nvfuse_get_channel_id(&nvh->nvh_ipc_ctx);
+		printf(" Obtained Channel ID = %d \n", nvh->nvh_ipc_ctx.my_channel_id);
+	}
+
+	res = nvfuse_init_buffer_cache(sb, NVFUSE_BUFFER_SIZE);
 	if (res < 0)
 	{
 		printf(" Error: initialization of buffer cache \n");
@@ -970,6 +1510,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 		printf(" Error: initialization of inode context cache \n");
 		return -1;
 	}
+
 	if (nvh->nvh_mounted)
 		return -1;
 
@@ -984,24 +1525,87 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 		pthread_mutex_init(&ft->ft_lock, NULL);
 	}
 		
-	pthread_mutex_init(&sb->sb_iolock, NULL);
-	pthread_mutex_init(&sb->sb_file_table_lock, NULL);
-	pthread_mutex_init(&sb->sb_prefetch_lock, NULL);
-	pthread_cond_init(&sb->sb_prefetch_cond, NULL);	
-	pthread_mutex_init(&sb->sb_request_lock, NULL);
-
-	gettimeofday(&start_tv, NULL);
-
-	res = nvfuse_scan_superblock(sb);
-	if (res < 0) {
-		printf(" invalid signature !!\n");
-		return res;
+	//gettimeofday(&start_tv, NULL);
+	if (spdk_process_is_primary())
+	{
+		res = nvfuse_scan_superblock(sb);
+		if (res < 0) {
+			printf(" invalid signature !!\n");
+			return res;
+		}	
 	}
+	else
+	{
+		/* App Registration Process*/
+		struct rte_ring *send_ring, *recv_ring;
+		struct rte_mempool *mempool;		
+		union nvfuse_ipc_msg *ipc_msg;
+		s32 ret;
 
-	gettimeofday(&end_tv, NULL);
+		/* INITIALIZATION OF TX/RX RING BUFFERS */
+		send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+		recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
 
-	timeval_subtract(&result_tv, &end_tv, &start_tv);
-	printf("\n scan time %.3d second\n", (s32)((float)result_tv.tv_sec + (float)result_tv.tv_usec / (float)1000000));
+		/* initialization of memory pool */
+		mempool = nvfuse_ipc_mempool(&nvh->nvh_ipc_ctx);
+
+		/*
+		 * REGISTRATION OF HOST ID 
+		 */
+		if (rte_mempool_get(mempool, (void **)&ipc_msg) < 0)
+		{
+		        rte_panic("Failed to get message buffer\n");
+		        return -1;
+		}
+
+		memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
+		ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
+		sprintf(ipc_msg->app_register_req.name, "%s_%d", nvh->nvh_params.appname, nvh->nvh_ipc_ctx.my_channel_id);
+
+		printf(" app name = %s (%s_%d) \n", ipc_msg->app_register_req.name, nvh->nvh_params.appname, nvh->nvh_ipc_ctx.my_channel_id);
+
+		/* SEND APP_REGISTER_REQ TO PRIMARY CORE */
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, APP_REGISTER_REQ);
+		if (ret)
+		{
+		        return ret;
+		}
+		
+		memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
+		ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;		
+		sprintf(ipc_msg->superblock_copy_req.name, "%s_%d", nvh->nvh_params.appname, nvh->nvh_ipc_ctx.my_channel_id);
+
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, SUPERBLOCK_COPY_REQ);
+		if (ret)
+		{
+		        return ret;
+		}
+
+		memcpy(sb, &ipc_msg->superblock_copy_cpl.superblock_common, sizeof(struct nvfuse_superblock_common));
+		
+		printf(" Copied superblock info from primary process!\n");
+		printf(" no_of_sectors = %ld\n", sb->sb_no_of_sectors);
+		printf(" no_of_inodes_per_seg = %d\n", sb->sb_no_of_inodes_per_seg);
+		printf(" no_of_blocks_per_seg = %d\n", sb->sb_no_of_blocks_per_seg);
+		printf(" no_of_segments = %d\n", sb->sb_segment_num);
+		printf(" free inodes = %d\n", sb->sb_free_inodes);
+		printf(" free blocks = %ld\n", sb->sb_free_blocks);
+		printf(" App Super Block Info \n");
+		printf(" fee inodes = %d\n", sb->asb.asb_free_inodes);
+		printf(" free blocks = %ld\n", sb->asb.asb_free_blocks);
+		printf(" used blocks = %ld\n", sb->asb.asb_no_of_used_blocks);
+		printf(" root seg = %d\n", sb->asb.asb_root_seg_id);
+
+		/* RELEASE MEMORY */
+		rte_mempool_put(mempool, ipc_msg);
+
+		assert(sb->asb.asb_root_seg_id != 0);
+	}
+	
+	//gettimeofday(&end_tv, NULL);
+	//timeval_subtract(&result_tv, &end_tv, &start_tv);
+	//printf("\n scan time %.3d second\n", (s32)((float)result_tv.tv_sec + (float)result_tv.tv_usec / (float)1000000));
+
 	gettimeofday(&sb->sb_last_update, NULL);
 		
 	nvfuse_set_cwd_ino(nvh, sb->sb_root_ino);
@@ -1045,8 +1649,45 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 	}
 	nvfuse_free_aligned_buffer(buf);
 
+	/* initilization of segment list */
+	INIT_LIST_HEAD(&sb->sb_seg_list);
+	sb->sb_seg_list_count = 0;	
+	sb->sb_seg_search_ptr_for_inode = &sb->sb_seg_list;
+	sb->sb_seg_search_ptr_for_data = &sb->sb_seg_list;
+
+	/* fetch allocated container list, which was already reserved 
+	   in the previous execution from primary process */
+	if (!spdk_process_is_primary())	
+	{
+		int container_id;
+		s32 nr_buffers;
+
+		do {
+			container_id = nvfuse_alloc_container_from_primary_process(nvh, CONTAINER_ALLOCATED_ALLOC);
+			if (container_id)
+			{
+				/* insert allocated container to process */
+				nvfuse_add_seg(sb, container_id);
+				/* try to allocate buffers from primary process */
+				nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
+				nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
+				if (nr_buffers > 0)
+				{
+					nvfuse_add_buffer_cache(sb, nr_buffers);
+				}
+			}
+		} while (container_id);
+	}
+	else 
+	{
+		/*add root container */
+		nvfuse_add_seg(sb, sb->asb.asb_root_seg_id);
+		nvfuse_add_buffer_cache(sb, 
+		(int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA));
+	}
+
 	/* create b+tree index for root directory at first mount after formattming */
-	if (sb->sb_mount_cnt == 0)
+	if (sb->sb_mount_cnt == 0 && spdk_process_is_primary())
 	{
 		struct nvfuse_inode_ctx *root_ictx;
 		struct nvfuse_inode *root_inode;
@@ -1063,7 +1704,6 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 		/* sync dirty data to storage medium */
 		nvfuse_check_flush_dirty(sb, DIRTY_FLUSH_FORCE);
 	}
-
 	nvh->nvh_mounted = 1;
 
 	sb->sb_dirty_sync_policy = NVFUSE_META_DIRTY_POLICY;
@@ -1071,17 +1711,21 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh, s32 buffer_size)
 	switch (sb->sb_dirty_sync_policy)
 	{
 	    case DIRTY_FLUSH_DELAY:
-		printf(" DIRTY_FLUSH_POLICY: DELAY \n");
-		break;
+			printf(" DIRTY_FLUSH_POLICY: DELAY \n");
+			break;
 	    case DIRTY_FLUSH_FORCE:
-		printf(" DIRTY_FLUSH_POLICY: FORCE \n");
-		break;
+			printf(" DIRTY_FLUSH_POLICY: FORCE \n");
+			break;
 	    default:
-		printf(" DIRTY_FLUSH_POLICY: UNKNOWN\n");
-		break;
+			printf(" DIRTY_FLUSH_POLICY: UNKNOWN\n");
+			break;
 	}
 
 	gettimeofday(&sb->sb_time_start, NULL);
+
+	if (!spdk_process_is_primary()) {
+		nvfuse_send_health_check_msg_to_primary_process(nvh);
+	}
 
 	printf(" NVFUSE has been successfully mounted. \n");
 
@@ -1109,29 +1753,30 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 
 	nvfuse_check_flush_dirty(sb, DIRTY_FLUSH_FORCE);
 
-	nvfuse_copy_mem_sb_to_disk_sb((struct nvfuse_superblock *)buf, sb);
-	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, sb->io_manager);
+	if (spdk_process_is_primary()) {
+		nvfuse_copy_mem_sb_to_disk_sb((struct nvfuse_superblock *)buf, sb);
+		nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, sb->io_manager);
+	}
 
-	nvfuse_free_buffer_cache(sb);	
-	nvfuse_free_ictx_cache(sb);
-
-	pthread_mutex_destroy(&sb->sb_iolock);
-	pthread_mutex_destroy(&sb->sb_request_lock);
-	
-	pthread_mutex_destroy(&sb->sb_file_table_lock);
-	pthread_mutex_destroy(&sb->sb_prefetch_lock);
-	pthread_cond_destroy(&sb->sb_prefetch_cond);
+	nvfuse_deinit_buffer_cache(sb);	
+	nvfuse_deinit_ictx_cache(sb);
 
 	for(i = 0;i < MAX_OPEN_FILE;i++){
 		struct nvfuse_file_table *ft = sb->sb_file_table + i;
 		pthread_mutex_destroy(&ft->ft_lock);
 	}
+
+	if (!spdk_process_is_primary()) {
+		/* app unregistration with keeping allocated containers permanently */
+		nvfuse_send_app_unregister_req(nvh, APP_UNREGISTER_WITHOUT_DESTROYING_CONTAINERS);
+		nvfuse_put_channel_id(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
 		
-	free(sb->sb_ss_nfinfo);
-	free(sb->sb_ss);
-	free(sb->sb_sb);
+		printf(" Release channel = %d \n", nvh->nvh_ipc_ctx.my_channel_id);
+	}
+
+	free(sb->sb_ss);	
 	free(sb->sb_bm);
-	free(sb->sb_file_table);	
+	free(sb->sb_file_table);
 	
 	nvfuse_lock_exit();
 
@@ -1374,7 +2019,7 @@ s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb)
 {
 	s32 i = 0, fid = -1;
 
-	pthread_mutex_lock(&sb->sb_file_table_lock);
+//	pthread_mutex_lock(&sb->sb_file_table_lock);
 	for (i = START_OPEN_FILE; i < MAX_OPEN_FILE; i++)
 	{
 		if (sb->sb_file_table[i].used == FALSE)
@@ -1383,7 +2028,7 @@ s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb)
 			break;
 		}
 	}
-	pthread_mutex_unlock(&sb->sb_file_table_lock);
+	//pthread_mutex_unlock(&sb->sb_file_table_lock);
 
 	return fid;
 }
@@ -1704,7 +2349,6 @@ s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position)
 	return(NVFUSE_SUCCESS);
 }
 
-
 s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset, s32 position)
 {	
 	if (position == SEEK_SET)             /* SEEK_SET */
@@ -1716,8 +2360,6 @@ s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 
 
 	return(NVFUSE_SUCCESS);
 }
-
-
 
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_blks, u32 num_blocks)
 {
@@ -1765,7 +2407,12 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_bl
 		int i;
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
-		
+#if 0
+		if (spdk_process_is_primary())
+		{
+			printf(" allocated segid = %d blks = %d\n", seg_id, alloc_cnt);
+		}
+#endif
 		nvfuse_dec_free_blocks(sb, ss->ss_seg_start + free_block, alloc_cnt);
 
 		return alloc_cnt;
@@ -1817,15 +2464,13 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t 
 			printf(" ERROR: block was already cleared. ");
 			assert(0);
 		}
-	}	
-		
-	
+	}
 		
 	if (flag)
 	{
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
-		nvfuse_inc_free_blocks(sb, ss->ss_seg_start + offset, count);
+		nvfuse_inc_free_blocks(sb, ss->ss_seg_start + offset, count);		
 	}
 	else
 	{

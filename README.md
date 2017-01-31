@@ -34,6 +34,15 @@ Before conducting an NVFUSE application, the kernel NVMe driver must be unloaded
 
     # sudo scripts/setup.sh config
 
+Disabling ASLR (Address Space Layout Randomization) is also required like this.
+
+	# sudo scripts/disable_aslr.sh
+
+Control plane is also invoked.
+
+	# cd examples/control_plane_proc
+	# ./start_control_plane.sh
+
 Move to examples directory and execute helloworld. 
 
     # cd examples/helloworld
@@ -46,8 +55,7 @@ After finalizing an NVFUSE application, the kernel NVMe driver and hugepages can
 To do
 =====
 
- - Multi thread support 
- - Multi NVMe queue support
+ - FS consistency management via light-weight journaling
 
 Contact
 =======

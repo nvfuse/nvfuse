@@ -22,6 +22,7 @@
 #include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
+#include "nvfuse_aio.h"
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
@@ -78,6 +79,7 @@ char *rt_decode_test_type(s32 type)
 
 	return NULL;
 }
+
 int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 {
 	struct timeval tv;
@@ -646,6 +648,9 @@ void rt_usage(char *cmd)
 
 int main(int argc, char *argv[])
 {
+	struct nvfuse_io_manager io_manager;
+	struct nvfuse_ipc_context ipc_ctx;
+	struct nvfuse_params params;
 	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;	
 	int ret = 0;
@@ -655,15 +660,26 @@ int main(int argc, char *argv[])
 	int app_argc = 0;
 	char *app_argv[128];
 	char op;
-	if (argc == 1)
-	{
-		goto INVALID_ARGS;
-	}
 
 	/* distinguish cmd line into core args and app args */
 	nvfuse_distinguish_core_and_app_options(argc, argv, 
 											&core_argc, core_argv, 
 											&app_argc, app_argv);
+	
+	ret = nvfuse_parse_args(core_argc, core_argv, &params);
+	if (ret < 0)
+		return -1;
+	
+	if (__builtin_popcount((u32)params.cpu_core_mask) > 1)
+	{
+		printf(" This example is only executed on single core.\n");
+		printf(" Given cpu core mask = %x \n", params.cpu_core_mask);
+		return -1;
+	}
+
+	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	if (ret < 0)
+		return -1;
 
 	/* optind must be reset before using getopt() */
 	optind = 0;
@@ -685,7 +701,7 @@ int main(int argc, char *argv[])
 	printf(" Perform test %s ... \n", rt_decode_test_type(test_type));
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(NULL, core_argc, core_argv);
+	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
 	if (nvh == NULL)
 	{
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
@@ -715,6 +731,7 @@ int main(int argc, char *argv[])
 
 RET:;
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
+	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);
 
 	return ret;
 

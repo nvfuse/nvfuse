@@ -23,8 +23,10 @@
 #include "nvfuse_aio.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
+#include "nvfuse_gettimeofday.h"
 #ifdef SPDK_ENABLED
 #include "spdk/env.h"
+#include "rte_lcore.h"
 #endif
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
@@ -50,30 +52,44 @@ s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue * aioq, s32 max_depth)
 	aioq->aio_cur_depth = 0;
 
 #ifdef SPDK_ENABLED
-	aioq->aio_start_tsc = spdk_get_ticks();
+	aioq->stat.aio_start_tsc = spdk_get_ticks();
 #endif
-	aioq->aio_end_tsc = 0;
+	aioq->stat.aio_end_tsc = 0;
 
-	aioq->aio_lat_total_tsc = 0;
-	aioq->aio_lat_total_count = 0;
-	aioq->aio_lat_min_tsc = ~0;
-	aioq->aio_lat_max_tsc = 0;
-	aioq->aio_total_size = 0;
+	aioq->stat.aio_lat_total_tsc = 0;
+	aioq->stat.aio_lat_total_count = 0;
+	aioq->stat.aio_lat_min_tsc = ~0;
+	aioq->stat.aio_lat_max_tsc = 0;
+	aioq->stat.aio_total_size = 0;
+
 	aioq->aio_cc_sum = 0;
 	aioq->aio_cc_cnt = 0;
+
+	getrusage(RUSAGE_THREAD, &aioq->stat.aio_start_rusage);
 
 	return 0;
 }
 
-void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq)
+void nvfuse_aio_queue_deinit(struct nvfuse_handle *nvh, struct nvfuse_aio_queue * aioq)
 {	
 	#ifdef SPDK_ENABLED
 	double io_per_second, mb_per_second;
 	double average_latency, min_latency, max_latency;
 	u64 tsc_rate = spdk_get_ticks_hz();
-	
-	aioq->aio_end_tsc = spdk_get_ticks();
+	struct nvfuse_ipc_context *ipc_ctx = &nvh->nvh_ipc_ctx;
+	aioq->stat.aio_end_tsc = spdk_get_ticks();
 
+	aioq->stat.aio_execution_tsc = (aioq->stat.aio_end_tsc - aioq->stat.aio_start_tsc);
+	getrusage(RUSAGE_THREAD, &aioq->stat.aio_end_rusage);
+	timeval_subtract(&aioq->stat.aio_sys_time, &aioq->stat.aio_end_rusage.ru_stime, &aioq->stat.aio_start_rusage.ru_stime);
+	timeval_subtract(&aioq->stat.aio_usr_time, &aioq->stat.aio_end_rusage.ru_utime, &aioq->stat.aio_start_rusage.ru_utime);
+	
+	assert(aioq->stat.aio_lat_total_count > 0);
+	assert(aioq->stat.aio_total_size > 0);
+	//printf(" %d lat total count = %ld\n", rte_lcore_id(), aioq->stat.aio_lat_total_count);
+	aioq->stat.lcore_id = rte_lcore_id();
+	
+#if 0
 	io_per_second = (double)aioq->aio_lat_total_count / ((aioq->aio_end_tsc - aioq->aio_start_tsc) / tsc_rate);
 	mb_per_second = (double)aioq->aio_total_size / (1024 * 1024) / ((aioq->aio_end_tsc - aioq->aio_start_tsc) / tsc_rate);
 	average_latency = (double)(aioq->aio_lat_total_tsc / aioq->aio_lat_total_count) * 1000 * 1000 / tsc_rate;
@@ -88,6 +104,9 @@ void nvfuse_aio_queue_deinit(struct nvfuse_aio_queue * aioq)
 	printf(" min latency = %.3f us \n", min_latency);
 	printf(" max latency = %.3f us \n", max_latency);
 	printf("------------------------------------\n");
+#else
+	nvfuse_stat_ring_put(ipc_ctx->stat_ring, ipc_ctx->stat_pool, &aioq->stat);
+#endif
 	printf("\n");
 
 	#endif
