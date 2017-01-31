@@ -23,7 +23,7 @@ before_install:
   - sed -i s/CONFIG_RTE_KNI_KMOD=y/CONFIG_RTE_KNI_KMOD=n/ build/.config
   - make
   - make install DESTDIR=.
-  - export DPDK_DIR=$PWD/usr/local/share/dpdk/x86_64-native-linuxapp-$CC
+  - export DPDK_DIR=$PWD/usr/local/share/dpdk/x86_64-native-linuxapp-gcc
   - popd
   - make DPDK_DIR=./dpdk-16.11/x86_64-native-linuxapp-gcc
   - popd
