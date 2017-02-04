@@ -751,7 +751,7 @@ s32 nvfuse_send_alloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, BUFFER_ALLOC_REQ);
 		if (ret == 0)
 		{
-			rte_panic("Failed to get buffer\n");
+			//printf("Failed to get buffer\n");
 			ret = -1;
 		}
 		else
@@ -764,8 +764,7 @@ s32 nvfuse_send_alloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 		sb->perf_stat_ipc.stat_ipc.total_count[BUFFER_ALLOC_REQ]++;
 	}	
 	
-	rte_mempool_put(mempool, ipc_msg);
-	
+	rte_mempool_put(mempool, ipc_msg);	
 	
 	return ret;
 }

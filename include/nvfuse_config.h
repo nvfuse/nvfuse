@@ -59,8 +59,8 @@
 
 /* RATIO SEGMENT TO BUFFER Cache */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001) /* data optimized */
+//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001) /* meta optimized*/
 #define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
-//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
 
 #define NVFUSE_SYNC_TIME	30 /* seconds */
 #define NVFUSE_SYNC_DIRTY_COUNT (1024) /* blocks */
