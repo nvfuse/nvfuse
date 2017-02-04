@@ -30,14 +30,6 @@
 #include "nvfuse_core.h"
 #include "nvfuse_dirhash.h"
 
-#define EXT2_HASH_LEGACY		0
-#define EXT2_HASH_HALF_MD4		1
-#define EXT2_HASH_TEA			2
-#define EXT2_HASH_LEGACY_UNSIGNED	3 /* reserved for userspace lib */
-#define EXT2_HASH_HALF_MD4_UNSIGNED	4 /* reserved for userspace lib */
-#define EXT2_HASH_TEA_UNSIGNED		5 /* reserved for userspace lib */
- 
-
 /*
  * Keyed 32-bit hash function using TEA in a Davis-Meyer function
  *   H0 = Key
@@ -275,4 +267,82 @@ s32 ext2fs_dirhash(int version, const char *name, int len,
 	if (ret_minor_hash)
 		*ret_minor_hash = minor_hash;
 	return 0;
+}
+
+#if BITS_PER_LONG == 64
+#define REX_PRE "0x48, "
+#define SCALE_F 8
+#else
+#define REX_PRE
+#define SCALE_F 4
+#endif
+
+int crc32c_intel_available = 0;
+static int crc32c_probed;
+
+static u32 crc32c_intel_le_hw_byte(u32 crc, unsigned char const *data,
+					unsigned long length)
+{
+	while (length--) {
+		__asm__ __volatile__(
+			".byte 0xf2, 0xf, 0x38, 0xf0, 0xf1"
+			:"=S"(crc)
+			:"0"(crc), "c"(*data)
+		);
+		data++;
+	}
+
+	return crc;
+}
+
+static inline void do_cpuid(unsigned int *eax, unsigned int *ebx,
+			    unsigned int *ecx, unsigned int *edx)
+{
+	asm volatile("cpuid"
+		: "=a" (*eax), "=b" (*ebx), "=c" (*ecx), "=d" (*edx)
+		: "0" (*eax), "2" (*ecx)
+		: "memory");
+}
+/*
+ * Steps through buffer one byte at at time, calculates reflected 
+ * crc using table.
+ */
+u32 crc32c_intel(unsigned char const *data, unsigned long length)
+{
+	unsigned int iquotient = length / SCALE_F;
+	unsigned int iremainder = length % SCALE_F;
+#if BITS_PER_LONG == 64
+	uint64_t *ptmp = (uint64_t *) data;
+#else
+	u32 *ptmp = (u32 *) data;
+#endif
+	u32 crc = ~0;
+
+	while (iquotient--) {
+		__asm__ __volatile__(
+			".byte 0xf2, " REX_PRE "0xf, 0x38, 0xf1, 0xf1;"
+			:"=S"(crc)
+			:"0"(crc), "c"(*ptmp)
+		);
+		ptmp++;
+	}
+
+	if (iremainder)
+		crc = crc32c_intel_le_hw_byte(crc, (unsigned char *)ptmp,
+				 iremainder);
+
+	return crc;
+}
+
+void crc32c_intel_probe(void)
+{
+	if (!crc32c_probed) {
+		unsigned int eax, ebx, ecx = 0, edx;
+
+		eax = 1;
+
+		do_cpuid(&eax, &ebx, &ecx, &edx);
+		crc32c_intel_available = (ecx & (1 << 20)) != 0;
+		crc32c_probed = 1;
+	}
 }

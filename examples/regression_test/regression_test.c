@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
@@ -23,6 +24,8 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
+#include "spdk/env.h"
+#include <rte_lcore.h>
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
@@ -41,6 +44,16 @@
 /* 1 million create/delete test */
 #define MILL_TEST   3
 
+/* global io_manager */
+static struct nvfuse_io_manager _g_io_manager;
+static struct nvfuse_io_manager *g_io_manager = &_g_io_manager;
+/* global ipc_context */
+static struct nvfuse_ipc_context _g_ipc_ctx;
+static struct nvfuse_ipc_context *g_ipc_ctx = &_g_ipc_ctx;
+/* global params */
+static struct nvfuse_params _g_params;
+static struct nvfuse_params *g_params = &_g_params;
+
 static s32 last_percent;
 static s32 test_type = QUICK_TEST;
 
@@ -53,16 +66,20 @@ void rt_progress_report(s32 curr, s32 max)
 {
     int curr_percent;
 
-    curr_percent = (curr + 1) * 100 / max;
+    /* FIXME: */
+	if (rte_lcore_id() == 1) 
+	{
+		curr_percent = (curr + 1) * 100 / max;
 
-    if	(curr_percent != last_percent)
-    {
-		last_percent = curr_percent;
-		printf(".");
-		if (curr_percent % 10 == 0)
-		    printf("%d%%\n", curr_percent);
-		fflush(stdout);
-    }
+		if	(curr_percent != last_percent)
+		{
+			last_percent = curr_percent;
+			printf(".");
+			if (curr_percent % 10 == 0)
+				printf("%d%%\n", curr_percent);
+			fflush(stdout);
+		}
+	}
 }
 
 char *rt_decode_test_type(s32 type)
@@ -117,6 +134,11 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	rt_progress_reset();
 	gettimeofday(&tv, NULL);
 
+	nvh->nvh_sb.bp_set_index_tsc = 0;
+	nvh->nvh_sb.bp_set_index_count = 0;
+	nvh->nvh_sb.nvme_io_tsc = 0;
+	nvh->nvh_sb.nvme_io_count = 0;
+
 	/* create null files */
 	printf(" Start: creating null files (0x%x).\n", max_inodes);
 	for (i = 0; i < max_inodes; i++)
@@ -132,7 +154,9 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: creating null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+	printf(" Finish: creating null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
+	printf(" bp tree cpu = %f sec\n", (double)nvh->nvh_sb.bp_set_index_tsc/(double)spdk_get_ticks_hz());
+	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc/(double)spdk_get_ticks_hz());
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -156,7 +180,7 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: looking up null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+	printf(" Finish: looking up null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -177,7 +201,7 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: deleting null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 
 	return 0;
 }
@@ -233,7 +257,9 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 
 	}
-	printf(" Finish: creating null directories (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+	printf(" Finish: creating null directories (0x%x) %.3f OPS (%.f sec). \n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
+	printf(" bp tree cpu = %f sec\n", (double)nvh->nvh_sb.bp_set_index_tsc/(double)spdk_get_ticks_hz());
+	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc/(double)spdk_get_ticks_hz());
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -256,7 +282,7 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: looking up null directories (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+	printf(" Finish: looking up null directories (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -276,7 +302,7 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: deleting null files (0x%x) %.3f OPS.\n", max_inodes, max_inodes / time_since_now(&tv));
+	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 
 	return 0;
 }
@@ -568,7 +594,7 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, nr);
 	}		
-	printf(" Finish: creating 4KB files (0x%x) %.3f OPS.\n", nr, nr / time_since_now(&tv));
+	printf(" Finish: creating 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv), time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -591,7 +617,7 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, nr);
 	}
-	printf(" Finish: looking up 4KB files (0x%x) %.3f OPS.\n", nr, nr / time_since_now(&tv));
+	printf(" Finish: looking up 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv), time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -611,7 +637,7 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, nr);
 	}
-	printf(" Finish: deleting 4KB files (0x%x) %.3f OPS.\n", nr, nr / time_since_now(&tv));
+	printf(" Finish: deleting 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv), time_since_now(&tv));
 
 	return NVFUSE_SUCCESS;
 
@@ -646,38 +672,206 @@ void rt_usage(char *cmd)
 	printf("\t-T: test type (e.g., 1: max_test, 2: quick_test, 3: million test \n");	
 }
 
-int main(int argc, char *argv[])
+static int rt_main(void *arg)
 {
-	struct nvfuse_io_manager io_manager;
-	struct nvfuse_ipc_context ipc_ctx;
-	struct nvfuse_params params;
 	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;	
-	int ret = 0;
+	struct rte_ring *stat_rx_ring;
+	struct ret_mempool *stat_message_pool;
+	union perf_stat perf_stat;	
+	struct timeval tv;
+	s32 ret;
 
+	printf(" Perform test %s thread id = %d... \n", rt_decode_test_type(test_type), (s32)arg);
+
+	/* create nvfuse_handle with user spcified parameters */
+	nvh = nvfuse_create_handle(g_io_manager, g_ipc_ctx, g_params);
+	if (nvh == NULL)
+	{
+		fprintf(stderr, "Error: nvfuse_create_handle()\n");
+		return -1;
+	}
+	/* stat ring lookup */
+	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RT_STAT);
+	if (ret < 0) 
+		return -1;
+
+	printf("\n");
+
+	cur_rt_ctx = rt_ctx;
+
+	/* Test Case Handler with Regression Test Context Array */
+	while (cur_rt_ctx < rt_ctx + NUM_ELEMENTS(rt_ctx))
+	{
+		double execution_time;
+		s32 index = cur_rt_ctx - rt_ctx + 1;
+
+		printf(" lcore = %d Regression Test %d: %s\n", rte_lcore_id(), index, cur_rt_ctx->test_name);
+		gettimeofday(&tv, NULL);
+		ret = cur_rt_ctx->function(nvh, cur_rt_ctx->arg);
+		if (!cur_rt_ctx->pass_criteria && 
+			ret != cur_rt_ctx->pass_criteria)
+		{
+			printf(" Failed Regression Test %d.\n", index);
+			goto RET;
+		}
+		
+		execution_time = time_since_now(&tv);
+		
+		memset(&perf_stat, 0x00, sizeof(union perf_stat));
+
+		perf_stat.stat_rt.stat_type = RT_STAT;
+		perf_stat.stat_rt.lcore_id = (s32)arg;
+		perf_stat.stat_rt.sequence = (index - 1);
+		perf_stat.stat_rt.total_time = execution_time;
+		
+		printf(" rt stat sequence = %d\n", index - 1);
+		nvfuse_stat_ring_put(stat_rx_ring, stat_message_pool, &perf_stat);
+
+		printf(" lcore = %d Regression Test %d: passed successfully.\n\n", rte_lcore_id(), index);
+		cur_rt_ctx++;
+	}
+	
+	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
+RET:
+	return 0;
+}
+
+static void print_stats(s32 num_cores, s32 num_tc)
+{
+	struct rte_ring *stat_rx_ring;
+	struct ret_mempool *stat_message_pool;
+	union perf_stat *per_core_stat, *cur_stat, sum_stat, temp_stat;		
+	s32 ret;
+	s32 cur;
+	s32 tc;
+	s32 i;
+	s8 name[128];
+	double group_exec_time = 0.0;
+	
+	per_core_stat = malloc(sizeof(union perf_stat) * num_cores * num_tc);
+	if (per_core_stat == NULL) {
+		fprintf(stderr, " Error: malloc() \n");
+	}
+	
+	/* stat ring lookup */
+	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RT_STAT);
+	if (ret < 0) 
+		return -1;
+
+	memset(per_core_stat, 0x00, sizeof(union perf_stat) * num_cores * num_tc);
+	memset(&sum_stat, 0x00, sizeof(union perf_stat));
+
+#if 0
+	printf(" perf stat size = %d \n", sizeof(union perf_stat));
+	printf(" rt stat size = %d \n", sizeof(struct perf_stat_rt));
+	printf(" aio stat size = %d \n", sizeof(struct perf_stat_aio));
+	printf(" ipc stat msg = %d \n", PERF_STAT_SIZE);
+#endif
+
+	/* gather rt stats */
+	for (i = 0;i < num_cores * num_tc; i++) {
+		ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
+		if (ret < 0)
+			return -1;
+		
+		assert(temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id < num_cores * num_tc);
+
+#if 0		
+		printf(" stat type = %d \n", temp_stat.stat_rt.stat_type);
+		printf(" seq = %d \n", temp_stat.stat_rt.sequence);
+		printf(" core = %d \n", temp_stat.stat_rt.lcore_id);
+		printf(" index = %d \n", (temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id));
+		printf(" \n");
+#endif
+		cur_stat = per_core_stat + (temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id);
+		memcpy(cur_stat, &temp_stat, sizeof(union perf_stat));
+	}
+
+	for (tc = 0; tc < num_tc; tc++)
+	{
+		double tc_total = 0.0;
+		printf(" TC %d %s\n", tc, rt_ctx[tc].test_name);
+		for (cur = 0;cur < num_cores; cur++)	
+		{
+			cur_stat = per_core_stat + tc * num_cores + cur;
+			tc_total += cur_stat->stat_rt.total_time;
+			group_exec_time += cur_stat->stat_rt.total_time;
+			printf(" Per core %d execution = %.6f\n", cur, cur_stat->stat_rt.total_time);			
+		}
+		printf(" Avg execution = %.6f sec \n", tc, rt_ctx[tc].test_name, tc_total / num_cores);
+		printf("\n");
+	}
+	printf("Summary: Avg execution = %.6f sec\n", group_exec_time / num_cores);
+	
+	free(per_core_stat);
+
+	/* Device Level Stat */
+	{
+		union perf_stat _sum_stat;
+		struct perf_stat_dev *sum_stat = &_sum_stat;
+		struct perf_stat_dev *cur_stat;
+
+		memset(sum_stat, 0x00, sizeof(struct perf_stat_dev));
+
+		/* stat ring lookup */
+		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, DEVICE_STAT);
+		if (ret < 0) 
+			return -1;
+
+		/* gather dev stats */
+		for (i = 0;i < num_cores; i++) {
+			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
+			if (ret < 0)
+				return -1;
+						
+			cur_stat = (struct perf_stat_dev *)&temp_stat;
+			
+			sum_stat->total_io_count += cur_stat->total_io_count;
+			sum_stat->read_io_count += cur_stat->read_io_count;
+			sum_stat->write_io_count += cur_stat->write_io_count;
+		}
+
+		printf(" Device Total I/O bandwdith = %.3f MB/s\n", (double)sum_stat->total_io_count * CLUSTER_SIZE / MB /group_exec_time);
+		printf(" Device Read I/O bandwdith = %.3f MB/s\n", (double)sum_stat->read_io_count * CLUSTER_SIZE / MB /group_exec_time);
+		printf(" Device Write I/O bandwdith = %.3f MB/s\n", (double)sum_stat->write_io_count * CLUSTER_SIZE / MB /group_exec_time);
+		
+		printf(" Device Total I/O Amount = %.3f MB\n", (double)sum_stat->total_io_count * CLUSTER_SIZE / MB);
+		printf(" Device Read I/O Amount = %.3f MB\n", (double)sum_stat->read_io_count * CLUSTER_SIZE / MB);
+		printf(" Device Write I/O Amount = %.3f MB\n", (double)sum_stat->write_io_count * CLUSTER_SIZE / MB);
+	}
+}
+
+int main(int argc, char *argv[])
+{	
 	int core_argc = 0;
 	char *core_argv[128];		
 	int app_argc = 0;
 	char *app_argv[128];
 	char op;
+	int ret = 0;
+	int num_cores = 0;
+	int lcore_id;
 
 	/* distinguish cmd line into core args and app args */
 	nvfuse_distinguish_core_and_app_options(argc, argv, 
 											&core_argc, core_argv, 
 											&app_argc, app_argv);
 	
-	ret = nvfuse_parse_args(core_argc, core_argv, &params);
+	ret = nvfuse_parse_args(core_argc, core_argv, g_params);
 	if (ret < 0)
 		return -1;
 	
-	if (__builtin_popcount((u32)params.cpu_core_mask) > 1)
+#if 0
+	if (__builtin_popcount((u32)g_params->cpu_core_mask) > 1)
 	{
 		printf(" This example is only executed on single core.\n");
-		printf(" Given cpu core mask = %x \n", params.cpu_core_mask);
+		printf(" Given cpu core mask = %x \n", g_params->cpu_core_mask);
 		return -1;
 	}
+#endif
 
-	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	ret = nvfuse_configure_spdk(g_io_manager, g_ipc_ctx, g_params->cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
 	if (ret < 0)
 		return -1;
 
@@ -698,40 +892,32 @@ int main(int argc, char *argv[])
 		}
 	}
 	
-	printf(" Perform test %s ... \n", rt_decode_test_type(test_type));
-
-	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
-	if (nvh == NULL)
-	{
-		fprintf(stderr, "Error: nvfuse_create_handle()\n");
+	/* call lcore_recv() on every slave lcore */
+	RTE_LCORE_FOREACH_SLAVE(lcore_id) {		
+		printf(" launch secondary lcore = %d \n", lcore_id);
+		rte_eal_remote_launch(rt_main, (void *)num_cores, lcore_id);
+		num_cores++;
+	}
+	
+	printf(" launch primary lcore = %d \n", rte_lcore_id());
+	
+	ret = rt_main((void *)num_cores);
+	if (ret < 0)
 		return -1;
-	}
 
-	printf("\n");
+	num_cores++;
 
-	cur_rt_ctx = rt_ctx;
-
-	/* Test Case Handler with Regression Test Context Array */
-	while (cur_rt_ctx < rt_ctx + NUM_ELEMENTS(rt_ctx))
-	{
-		s32 index = cur_rt_ctx - rt_ctx + 1;
-		printf(" Regression Test %d: %s\n", index, cur_rt_ctx->test_name);
-		ret = cur_rt_ctx->function(nvh, cur_rt_ctx->arg);
-		if (!cur_rt_ctx->pass_criteria && 
-			ret != cur_rt_ctx->pass_criteria)
-		{
-			printf(" Failed Regression Test %d.\n", index);
-			goto RET;
+	//rte_eal_mp_wait_lcore();
+	RTE_LCORE_FOREACH(lcore_id) {
+		printf(" wait lcore = %d \n", lcore_id);
+		if (rte_eal_wait_lcore(lcore_id) < 0) {
+			ret = -1;
 		}
-
-		printf(" Regression Test %d: passed successfully.\n\n", index);
-		cur_rt_ctx++;
 	}
+	
+	print_stats(num_cores, NUM_ELEMENTS(rt_ctx));
 
-RET:;
-	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);
+	nvfuse_deinit_spdk(g_io_manager, g_ipc_ctx);
 
 	return ret;
 

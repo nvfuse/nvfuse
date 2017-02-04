@@ -24,9 +24,22 @@
 
 #ifndef __DIR_HASH__
 #define __DIR_HASH__
+
+#define USE_INTEL_CRC32C
+#define EXT2_HASH_LEGACY		0
+#define EXT2_HASH_HALF_MD4		1
+#define EXT2_HASH_TEA			2
+#define EXT2_HASH_LEGACY_UNSIGNED	3 /* reserved for userspace lib */
+#define EXT2_HASH_HALF_MD4_UNSIGNED	4 /* reserved for userspace lib */
+#define EXT2_HASH_TEA_UNSIGNED		5 /* reserved for userspace lib */
+
 typedef u32	ext2_dirhash_t;
 s32 ext2fs_dirhash(int version, const char *name, int len,
 			 const u32 *seed,
 			 ext2_dirhash_t *ret_hash,
 			 ext2_dirhash_t *ret_minor_hash);
+
+void crc32c_intel_probe(void);
+u32 crc32c_intel(unsigned char const *data, unsigned long length);
+
 #endif

@@ -36,7 +36,7 @@
 #include "nvfuse_core.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_ipc_ring.h"
-
+#include "nvfuse_stat.h"
 
 //#ifdef LIST_HEAD
 //#undef LIST_HEAD
@@ -206,6 +206,15 @@ void spdk_release_qpair(struct nvfuse_io_manager *io_manager)
 			break;
 		}
     }
+
+    printf(" Send stat dev msg to perf_stat_dev ring queue.\n");
+    printf(" Device Total I/O = %.3f MB\n", (double)io_manager->perf_stat_dev.stat_dev.total_io_count * CLUSTER_SIZE / MB);
+    printf(" Device Read I/O = %.3f MB\n", (double)io_manager->perf_stat_dev.stat_dev.read_io_count * CLUSTER_SIZE / MB);
+    printf(" Device Write I/O = %.3f MB\n", (double)io_manager->perf_stat_dev.stat_dev.write_io_count * CLUSTER_SIZE / MB);
+
+    nvfuse_stat_ring_put(io_manager->ipc_ctx->stat_ring[DEVICE_STAT], 
+                        io_manager->ipc_ctx->stat_pool[DEVICE_STAT],
+                        &io_manager->perf_stat_dev);
 }
 
 static int spdk_init(struct nvfuse_io_manager *io_manager)
@@ -324,6 +333,8 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
                     job->offset / 512, /* LBA start */
                     job->bytes / 512, /* number of LBAs */
                     spdk_callback, job, 0);
+            
+            io_manager->perf_stat_dev.stat_dev.read_io_count += (job->bytes / 4096);
         }
         else
         {
@@ -331,7 +342,12 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
                     job->offset / 512, /* LBA start */
                     job->bytes / 512, /* number of LBAs */
                     spdk_callback, job, 0);
+            
+            io_manager->perf_stat_dev.stat_dev.write_io_count += (job->bytes / 4096);
         }
+        
+        io_manager->perf_stat_dev.stat_dev.total_io_count += (job->bytes / 4096);
+        
         if (ret != 0) {
             fprintf(stderr, "starting write I/O failed\n");
             exit(1);
@@ -430,6 +446,9 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
     /*if ( block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
 	printf(" ss read: block = %ld count = %d \n", block, count);*/
 
+    io_manager->perf_stat_dev.stat_dev.total_io_count += count;
+    io_manager->perf_stat_dev.stat_dev.read_io_count += count;
+
     res = spdk_nvme_ns_cmd_read(ns_entry->ns, io_manager->spdk_queue[SPDK_QUEUE_SYNC], job.buf,
 	    (uint64_t)block * 8, /* LBA start */
 	    count * 8, /* number of LBAs */
@@ -457,6 +476,9 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
       
     /*if (block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
 	printf(" ss write: block = %ld count = %d \n", block, count);*/
+
+    io_manager->perf_stat_dev.stat_dev.total_io_count += count;
+    io_manager->perf_stat_dev.stat_dev.write_io_count += count;
 
     ns_entry = g_namespaces;
     job.buf = buf;

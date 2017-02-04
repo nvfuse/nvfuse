@@ -320,6 +320,8 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 	
 	/* copy instance of io_manager */
 	memcpy(&nvh->nvh_iom, io_manager, sizeof(struct nvfuse_io_manager));
+	/* Initialization of Perf Stat for Dev */
+	memset(&nvh->nvh_iom.perf_stat_dev, 0x00, sizeof(union perf_stat));
 	
 	/* copy instance of ipc_ctx */
 	memcpy(&nvh->nvh_ipc_ctx, ipc_ctx, sizeof(struct nvfuse_ipc_context));
@@ -334,6 +336,8 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 		fprintf(stderr, " Error: alloc qpair \n");
 		return NULL;
 	}
+
+	crc32c_intel_probe();
 
 	/* file system format */
 	if (nvh->nvh_params.need_format)
@@ -350,11 +354,10 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 		{
 			fprintf(stdout, " format skipped due to secondary process!\n");
 		}
-		
 	}
-	
+
 	/* file system mount */
-	if (nvh->nvh_params.need_mount) {		
+	if (nvh->nvh_params.need_mount) {	
 		memset(&nvh->nvh_sb, 0x00, sizeof(struct nvfuse_superblock));
 		nvh->nvh_sb.sb_nvh = nvh; /* temporary */
 		ret = nvfuse_mount(nvh);
@@ -637,6 +640,7 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	struct nvfuse_file_table *ft;
 	s32 fid = -1;
 	s32 res = 0;
+	inode_t ino = 0;
 
 	if (!strcmp(filename, ""))
 		return error_msg("open file error, invalid file name");
@@ -646,10 +650,10 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	{ // no such file 
 		if (flags & O_RDWR || flags & O_CREAT) 
 		{
-			res = nvfuse_createfile(sb, par_ino, filename, NULL, mode, 0);
+			res = nvfuse_createfile(sb, par_ino, filename, &ino, mode, 0);
 			if (res < 0)
 				return res;
-
+#if 0
 			if (res == NVFUSE_SUCCESS) 
 			{
 				res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
@@ -660,6 +664,7 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 					goto RES;
 				}
 			}
+#endif
 		}
 		else {
 			res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
@@ -667,9 +672,13 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 			fid = -1;
 			goto RES;
 		}
+	} 
+	else 
+	{
+		ino = dir_temp.d_ino;
 	}
 
-	ictx = nvfuse_read_inode(sb, NULL, dir_temp.d_ino);
+	ictx = nvfuse_read_inode(sb, NULL, ino);
 	inode = ictx->ictx_inode;
 	if (inode->i_type != NVFUSE_TYPE_FILE) {		
 		printf("This is not a file");
@@ -683,10 +692,9 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	}
 
 	ft = sb->sb_file_table + fid;
-
-	pthread_mutex_lock(&ft->ft_lock);
+	
 	ft->used = TRUE;
-	ft->ino = dir_temp.d_ino;
+	ft->ino = inode->i_ino;
 	ft->size = inode->i_size;
 	ft->rwoffset = 0;
 	ft->flags = flags;
@@ -696,12 +704,9 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	else
 		nvfuse_seek(sb, ft, 0, SEEK_SET);
 
-	pthread_mutex_unlock(&ft->ft_lock);
-
 	nvfuse_release_inode(sb, ictx, 0 /*clean*/);
 	
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
-
 
 RES:;
 	nvfuse_release_super(sb);
@@ -760,7 +765,7 @@ s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags)
 	}
 
 	ft = sb->sb_file_table + fid;
-	pthread_mutex_lock(&ft->ft_lock);
+	
 	ft->used = TRUE;
 	ft->ino = ino;
 	ft->size = inode->i_size;
@@ -771,8 +776,6 @@ s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags)
 		nvfuse_seek(sb, ft, inode->i_size, SEEK_SET);
 	else
 		nvfuse_seek(sb, ft, 0, SEEK_SET);
-
-	pthread_mutex_unlock(&ft->ft_lock);
 
 	nvfuse_release_inode(sb, ictx, CLEAN);
 	return(fid);
@@ -785,15 +788,13 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 
 	ft = sb->sb_file_table + fid;
 
-	pthread_mutex_lock(&ft->ft_lock);	
 	ft->ino = 0;	
 	ft->size = 0;
 	ft->used = 0;
 	ft->rwoffset = 0;
 	ft->prefetch_cur = 0;
 	ft->flags = 0;
-	pthread_mutex_unlock(&ft->ft_lock);
-
+	
 	nvfuse_release_super(sb);
 
 	return NVFUSE_SUCCESS;
@@ -809,8 +810,7 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 	s32 offset, remain, rcount = 0;
 
 	of = &(sb->sb_file_table[fid]);
-	pthread_mutex_lock(&of->ft_lock);
-
+	
 	ictx = nvfuse_read_inode(sb, NULL, of->ino);
 	inode = ictx->ictx_inode;
 
@@ -848,9 +848,6 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 RES:;
 	nvfuse_release_inode(sb, ictx, CLEAN);
 	
-
-	pthread_mutex_unlock(&of->ft_lock);
-
 	return rcount;
 }
 
@@ -862,8 +859,7 @@ s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buf
 	s32 rcount = 0;
 
 	of = &(sb->sb_file_table[fid]);
-	pthread_mutex_lock(&of->ft_lock);
-
+	
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS 
 	if (roffset) {
 		of->rwoffset = roffset;
@@ -899,8 +895,7 @@ s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buf
 
 RET:;
 	nvfuse_release_inode(sb, ictx, CLEAN);
-	pthread_mutex_unlock(&of->ft_lock);
-
+	
 	return rcount;
 }
 
@@ -949,8 +944,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 	int ret;
 
 	of = &(sb->sb_file_table[fid]);
-	pthread_mutex_lock(&of->ft_lock);
-
+	
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS 
 	if (woffset) {
 		of->rwoffset = woffset;
@@ -1018,8 +1012,6 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		}
 	}
 	
-	pthread_mutex_unlock(&of->ft_lock);
-
 	return wcount;
 }
 
@@ -1032,8 +1024,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 	int ret;
 
 	of = &(sb->sb_file_table[fid]);
-	pthread_mutex_lock(&of->ft_lock);
-
+	
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS 
 	if (woffset) {
 		of->rwoffset = woffset;
@@ -1077,8 +1068,6 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 		of->size = of->rwoffset;
 	
 RET:;
-
-	pthread_mutex_unlock(&of->ft_lock);
 
 	return wcount;
 }
@@ -1133,8 +1122,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 	lbno_t lblock = 0;
 
 	of = &(sb->sb_file_table[fid]);
-	pthread_mutex_lock(&of->ft_lock);
-
+	
 	curoffset = woffset;
 	
 	ictx = nvfuse_read_inode(sb, NULL, of->ino);
@@ -1162,8 +1150,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 	}
 	
 	nvfuse_release_inode(sb, ictx, CLEAN);
-	pthread_mutex_unlock(&of->ft_lock);
-
+	
 	return 0;
 }
 
@@ -1219,8 +1206,10 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 		return -1;
 	}
 
+#if 0
 	if (!nvfuse_lookup(sb, NULL, NULL, fiename, par_ino))
 		return error_msg(" exist file or directory\n");
+#endif
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
@@ -1709,11 +1698,13 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 		goto RET;
 	}
 
+#if 1
 	if (!nvfuse_lookup(sb, NULL, NULL, dirname, par_ino)) {
 		printf(" exist file or directory\n");
 		ret = NVFUSE_ERROR;
 		goto RET;
 	}
+#endif
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
@@ -1755,6 +1746,8 @@ retry:
 			}
 			if (nvfuse_dir_is_invalid(dir + search_entry)) {
 				flag = 1;
+				// if (i)
+				// 	printf(" lookup count = %d\n", i);
 				goto find;
 			}
 		}
@@ -1851,7 +1844,6 @@ find:
 	strcpy(dir[1].d_filename, ".."); // parent dir
 	dir[1].d_ino = dir_inode->i_ino;
 	dir[1].d_flag = DIR_USED;
-
 
 	if (new_ino)
 		*new_ino = new_inode->i_ino;
@@ -2020,6 +2012,10 @@ s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t
 	else 
 	{
 		sb = nvfuse_read_super(nvh);
+		
+		if (!nvfuse_lookup(sb, NULL, NULL, filename, dir_entry.d_ino))
+			return error_msg(" exist file or directory\n");
+
 		res = nvfuse_createfile(sb, dir_entry.d_ino, filename, 0, mode, dev);
 		if (res < 0)
 			return res;
@@ -2053,7 +2049,8 @@ s32 nvfuse_mkdir_path(struct nvfuse_handle *nvh, const char *path, mode_t mode)
 		printf(" %s: invalid path\n", __FUNCTION__);
 		res = -1;
 	}
-	else {
+	else 
+	{
 		res = nvfuse_mkdir(sb, dir_entry.d_ino, filename, 0, mode);
 	}
 	
@@ -2127,6 +2124,9 @@ s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, 
 		link, (int)parent, name);
 	
 	nvfuse_lock();
+
+	if (!nvfuse_lookup(sb, NULL, NULL, name, parent))
+		return error_msg(" exist file or directory\n");
 
 	res = nvfuse_createfile(sb, parent, (char *)name, &ino, 0777 | S_IFLNK, 0);
 	if (res != NVFUSE_SUCCESS) {

@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/queue.h>
+#include <assert.h>
 
 #include "spdk/env.h"
 
@@ -48,6 +49,9 @@
 #include "nvfuse_api.h"
 
 #include "nvfuse_ipc_ring.h"
+
+static s8 *_STAT_MSG_POOL[] = {"STAT_MSG_POOL_DEVICE", "STAT_MSG_POOL_AIO", "STAT_MSG_POOL_RT"};
+static s8 *_STAT_RX_RING[] = {"STAT_RX_RING_DEVICE", "STAT_RX_RING_AIO", "STAT_RX_RINGL_RT"};
 
 #define RTE_LOGTYPE_APP RTE_LOGTYPE_USER1
 
@@ -360,7 +364,7 @@ int nvfuse_get_channel_id(struct nvfuse_ipc_context *ipc_ctx)
 }
 
 /* perf stat ring queue */
-int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool)
+int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool, enum stat_type type)
 {
 	const unsigned flags = 0;
 	const unsigned ring_size = 16384; /* FIXME: needed to find optimal value */
@@ -369,10 +373,11 @@ int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 	const unsigned priv_data_sz = 0;
 	const unsigned string_size = PERF_STAT_SIZE;
 
-	printf(" stat ring size = %d \n", ring_size);
+	//printf(" stat ring size = %d \n", ring_size);
+	assert(type < NUM_STAT_TYPE);
 	
-	*stat_rx_ring = rte_ring_create(_STAT_RX_RING, ring_size, rte_socket_id(), flags);
-	*stat_message_pool = rte_mempool_create(_STAT_MSG_POOL, pool_size,
+	*stat_rx_ring = rte_ring_create(_STAT_RX_RING[type], ring_size, rte_socket_id(), flags);
+	*stat_message_pool = rte_mempool_create(_STAT_MSG_POOL[type], pool_size,
 				string_size, pool_cache, priv_data_sz,
 				NULL, NULL, NULL, NULL,
 				rte_socket_id(), flags);
@@ -386,10 +391,12 @@ int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 }
 
 /* perf stat ring queue */
-int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool)
+int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool, enum stat_type type)
 {	
-	*stat_rx_ring = rte_ring_lookup(_STAT_RX_RING);
-	*stat_message_pool = rte_mempool_lookup(_STAT_MSG_POOL);
+	assert(type < NUM_STAT_TYPE);
+
+	*stat_rx_ring = rte_ring_lookup(_STAT_RX_RING[type]);
+	*stat_message_pool = rte_mempool_lookup(_STAT_MSG_POOL[type]);
 	
 	if (*stat_rx_ring == NULL)
 		rte_exit(EXIT_FAILURE, "Problem getting stat rx ring\n");
@@ -402,7 +409,7 @@ int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 /* perf stat ring queue */
 int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring, 
 						struct rte_mempool *stat_message_pool,
-						struct perf_stat_aio *stat)
+						union perf_stat *stat)
 {
 	char *ipc_msg;
 
@@ -412,7 +419,7 @@ int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring,
 			return -1;
 	}
 	
-	memcpy(ipc_msg, stat, sizeof(struct perf_stat_aio));
+	memcpy(ipc_msg, stat, sizeof(union perf_stat));
 	
 	if (rte_ring_enqueue(stat_tx_ring, ipc_msg) < 0) {
 		printf("Failed to send message - message discarded\n");		
@@ -425,7 +432,7 @@ int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring,
 /* perf stat ring queue */
 int nvfuse_stat_ring_get(struct rte_ring *stat_rx_ring, 
 						struct rte_mempool *stat_message_pool,
-						struct perf_stat_aio *stat)
+						union perf_stat *stat)
 {
 	char *ipc_msg;	
 
@@ -437,7 +444,7 @@ int nvfuse_stat_ring_get(struct rte_ring *stat_rx_ring,
 		break;
 	} while (1);
 	
-	memcpy(stat, ipc_msg, sizeof(struct perf_stat_aio));
+	memcpy(stat, ipc_msg, sizeof(union perf_stat));
 
 	rte_mempool_put(stat_message_pool, ipc_msg);
 
@@ -454,7 +461,7 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 
     int i;
 	int ret;
-
+	
 	printf(" ipc init \n");
 	printf(" rte_socket_id() = %d \n", rte_socket_id());
 	printf(" rte_lcore_id() = %d \n", rte_lcore_id());
@@ -553,13 +560,15 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 	
 	if (spdk_process_is_primary())	
 	{
-		ret = perf_stat_ring_create(&ipc_ctx->stat_ring, &ipc_ctx->stat_pool);
+		for (i = 0;i < NUM_STAT_TYPE; i++)
+			ret = perf_stat_ring_create(&ipc_ctx->stat_ring[i], &ipc_ctx->stat_pool[i], i);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Problem getting message pool\n");
 	}
 	else
 	{
-		ret = perf_stat_ring_lookup(&ipc_ctx->stat_ring, &ipc_ctx->stat_pool);
+		for (i = 0;i < NUM_STAT_TYPE; i++)
+			ret = perf_stat_ring_lookup(&ipc_ctx->stat_ring[i], &ipc_ctx->stat_pool[i], i);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "Problem getting message pool\n");
 	}
@@ -710,10 +719,11 @@ s32 nvfuse_send_app_unregister_req(struct nvfuse_handle *nvh, s32 destroy_contai
 
 s32 nvfuse_send_alloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 {
+	struct nvfuse_superblock *sb = &nvh->nvh_sb;
 	struct rte_ring *send_ring, *recv_ring;
 	struct rte_mempool *mempool;		
 	union nvfuse_ipc_msg *ipc_msg;
-	s32 ret;
+	s32 ret;	
 
 	/* INITIALIZATION OF TX/RX RING BUFFERS */
 	send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
@@ -735,26 +745,34 @@ s32 nvfuse_send_alloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
 	ipc_msg->buffer_alloc_req.buffer_size = buffer_size; // in 4K page unit
 	// necessary to keep this value somewhere
+	{
+		u64 start_tsc = spdk_get_ticks();
+		/* SEND BUFFER_ALLOC_REQ TO PRIMARY CORE */
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, BUFFER_ALLOC_REQ);
+		if (ret == 0)
+		{
+			rte_panic("Failed to get buffer\n");
+			ret = -1;
+		}
+		else
+		{
+			buffer_size = ret;
+			//printf(" allocated buffer size = %d pages\n", buffer_size);
+		}
 
-	/* SEND BUFFER_ALLOC_REQ TO PRIMARY CORE */
-	ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, BUFFER_ALLOC_REQ);
-	if (ret == 0)
-	{
-		rte_panic("Failed to get buffer\n");
-		ret = -1;
-	}
-	else
-	{
-		buffer_size = ret;
-		//printf(" allocated buffer size = %d pages\n", buffer_size);
-	}
+		sb->perf_stat_ipc.stat_ipc.total_tsc[BUFFER_ALLOC_REQ] += (spdk_get_ticks() - start_tsc);
+		sb->perf_stat_ipc.stat_ipc.total_count[BUFFER_ALLOC_REQ]++;
+	}	
 	
 	rte_mempool_put(mempool, ipc_msg);
+	
+	
 	return ret;
 }
 
 s32 nvfuse_send_dealloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 {
+	struct nvfuse_superblock *sb = &nvh->nvh_sb;
 	struct rte_ring *send_ring, *recv_ring;
 	struct rte_mempool *mempool;		
 	union nvfuse_ipc_msg *ipc_msg;
@@ -779,14 +797,20 @@ s32 nvfuse_send_dealloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 	memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
 	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
 	ipc_msg->buffer_free_req.buffer_size = buffer_size; // in 4K page unit
-	
-	/* SEND BUFFER_DEALLOC_REQ TO PRIMARY CORE */
-	ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, BUFFER_FREE_REQ);
-	if (ret < 0)
 	{
-		rte_panic("Failed to dealloc buffer\n");		
+		u64 start_tsc = spdk_get_ticks();
+
+		/* SEND BUFFER_DEALLOC_REQ TO PRIMARY CORE */
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, BUFFER_FREE_REQ);
+		if (ret < 0)
+		{
+			rte_panic("Failed to dealloc buffer\n");		
+		}
+
+		sb->perf_stat_ipc.stat_ipc.total_tsc[BUFFER_FREE_REQ] += (spdk_get_ticks() - start_tsc);
+		sb->perf_stat_ipc.stat_ipc.total_count[BUFFER_FREE_REQ]++;
 	}
-	
+
 	rte_mempool_put(mempool, ipc_msg);
 	return ret;
 }

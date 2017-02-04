@@ -69,7 +69,8 @@ struct nvfuse_aio_queue {
 
 	s32 max_completions;
 
-	struct perf_stat_aio stat;
+	union perf_stat uni_stat;
+	struct perf_stat_aio *aio_stat;
 
 	u64 aio_cc_sum; /* average cpl count per poll*/
 	u64 aio_cc_cnt;

@@ -18,6 +18,7 @@
 #include "nvfuse_bp_tree.h"
 #include "list.h"
 #include "rbtree.h"
+#include "nvfuse_stat.h"
 
 #include <pthread.h>
 
@@ -277,6 +278,14 @@ struct nvfuse_superblock{
 		struct timeval sb_time_start;
 		struct timeval sb_time_end;
 		struct timeval sb_time_total;
+		
+		u64 bp_set_index_tsc;
+		u64 bp_set_index_count;
+
+		u64 nvme_io_tsc;
+		u64 nvme_io_count;
+
+		union perf_stat perf_stat_ipc;
 	};
 };
 
@@ -292,7 +301,7 @@ struct nvfuse_file_table{
 	nvfuse_off_t prefetch_cur;
 	nvfuse_off_t rwoffset;
 	s32 flags;
-	pthread_mutex_t ft_lock;
+	//pthread_mutex_t ft_lock;
 };
 
 #define MAX_FILES_PER_DIR (0x7FFFFFFF)
@@ -440,8 +449,8 @@ struct nvfuse_ipc_context {
 	struct rte_mempool *message_pool;
 
 	/* Stat Ring and Mempool */
-	struct rte_ring *stat_ring;
-	struct rte_mempool *stat_pool;
+	struct rte_ring *stat_ring[MAX_NUM_STAT];
+	struct rte_mempool *stat_pool[MAX_NUM_STAT];
 
 	int my_channel_id;
 };
@@ -450,7 +459,7 @@ struct nvfuse_handle {
 	struct nvfuse_superblock nvh_sb;
 	struct nvfuse_io_manager nvh_iom;
 	struct nvfuse_params nvh_params;
-	struct nvfuse_ipc_context nvh_ipc_ctx;
+	struct nvfuse_ipc_context nvh_ipc_ctx;	
 
 	u32 nvh_cwd_ino;
 	u32 nvh_root_dir;

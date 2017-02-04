@@ -739,8 +739,8 @@ s32 nvfuse_control_plane_buffer_free(struct nvfuse_handle *nvh, s32 size)
     cp->curr_buffer_size += size;
     assert(cp->curr_buffer_size <= cp->total_buffer_size);
 
-	printf(" Remaining buffers = %.3f\n", 
-		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size);
+	//printf(" Remaining buffers = %.3f\n", 
+	//	(double)cp->curr_buffer_size * 100 / cp->total_buffer_size);
 
     return 0;
 }
@@ -877,8 +877,7 @@ s32 nvfuse_control_plane_container_alloc(struct nvfuse_handle *nvh, s32 core_id,
 				printf(" No such containers for core %d\n\n", core_id);
 				goto RET;
 			}
-	    }
-	    
+	    }	    
 
 	    assert(container_id != 0);
 	    assert(reservation_table[container_id].owner_core_id == core_id);

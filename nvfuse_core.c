@@ -50,6 +50,7 @@
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_ipc_ring.h"
+#include "nvfuse_dirhash.h"
 
 struct nvfuse_superblock * nvfuse_read_super(struct nvfuse_handle *nvh)
 {		
@@ -828,7 +829,8 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u32 dir_hash[2];
 	u32 collision = ~0; 	
 	u32 cur_offset;
-	
+	u64 start_tsc = spdk_get_ticks();
+	u64 end_tsc;
 	master_node_t *master;
 
 	master= bp_init_master();
@@ -847,7 +849,7 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		u32 c = cur_offset >> (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);		
 		c++;
 
-		//printf(" file name collision = %x, %d\n", dir_hash, c);
+		printf(" file name collision = %08x%08x, %d\n", dir_hash[0], dir_hash[1], c);
 
 		c <<= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
 		/* if collision occurs, offset is set to 0 */
@@ -858,6 +860,11 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	}
 	bp_write_master(master);
 	bp_deinit_master(master);
+
+	end_tsc = spdk_get_ticks();
+	assert((end_tsc - start_tsc) > 0);	
+	sb->bp_set_index_tsc += (end_tsc - start_tsc);
+	sb->bp_set_index_count++;
 
 	B_KEY_FREE(key);
 
@@ -1369,21 +1376,27 @@ s32 nvfuse_alloc_container_from_primary_process(struct nvfuse_handle *nvh, s32 t
 	memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
 	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
 	ipc_msg->container_alloc_req.type = type;
+	{
+		u64 start_tsc = spdk_get_ticks();
 
-	/* SEND CONTAINER_ALLOC_REQ TO PRIMARY CORE */
-	ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, CONTAINER_ALLOC_REQ);
-	if (ret == 0)
-	{
-		fprintf(stderr, "Failed to get new container (lcore = %d)\n", rte_lcore_id());
-		return 0;
-	}
-	else 
-	{
-		//printf(" allocated container = %d \n", ret);
-		container_id = ret;
+		/* SEND CONTAINER_ALLOC_REQ TO PRIMARY CORE */
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, CONTAINER_ALLOC_REQ);
+		if (ret == 0)
+		{
+			fprintf(stderr, "Failed to get new container (lcore = %d)\n", rte_lcore_id());
+			return 0;
+		}
+		else 
+		{
+			//printf(" allocated container = %d \n", ret);
+			container_id = ret;
+		}
+
+		sb->perf_stat_ipc.stat_ipc.total_tsc[CONTAINER_ALLOC_REQ] += (spdk_get_ticks() - start_tsc);
+		sb->perf_stat_ipc.stat_ipc.total_count[CONTAINER_ALLOC_REQ]++;
 	}
 	rte_mempool_put(mempool, ipc_msg);
-
+	
 	return container_id;
 }
 
@@ -1394,7 +1407,7 @@ s32 nvfuse_dealloc_container_from_primary_process(struct nvfuse_superblock *sb, 
 	struct rte_mempool *mempool;		
 	union nvfuse_ipc_msg *ipc_msg;
 	s32 ret;
-
+	
 	/* INITIALIZATION OF TX/RX RING BUFFERS */
 	send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
 	recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
@@ -1413,14 +1426,21 @@ s32 nvfuse_dealloc_container_from_primary_process(struct nvfuse_superblock *sb, 
 	memset(ipc_msg->bytes, 0x00, NVFUSE_IPC_MSG_SIZE);
 	ipc_msg->chan_id = nvh->nvh_ipc_ctx.my_channel_id;
 	ipc_msg->container_release_req.container_id = seg_id;
-
-	/* SEND CONTAINER_RELEASE_REQ TO PRIMARY CORE */
-	ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, CONTAINER_RELEASE_REQ);
-	if (ret < 0)
 	{
-			rte_panic("Failed to get new container\n");
-			return -1;
-	}		
+		u64 start_tsc = spdk_get_ticks();
+		
+		/* SEND CONTAINER_RELEASE_REQ TO PRIMARY CORE */
+		ret = nvfuse_send_msg_to_primary_core(send_ring, recv_ring, ipc_msg, CONTAINER_RELEASE_REQ);
+		if (ret < 0)
+		{
+				rte_panic("Failed to get new container\n");
+				return -1;
+		}
+
+		sb->perf_stat_ipc.stat_ipc.total_tsc[CONTAINER_RELEASE_REQ] += (spdk_get_ticks() - start_tsc);
+		sb->perf_stat_ipc.stat_ipc.total_count[CONTAINER_RELEASE_REQ]++;
+	}
+	
 	rte_mempool_put(mempool, ipc_msg);
 	
 	return 0;
@@ -1511,8 +1531,10 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		return -1;
 	}
 
-	if (nvh->nvh_mounted)
+	if (nvh->nvh_mounted) {
+		printf(" nvfuse is already mounted.\n");
 		return -1;
+	}
 
 	sb->sb_file_table = (struct nvfuse_file_table *)nvfuse_malloc(sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
 	if (sb->sb_file_table == NULL) {
@@ -1520,11 +1542,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		return -1;
 	}
 	memset(sb->sb_file_table, 0x00, sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
-	for (i = 0; i < MAX_OPEN_FILE; i++) {
-		struct nvfuse_file_table *ft = &sb->sb_file_table[i];
-		pthread_mutex_init(&ft->ft_lock, NULL);
-	}
-		
+
 	//gettimeofday(&start_tv, NULL);
 	if (spdk_process_is_primary())
 	{
@@ -1707,7 +1725,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	nvh->nvh_mounted = 1;
 
 	sb->sb_dirty_sync_policy = NVFUSE_META_DIRTY_POLICY;
-	//sb->sb_dirty_sync_policy = NVFUSE_META_DIRTY_SYNC_DELAYED;
+	
 	switch (sb->sb_dirty_sync_policy)
 	{
 	    case DIRTY_FLUSH_DELAY:
@@ -1728,6 +1746,15 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 
 	printf(" NVFUSE has been successfully mounted. \n");
+	if (0) /* for debugging */
+	{
+		struct perf_stat_ipc *stat = &sb->perf_stat_ipc.stat_ipc;
+		printf(" Container Alloc Latency = %f us\n", (double)stat->total_tsc[CONTAINER_ALLOC_REQ]/stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Container Free Latency = %f us\n", (double)stat->total_tsc[CONTAINER_RELEASE_REQ]/stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" BUFFER Alloc Latency = %f us\n", (double)stat->total_tsc[BUFFER_ALLOC_REQ]/stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" BUFFER Free Latency = %f us\n", (double)stat->total_tsc[BUFFER_FREE_REQ]/stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
+		memset(stat, 0x00, sizeof(struct perf_stat_ipc));
+	}
 
 	return NVFUSE_SUCCESS;
 }
@@ -1761,17 +1788,20 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	nvfuse_deinit_buffer_cache(sb);	
 	nvfuse_deinit_ictx_cache(sb);
 
-	for(i = 0;i < MAX_OPEN_FILE;i++){
-		struct nvfuse_file_table *ft = sb->sb_file_table + i;
-		pthread_mutex_destroy(&ft->ft_lock);
-	}
-
 	if (!spdk_process_is_primary()) {
 		/* app unregistration with keeping allocated containers permanently */
 		nvfuse_send_app_unregister_req(nvh, APP_UNREGISTER_WITHOUT_DESTROYING_CONTAINERS);
 		nvfuse_put_channel_id(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
 		
 		printf(" Release channel = %d \n", nvh->nvh_ipc_ctx.my_channel_id);
+	}
+
+	{
+		struct perf_stat_ipc *stat = &sb->perf_stat_ipc.stat_ipc;
+		printf(" Container Alloc Latency = %f us\n", (double)stat->total_tsc[CONTAINER_ALLOC_REQ]*1000000/stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz());
+		printf(" Container Free Latency = %f us\n", (double)stat->total_tsc[CONTAINER_RELEASE_REQ]*1000000/stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz());
+		printf(" BUFFER Alloc Latency = %f us\n", (double)stat->total_tsc[BUFFER_ALLOC_REQ]*1000000/stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz());
+		printf(" BUFFER Free Latency = %f us\n", (double)stat->total_tsc[BUFFER_FREE_REQ]*1000000/stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz());
 	}
 
 	free(sb->sb_ss);	
@@ -2678,10 +2708,13 @@ u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, 
 	struct nvfuse_inode *inode;	
 	bitem_t value = 0;
 	int ret;
+	
+	//printf(" %s ino = %d, offset = %d, res = %d \n", __FUNCTION__, ino, offset, value);
 
 	if (ino < ROOT_INO) 
 	{
 		printf(" Received invalid ino = %d", ino);
+		assert(0);
 		return 0;
 	}
 
@@ -2725,7 +2758,7 @@ u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, 
 	{
 		printf(" Warning: block is not allocated.");
 	}	
-	
+
 	return value;
 }
 
@@ -2760,7 +2793,15 @@ s32 fat_filename(const s8 *path, s8 *dest)
 
 void nvfuse_dir_hash(s8 *filename, u32 *hash1, u32 *hash2)
 {
-	ext2fs_dirhash(1, filename, strlen(filename), 0, hash1, hash2);
+#ifdef USE_INTEL_CRC32C
+	s32 size = strlen(filename);
+	s32 half = size / 2;
+
+	*hash1 = crc32c_intel(filename, half);	
+	*hash2 = crc32c_intel(filename + half, size - half);	
+#else
+	ext2fs_dirhash(EXT2_HASH_TEA, filename, strlen(filename), 0, hash1, hash2);
+#endif 	
 }
 
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager)
@@ -2776,6 +2817,12 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 	s32 dirty_count = 0;
 	s32 flushing_count = 0;
 	s32 res;
+	u64 start_tsc;
+
+	if (spdk_process_is_primary())
+	{
+		force = DIRTY_FLUSH_FORCE;
+	}
 
 	dirty_count = nvfuse_get_dirty_count(sb);
 	/* check dirty flush with force option */
@@ -2785,6 +2832,13 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 	/* no more dirty data */
 	if (dirty_count == 0)
 		goto RES;
+
+	// if (!spdk_process_is_primary())
+	// {
+	// 	printf(" flush dirty = %d \n", dirty_count);
+	// }
+
+	start_tsc = spdk_get_ticks();
 
 	while ((dirty_count = nvfuse_get_dirty_count(sb)) != 0)
 	{
@@ -2807,8 +2861,12 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 			break;
 	}
 
-	if (sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY])
-		printf(" Warning: inode dirty count = %d \n", sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY]);
+	sb->nvme_io_tsc += (spdk_get_ticks() - start_tsc);
+	sb->nvme_io_count ++;
+	
+	/* FIXME: it is necessary to analyze why dirties are left here. */
+	//if (sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY])
+	//	printf(" Warning: inode dirty count = %d \n", sb->sb_ictxc->ictxc_list_count[BUFFER_TYPE_DIRTY]);
 RES:;	
 
 	return;

@@ -14,6 +14,7 @@
 #
 
 include spdk_config.mk
+include nvfuse.mk
 
 LIB_NVFUSE = nvfuse.a
 SRCS   = nvfuse_buffer_cache.o \
@@ -30,6 +31,7 @@ CFLAGS = $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 #CFLAGS = -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 CFLAGS += -march=native -m64
 
+
 OBJS=$(SRCS:.c=.o)
 
 CC=gcc
@@ -41,7 +43,7 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) -O2 -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) -O2 $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test perf control_plane_proc
 

@@ -100,8 +100,9 @@ struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, 
 	remove_ptr = (struct list_head *)(&bm->bm_list[type])->prev;
 	do {
 		bh = list_entry(remove_ptr, struct nvfuse_buffer_cache, bc_list);
-		if (bh->bc_ref == 0 && bh->bc_bh_count == 0)
+		if (bh->bc_ref == 0 && bh->bc_bh_count == 0) {
 			break;
+		}
 		remove_ptr = remove_ptr->prev;
 		if (remove_ptr == &bm->bm_list[type]) {
 			printf(" no more buffer head.");
@@ -207,6 +208,7 @@ struct nvfuse_buffer_head *nvfuse_alloc_buffer_head()
 
 void nvfuse_free_buffer_head(struct nvfuse_buffer_head *bh)
 {
+	//printf(" %s inode ino = %d blkno = %d\n", __FUNCTION__, bh->bh_bc->bc_ino, bh->bh_bc->bc_lbno);
 	nvfuse_free(bh);
 }
 

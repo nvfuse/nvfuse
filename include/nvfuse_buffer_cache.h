@@ -20,9 +20,6 @@
 #ifndef _LRU_CACHE_H
 #define _LRU_CACHE_H
 
-//#define HASH_NUM (15331)
-#define HASH_NUM (52631)
-
 #define INSERT_HEAD 0
 #define INSERT_TAIL 1
 

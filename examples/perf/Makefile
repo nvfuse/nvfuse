@@ -17,6 +17,7 @@ NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
 include $(NVFUSE_ROOT_DIR)/spdk_config.mk
+include $(NVFUSE_ROOT_DIR)/nvfuse.mk
 
 TARGET = perf 
 SRCS   = perf.o
@@ -36,10 +37,10 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) -O2 -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) -O2 $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 $(TARGET)	:	$(OBJS)
-	$(CC) -g -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
+	$(CC) -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
 all:  $(TARGET) 
 
 

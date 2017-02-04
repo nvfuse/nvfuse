@@ -95,11 +95,11 @@ void nvfuse_aio_test_callback(void *arg)
 #ifdef SPDK_ENABLED
 	u64 latency_tsc;
 	latency_tsc = actx->actx_complete_tsc - actx->actx_submit_tsc;
-	aioq->stat.aio_lat_total_tsc += latency_tsc;
-	aioq->stat.aio_lat_total_count++;
-	aioq->stat.aio_lat_min_tsc = MIN(latency_tsc, aioq->stat.aio_lat_min_tsc);
-	aioq->stat.aio_lat_max_tsc = MAX(latency_tsc, aioq->stat.aio_lat_max_tsc);
-	aioq->stat.aio_total_size += actx->actx_bytes;
+	aioq->aio_stat->aio_lat_total_tsc += latency_tsc;
+	aioq->aio_stat->aio_lat_total_count++;
+	aioq->aio_stat->aio_lat_min_tsc = MIN(latency_tsc, aioq->aio_stat->aio_lat_min_tsc);
+	aioq->aio_stat->aio_lat_max_tsc = MAX(latency_tsc, aioq->aio_stat->aio_lat_max_tsc);
+	aioq->aio_stat->aio_total_size += actx->actx_bytes;
 #endif
 
 	free(actx);

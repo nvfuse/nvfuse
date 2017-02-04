@@ -176,51 +176,54 @@ void _print_stats(struct perf_stat_aio *cur_stat, char *name)
 	printf("------------------------------------\n");
 }
 
-void print_stats(s32 num_cores)
+static void print_stats(s32 num_cores)
 {
 	struct rte_ring *stat_rx_ring;
 	struct ret_mempool *stat_message_pool;
-	struct perf_stat_aio *per_core_stat, *cur_stat, sum_stat;		
+	union perf_stat *per_core_stat, *cur_stat, sum_stat;		
 	s32 ret;
 	s32 cur;	
 	s8 name[128];
 	
-	per_core_stat = malloc(sizeof(struct perf_stat_aio) * num_cores);
+	per_core_stat = malloc(sizeof(union perf_stat) * num_cores);
 	if (per_core_stat == NULL) {
 		fprintf(stderr, " Error: malloc() \n");
 	}
-
-	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool);
+	
+	/* stat ring lookup */
+	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, AIO_STAT);
 	if (ret < 0) 
 		return -1;
 
-	memset(per_core_stat, 0x00, sizeof(struct perf_stat_aio) * num_cores);
-	memset(&sum_stat, 0x00, sizeof(struct perf_stat_aio));
-	sum_stat.aio_lat_min_tsc = ~0;
-	sum_stat.aio_lat_max_tsc = 0;
+	memset(per_core_stat, 0x00, sizeof(union perf_stat) * num_cores);
+	memset(&sum_stat, 0x00, sizeof(union perf_stat));
+	sum_stat.stat_aio.aio_lat_min_tsc = ~0;
+	sum_stat.stat_aio.aio_lat_max_tsc = 0;
 
 
 	for (cur = 0;cur < num_cores; cur++)	
 	{
 		cur_stat = per_core_stat + cur;
-		ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, cur_stat);
+		ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)cur_stat);
 		if (ret < 0)
 			return -1;
 		
 		sprintf(name, "lcore %d", cur);
 		_print_stats(cur_stat, name);
-		sum_stat.aio_execution_tsc += cur_stat->aio_execution_tsc;
-		sum_stat.aio_lat_total_count += cur_stat->aio_lat_total_count;	// io count	
-		sum_stat.aio_lat_total_tsc += cur_stat->aio_lat_total_tsc;		// latency total
-		sum_stat.aio_total_size += cur_stat->aio_total_size;			// io amount
-		sum_stat.aio_lat_min_tsc = MIN(sum_stat.aio_lat_min_tsc, cur_stat->aio_lat_min_tsc);
-		sum_stat.aio_lat_max_tsc = MAX(sum_stat.aio_lat_max_tsc, cur_stat->aio_lat_max_tsc);		
+		sum_stat.stat_aio.aio_execution_tsc += cur_stat->stat_aio.aio_execution_tsc;
+		sum_stat.stat_aio.aio_lat_total_count += cur_stat->stat_aio.aio_lat_total_count;	// io count	
+		sum_stat.stat_aio.aio_lat_total_tsc += cur_stat->stat_aio.aio_lat_total_tsc;		// latency total
+		sum_stat.stat_aio.aio_total_size += cur_stat->stat_aio.aio_total_size;			// io amount
+		sum_stat.stat_aio.aio_lat_min_tsc = 
+				MIN(sum_stat.stat_aio.aio_lat_min_tsc, cur_stat->stat_aio.aio_lat_min_tsc);
+		sum_stat.stat_aio.aio_lat_max_tsc = 
+				MAX(sum_stat.stat_aio.aio_lat_max_tsc, cur_stat->stat_aio.aio_lat_max_tsc);
 
-		timeval_add(&sum_stat.aio_sys_time, &cur_stat->aio_sys_time);
-		timeval_add(&sum_stat.aio_usr_time, &cur_stat->aio_usr_time);
+		timeval_add(&sum_stat.stat_aio.aio_sys_time, &cur_stat->stat_aio.aio_sys_time);
+		timeval_add(&sum_stat.stat_aio.aio_usr_time, &cur_stat->stat_aio.aio_usr_time);
 	}
 	
-	sum_stat.aio_execution_tsc /= num_cores;
+	sum_stat.stat_aio.aio_execution_tsc /= num_cores;
 	sprintf(name, "group");
 	_print_stats(&sum_stat, name);
 
@@ -258,7 +261,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'B':
 			block_size = atoi(optarg);
-			if (block_size % CLUSTER_SIZE)
+			if (block_size % CLUSTER_SIZE | block_size < CLUSTER_SIZE)
 			{
 				printf("\n Error: block size (%d) is not alinged with 4KB\n", block_size);
 				goto INVALID_ARGS;

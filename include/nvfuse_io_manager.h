@@ -22,6 +22,7 @@ typedef struct io_context io_context_t;
 struct io_event;
 #endif 
 #include "nvfuse_types.h"
+#include "nvfuse_stat.h"
 
 #ifndef __IO_MANAGER__
 #define __IO_MANAGER__
@@ -137,6 +138,7 @@ struct nvfuse_io_manager {
 
     struct spdk_nvme_qpair *spdk_queue[SPDK_QUEUE_NUM];
     struct nvfuse_ipc_context *ipc_ctx;
+    union perf_stat perf_stat_dev;
 #endif
     int queue_cur_count;
 

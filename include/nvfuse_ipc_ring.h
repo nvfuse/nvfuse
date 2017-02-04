@@ -41,6 +41,7 @@ enum ipc_opcode {
     HEALTH_CHECK_REQ,
     HEALTH_CHECK_CPL,    
     UNKOWN_CPL,
+    NUM_IPC_MSGS,
 };
 
 struct app_register_req {
@@ -276,29 +277,9 @@ struct container_reservation
     s32 ref_count;
 };
 
-struct perf_stat_aio 
-{
-    u32 lcore_id;
-	u64 aio_start_tsc;
-	u64 aio_end_tsc;
-    u64 aio_execution_tsc;
-    
-	u64 aio_lat_total_tsc;
-	u64 aio_lat_total_count;
-	u64 aio_lat_min_tsc;
-	u64 aio_lat_max_tsc;
-	u64 aio_total_size;
-    struct rusage aio_start_rusage;
-    struct rusage aio_end_rusage;
-    struct timeval aio_usr_time;
-    struct timeval aio_sys_time;
-};
-
-#define PERF_STAT_SIZE (DIV_UP(sizeof(struct perf_stat_aio), 512))
-
 /* perf stat relavent macros */
-#define _STAT_MSG_POOL "STAT_MSG_POOL"
-#define _STAT_RX_RING "STAT_RX_RING"
+//#define _STAT_MSG_POOL "STAT_MSG_POOL"
+//#define _STAT_RX_RING "STAT_RX_RING"
 
 int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx);
 void nvfuse_ipc_exit(struct nvfuse_ipc_context *ipc_ctx);
@@ -341,13 +322,13 @@ s32 nvfuse_send_dealloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size);
 
 int nvfuse_get_channel_id(struct nvfuse_ipc_context *ipc_ctx);
 int nvfuse_put_channel_id(struct nvfuse_ipc_context *ipc_ctx, int channel);
-int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool);
-int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool);
+int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool, enum stat_type type);
+int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool, enum stat_type type);
 int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring, 
 						struct rte_mempool *stat_message_pool,
-						struct perf_stat_aio *stat);
+						union perf_stat *stat);
 
 int nvfuse_stat_ring_get(struct rte_ring *stat_rx_ring, 
 						struct rte_mempool *stat_message_pool,
-						struct perf_stat_aio *stat);        
+                        union perf_stat *stat);        
 #endif

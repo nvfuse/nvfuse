@@ -44,6 +44,7 @@
 #include <fcntl.h>
 #include <assert.h>
 #include <errno.h>
+#include "spdk/env.h"
 
 #ifdef __linux__
 #include <sys/uio.h>
@@ -250,8 +251,9 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 				nvfuse_add_buffer_cache(sb, nr_buffers);
 			}
 			assert (nvfuse_check_free_block(sb, num_blocks) == 1);
-		} else
+		} else {
 			assert(0);
+		}
 	}
 
 	seg_id = inode->i_ino / sb->sb_no_of_inodes_per_seg;
@@ -872,9 +874,9 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 				(u32*)bh->bh_buf,
 				(u32*)bh->bh_buf + addr_per_block,
 				depth);
-			
-			//nvfuse_release_bh(sb, bh, 0, DIRTY);
-			nvfuse_forget_bh(sb, bh);
+			/* FIXME: ??? needed to be revised */
+			nvfuse_release_bh(sb, bh, 0, DIRTY);
+			//nvfuse_forget_bh(sb, bh);
 			nvfuse_free_blocks(sb, nr, 1);			
 			nvfuse_mark_inode_dirty(ictx);
 		}
