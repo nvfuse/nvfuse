@@ -840,6 +840,45 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		printf(" Device Read I/O Amount = %.3f MB\n", (double)sum_stat->read_io_count * CLUSTER_SIZE / MB);
 		printf(" Device Write I/O Amount = %.3f MB\n", (double)sum_stat->write_io_count * CLUSTER_SIZE / MB);
 	}
+
+	/* IPC Stat */
+	{
+		union perf_stat _sum_stat;
+		struct perf_stat_ipc *sum_stat = &_sum_stat;
+		struct perf_stat_ipc *cur_stat;
+		s32 type;
+
+		memset(sum_stat, 0x00, sizeof(struct perf_stat_ipc));
+
+		/* stat ring lookup */
+		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, IPC_STAT);
+		if (ret < 0) 
+			return -1;
+
+		/* gather dev stats */
+		for (i = 0;i < num_cores; i++) {
+			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
+			if (ret < 0)
+				return -1;
+						
+			cur_stat = (struct perf_stat_ipc *)&temp_stat;
+			for (type = APP_REGISTER_REQ; type < HEALTH_CHECK_CPL; type++)
+			{
+				sum_stat->total_tsc[type] += cur_stat->total_tsc[type];
+				sum_stat->total_count[type] += cur_stat->total_count[type];
+			}			
+			
+			printf(" Core %d Container Alloc Latency = %f us\n", i, (double)cur_stat->total_tsc[CONTAINER_ALLOC_REQ]/cur_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+			printf(" Core %d Container Free Latency = %f us\n", i, (double)cur_stat->total_tsc[CONTAINER_RELEASE_REQ]/cur_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
+			printf(" Core %d BUFFER Alloc Latency = %f us\n", i, (double)cur_stat->total_tsc[BUFFER_ALLOC_REQ]/cur_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+			printf(" Core %d BUFFER Free Latency = %f us\n", i, (double)cur_stat->total_tsc[BUFFER_FREE_REQ]/cur_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
+		}
+
+		printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg BUF FER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
+	}
 }
 
 int main(int argc, char *argv[])

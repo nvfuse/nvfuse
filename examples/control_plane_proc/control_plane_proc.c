@@ -173,7 +173,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 		ipc_msg = NULL;
 
 		if (rte_ring_dequeue(recv_ring, &ipc_msg) < 0) {
-			rte_pause();
+			//rte_pause();
 			continue;
 		}
 		

@@ -50,8 +50,9 @@
 
 #include "nvfuse_ipc_ring.h"
 
-static s8 *_STAT_MSG_POOL[] = {"STAT_MSG_POOL_DEVICE", "STAT_MSG_POOL_AIO", "STAT_MSG_POOL_RT"};
-static s8 *_STAT_RX_RING[] = {"STAT_RX_RING_DEVICE", "STAT_RX_RING_AIO", "STAT_RX_RINGL_RT"};
+#define MAX_STAT_MSG 4
+static s8 *_STAT_MSG_POOL[MAX_STAT_MSG] = {"STAT_MSG_POOL_DEVICE", "STAT_MSG_POOL_AIO", "STAT_MSG_POOL_RT", "STAT_MSG_POOL_IPC"};
+static s8 *_STAT_RX_RING[MAX_STAT_MSG] = {"STAT_RX_RING_DEVICE", "STAT_RX_RING_AIO", "STAT_RX_RINGL_RT", "STAT_MSG_POOL_IPC"};
 
 #define RTE_LOGTYPE_APP RTE_LOGTYPE_USER1
 
@@ -314,7 +315,7 @@ void nvfuse_try_ring_dequeue(struct rte_ring *recv_ring, union nvfuse_ipc_msg **
 
 	do {
 		if (rte_ring_dequeue(recv_ring, &ptr) < 0) {
-			rte_pause();
+			//rte_pause();
 			continue;
 		}
 		break;
@@ -350,7 +351,7 @@ int nvfuse_get_channel_id(struct nvfuse_ipc_context *ipc_ctx)
 	s32 val;
 	do {
 		if (rte_ring_dequeue(ipc_ctx->id_gen, (void **)&my_id) < 0) {
-			rte_pause();
+			//rte_pause();
 			continue;
 		}
 		break;
@@ -375,7 +376,8 @@ int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 
 	//printf(" stat ring size = %d \n", ring_size);
 	assert(type < NUM_STAT_TYPE);
-	
+	assert(type < MAX_STAT_MSG);
+
 	*stat_rx_ring = rte_ring_create(_STAT_RX_RING[type], ring_size, rte_socket_id(), flags);
 	*stat_message_pool = rte_mempool_create(_STAT_MSG_POOL[type], pool_size,
 				string_size, pool_cache, priv_data_sz,
@@ -438,7 +440,7 @@ int nvfuse_stat_ring_get(struct rte_ring *stat_rx_ring,
 
 	do {
 		if (rte_ring_dequeue(stat_rx_ring, (void **)&ipc_msg) < 0) {
-			rte_pause();
+			//rte_pause();
 			continue;
 		}
 		break;

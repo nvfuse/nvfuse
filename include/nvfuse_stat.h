@@ -23,7 +23,8 @@ enum stat_type{
     DEVICE_STAT		= 0,
     AIO_STAT		= 1,
     RT_STAT			= 2,
-    NUM_STAT_TYPE	= 3
+    IPC_STAT        = 3,
+    NUM_STAT_TYPE	= 4
 };
 
 /* aio perf stat */

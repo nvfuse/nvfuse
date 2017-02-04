@@ -396,6 +396,10 @@ void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_u
 		}
 	}
 
+   nvfuse_stat_ring_put(io_manager->ipc_ctx->stat_ring[IPC_STAT], 
+                        io_manager->ipc_ctx->stat_pool[IPC_STAT],
+                        &nvh->nvh_sb.perf_stat_ipc);
+
 	spdk_release_qpair(io_manager);
 }
 /* 
