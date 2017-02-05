@@ -118,8 +118,7 @@ struct io_job{
 #define SPDK_QUEUE_AIO  1
 #define SPDK_QUEUE_NUM  2
 
-struct nvfuse_io_manager {	
-    pthread_mutex_t io_lock;
+struct nvfuse_io_manager {
     char *io_name;
     char *dev_path;
     int type;

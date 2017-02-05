@@ -26,6 +26,7 @@
 #include <rte_config.h>
 #include <rte_eal.h>
 #include <rte_lcore.h>
+#include <rte_memcpy.h>
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
@@ -170,7 +171,7 @@ s32 nvfuse_store_app_table(struct nvfuse_handle *nvh)
 			*p = cp->app_table_generation++;
 		} else {
 			s8 *p = (s8 *)cp->app_manage_table;
-			memcpy(buf, p + offset - chunk_size, chunk_size); 
+			rte_memcpy(buf, p + offset - chunk_size, chunk_size); 
 		}
 
 		ret = nvfuse_writefile(nvh, fd, buf, chunk_size, offset);
@@ -280,7 +281,7 @@ s32 nvfuse_load_app_table(struct nvfuse_handle *nvh)
 			cp->app_table_generation++;
 		} else {
 			s8 *p = (s8 *)cp->app_manage_table;
-			memcpy(p + offset - chunk_size, buf, chunk_size); 
+			rte_memcpy(p + offset - chunk_size, buf, chunk_size); 
 		}
 
 		offset += chunk_size;
@@ -343,7 +344,7 @@ s32 nvfuse_store_container_table(struct nvfuse_handle *nvh)
 			*p = cp->container_generation++;
 		} else {
 			s8 *p = (s8 *)cp->reservation_table;
-			memcpy(buf, p + offset - chunk_size, chunk_size); 
+			rte_memcpy(buf, p + offset - chunk_size, chunk_size); 
 		}
 
 		ret = nvfuse_writefile(nvh, fd, buf, chunk_size, offset);
@@ -453,7 +454,7 @@ s32 nvfuse_load_container_table(struct nvfuse_handle *nvh)
 			cp->container_generation++;
 		} else {
 			s8 *p = (s8 *)cp->reservation_table;
-			memcpy(p + offset - chunk_size, buf, chunk_size); 
+			rte_memcpy(p + offset - chunk_size, buf, chunk_size); 
 		}
 
 		offset += chunk_size;
@@ -672,7 +673,7 @@ s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname, struct superb
     }    
 	nvfuse_release_super(sb);
 
-    memcpy(&msg->superblock_common, sb_common, sizeof(struct nvfuse_superblock_common));
+    rte_memcpy(&msg->superblock_common, sb_common, sizeof(struct nvfuse_superblock_common));
     
     msg->superblock_common.sb_root_ino = dir_entry.d_ino;
     msg->superblock_common.asb.asb_root_seg_id = dir_entry.d_ino / sb->sb_no_of_inodes_per_seg;

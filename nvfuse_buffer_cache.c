@@ -14,6 +14,7 @@
 */
 
 #include "spdk/env.h"
+#include <rte_lcore.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -62,15 +63,15 @@ void nvfuse_move_buffer_type(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 #endif
 }
 
-void nvfuse_init_buffer_head(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bh){
-	bh->bc_bno = 0;
-	bh->bc_dirty = 0;
-	bh->bc_ino = 0;
-	bh->bc_lbno = 0;
-	bh->bc_load = 0;	
-	bh->bc_pno = 0;
-	bh->bc_ref = 0;
-	memset(bh->bc_buf, 0x00, CLUSTER_SIZE);	
+void nvfuse_init_buffer_head(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc){
+	bc->bc_bno = 0;
+	bc->bc_dirty = 0;
+	bc->bc_ino = 0;
+	bc->bc_lbno = 0;
+	bc->bc_load = 0;	
+	bc->bc_pno = 0;
+	bc->bc_ref = 0;
+	memset(bc->bc_buf, 0x00, CLUSTER_SIZE);	
 }
 
 struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, u64 key){	
@@ -185,13 +186,14 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 
 static s32 seq_num = 0;
 
-struct nvfuse_buffer_head *nvfuse_alloc_buffer_head()
+struct nvfuse_buffer_head *nvfuse_alloc_buffer_head(struct nvfuse_superblock *sb)
 {
+	struct spdk_mempool *bh_mempool = sb->bh_mempool;
 	struct nvfuse_buffer_head *bh;
 
-	bh = nvfuse_malloc(sizeof(struct nvfuse_buffer_head));
+	bh = spdk_mempool_get(bh_mempool);
 	if (!bh) {
-		printf(" Error: malloc() \n");
+		printf(" Error: spdk_mempool_get() \n");
 		return NULL;
 	}
 	memset(bh, 0x00, sizeof(struct nvfuse_buffer_head));
@@ -206,10 +208,14 @@ struct nvfuse_buffer_head *nvfuse_alloc_buffer_head()
 	return bh;
 }
 
-void nvfuse_free_buffer_head(struct nvfuse_buffer_head *bh)
-{
-	//printf(" %s inode ino = %d blkno = %d\n", __FUNCTION__, bh->bh_bc->bc_ino, bh->bh_bc->bc_lbno);
-	nvfuse_free(bh);
+void nvfuse_free_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc)
+{	
+	spdk_mempool_put(sb->bc_mempool, bc);
+}
+
+void nvfuse_free_buffer_head(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh)
+{	
+	spdk_mempool_put(sb->bh_mempool, bh);
 }
 
 struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 sync_read, s32 is_meta)
@@ -228,7 +234,7 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nv
 	} 
 	else
 	{
-		bh = nvfuse_alloc_buffer_head();
+		bh = nvfuse_alloc_buffer_head(sb);
 		if (!bh)
 			return NULL;		
 	}
@@ -318,7 +324,7 @@ struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb, struc
 	bc->bc_ref++;
 	assert(bc->bc_ref == 1);
 		
-	bh = nvfuse_alloc_buffer_head();
+	bh = nvfuse_alloc_buffer_head(sb);
 	if (!bh)
 		return NULL;
 
@@ -336,10 +342,10 @@ struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb, struc
 	return bh;
 }
 
-struct nvfuse_buffer_cache *nvfuse_alloc_bc(){
+struct nvfuse_buffer_cache *nvfuse_alloc_bc(struct nvfuse_superblock *sb){
 	struct nvfuse_buffer_cache *bc;
 
-	bc = (struct nvfuse_buffer_cache *)nvfuse_malloc(sizeof(struct nvfuse_buffer_cache));
+	bc = (struct nvfuse_buffer_cache *)spdk_mempool_get(sb->bc_mempool);
 	if (bc == NULL) {
 		printf(" nvfuse_malloc error \n");
 		return bc;
@@ -360,7 +366,7 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 
 	while (nr--)
 	{
-		bc = nvfuse_alloc_bc();
+		bc = nvfuse_alloc_bc(sb);
 		if (!bc)
 		{
 			return -1;
@@ -395,6 +401,25 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 	s32 i;
 	s32 recommended_size;
 	s32 buffer_size_in_4k;
+	s8 mempool_name[16];
+
+	sprintf(mempool_name, "nvfuse_bh_%d", rte_lcore_id());
+	sb->bh_mempool = spdk_mempool_create(mempool_name, NVFUSE_BH_MEMPOOL_TOTAL_SIZE,
+	                           sizeof(struct nvfuse_buffer_head), NVFUSE_BH_MEMPOOL_CACHE_SIZE);
+	if (sb->bh_mempool == NULL)
+	{
+		fprintf( stderr, " Error: allocation of bh mempool \n");
+		exit(0);
+	}
+
+	sprintf(mempool_name, "nvfuse_bc_%d", rte_lcore_id());
+	sb->bc_mempool = spdk_mempool_create(mempool_name, NVFUSE_BC_MEMPOOL_TOTAL_SIZE,
+	                           sizeof(struct nvfuse_buffer_head), NVFUSE_BC_MEMPOOL_CACHE_SIZE);
+	if (sb->bc_mempool == NULL)
+	{
+		fprintf( stderr, " Error: allocation of bc mempool \n");
+		exit(0);
+	}
 
 	bm = (struct nvfuse_buffer_manager *)nvfuse_malloc(sizeof(struct nvfuse_buffer_manager));
 	if (bm == NULL) {
@@ -480,7 +505,7 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 			assert(!bc->bc_dirty);
 			list_del(&bc->bc_list);
 			nvfuse_free_aligned_buffer(bc->bc_buf);
-			nvfuse_free(bc);
+			nvfuse_free_bc(sb, bc);
 			removed_count++;
 		}
 	}
@@ -489,6 +514,9 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 	{
 		nvfuse_send_dealloc_buffer_req(sb->sb_nvh, removed_count);
 	}
+
+	spdk_mempool_free(sb->bh_mempool);
+	spdk_mempool_free(sb->bc_mempool);
 }
 
 s32 nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh) 
@@ -633,7 +661,7 @@ s32 nvfuse_forget_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh
 
 	nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_UNUSED, INSERT_HEAD);
 
-	nvfuse_free_buffer_head(bh);
+	nvfuse_free_buffer_head(sb, bh);
 
 	return 0;
 }
@@ -676,7 +704,7 @@ s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *b
 	}
 	else 
 	{		
-		nvfuse_free_buffer_head(bh);
+		nvfuse_free_buffer_head(sb, bh);
 	}
 		
 	return 0;
@@ -732,8 +760,8 @@ void nvfuse_remove_bh_in_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_c
 			bc->bc_ref--;
 		}
 
-		/* removal of buffer head */
-		nvfuse_free(bh);	
+		/* removal of buffer head */		
+		nvfuse_free_buffer_head(sb, bh);
 
 		/* move inode context to clean list */
 		if (ictx->ictx_meta_dirty_count == 0 &&
@@ -1104,16 +1132,15 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 		ictxc->ictxc_hash_count[i] = 0;
 	}
 
+	ictxc->ictx_buf = spdk_zmalloc(sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE, 0, NULL);
+	
+	printf(" ictx cache size = %d \n", (int)sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE);
+
 	/* alloc unsed list buffer cache */
 	for (i = 0; i < NVFUSE_ICTXC_SIZE; i++) {
 		struct nvfuse_inode_ctx *ictx;
 
-		ictx = nvfuse_malloc(sizeof(struct nvfuse_inode_ctx));
-		if (!ictx)
-		{
-			printf(" Error: malloc() ");
-		}
-		memset(ictx, 0x00, sizeof(struct nvfuse_inode_ctx));		
+		ictx = ((struct nvfuse_inode_ctx *)ictxc->ictx_buf) + i;
 
 		list_add(&ictx->ictx_cache_list, &ictxc->ictxc_list[BUFFER_TYPE_UNUSED]);
 		hlist_add_head(&ictx->ictx_hash, &ictxc->ictxc_hash[HASH_NUM]);
@@ -1138,12 +1165,12 @@ void nvfuse_deinit_ictx_cache(struct nvfuse_superblock *sb)
 		head = &sb->sb_ictxc->ictxc_list[type];
 		list_for_each_safe(ptr, temp, head) {
 			ictx = (struct nvfuse_inode_ctx *)list_entry(ptr, struct nvfuse_inode_ctx, ictx_cache_list);
-			list_del(&ictx->ictx_cache_list);
-			nvfuse_free(ictx);
+			list_del(&ictx->ictx_cache_list);			
 			removed_count++;
 		}
 	}
-
+	/* deallocate whole ictx buffer */
+	spdk_free(sb->sb_ictxc->ictx_buf);
 	assert(removed_count == NVFUSE_ICTXC_SIZE);
 }
 

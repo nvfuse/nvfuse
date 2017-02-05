@@ -421,7 +421,7 @@ int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring,
 			return -1;
 	}
 	
-	memcpy(ipc_msg, stat, sizeof(union perf_stat));
+	rte_memcpy(ipc_msg, stat, sizeof(union perf_stat));
 	
 	if (rte_ring_enqueue(stat_tx_ring, ipc_msg) < 0) {
 		printf("Failed to send message - message discarded\n");		
@@ -446,7 +446,7 @@ int nvfuse_stat_ring_get(struct rte_ring *stat_rx_ring,
 		break;
 	} while (1);
 	
-	memcpy(stat, ipc_msg, sizeof(union perf_stat));
+	rte_memcpy(stat, ipc_msg, sizeof(union perf_stat));
 
 	rte_mempool_put(stat_message_pool, ipc_msg);
 

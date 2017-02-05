@@ -55,8 +55,6 @@ void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->dev_format = NULL;
 
 	io_manager->total_blkcount = (s64)dev_size * NVFUSE_MEGA_BYTES / SECTOR_SIZE;
-
-	pthread_mutex_init(&io_manager->io_lock,NULL);
 }
 
 static int file_open(struct nvfuse_io_manager *io_manager, int flags)
@@ -103,8 +101,7 @@ static int file_close(struct nvfuse_io_manager *io_manager)
 	int	retval = 0;
 	
 	fclose(io_manager->fp);	
-	pthread_mutex_destroy(&io_manager->io_lock);
-
+	
 	free(io_manager->dev_path);
 	free(io_manager->io_name);
 	
@@ -123,16 +120,14 @@ static int file_read_blk(struct nvfuse_io_manager *io_manager, long block,
 	
 	size = count * CLUSTER_SIZE;
 	location = ((s64) block * CLUSTER_SIZE);
-	
-	pthread_mutex_lock(&io_manager->io_lock);
+		
 	#if (_FILE_OFFSET_BITS==64)
 	fsetpos64(io_manager->fp, (fpos64_t *)(&location));
 	#else
 	fsetpos(io_manager->fp, (fpos_t *)(&location));
 	#endif
 	ret = fread(buf, size, 1, io_manager->fp);
-	pthread_mutex_unlock(&io_manager->io_lock);
-
+	
 	if(ret)
 		return size;
 	else 
@@ -160,15 +155,14 @@ static int file_write_blk(struct nvfuse_io_manager *io_manager, long block,
 
 	size = count * CLUSTER_SIZE;
 	location = ((s64) block * CLUSTER_SIZE);
-	
-	pthread_mutex_lock(&io_manager->io_lock);
+		
 	#if (_FILE_OFFSET_BITS==64)
 	fsetpos64(io_manager->fp, (fpos64_t *)&location);
 	#else
 	fsetpos(io_manager->fp, (fpos_t *)(&location));
 	#endif
 	ret = fwrite(buf, size, 1, io_manager->fp);
-	pthread_mutex_unlock(&io_manager->io_lock);
+	
 	if(ret)
 		return size;
 	else 

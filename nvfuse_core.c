@@ -825,7 +825,7 @@ s32 ext2fs_test_bit(u32 nr, const void * addr)
 
 s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, u32 offset)
 {
-	bkey_t *key;
+	bkey_t key;
 	u32 dir_hash[2];
 	u32 collision = ~0; 	
 	u32 cur_offset;
@@ -833,7 +833,7 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u64 end_tsc;
 	master_node_t *master;
 
-	master= bp_init_master();
+	master= bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;	
 	bp_read_master(master);
@@ -841,11 +841,9 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	collision >>= NVFUSE_BP_COLLISION_BITS;
 	offset &= collision;
 
-	key = B_KEY_ALLOC();
-
 	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);	
-	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
-	if (B_INSERT(master, key, &offset, &cur_offset, 0) < 0) {
+	key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	if (B_INSERT(master, &key, &offset, &cur_offset, 0) < 0) {
 		u32 c = cur_offset >> (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);		
 		c++;
 
@@ -856,7 +854,7 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		cur_offset = 0;
 		cur_offset = c | cur_offset;
 		//collision
-		B_UPDATE(master, key, &cur_offset);
+		B_UPDATE(master, &key, &cur_offset);
 	}
 	bp_write_master(master);
 	bp_deinit_master(master);
@@ -866,13 +864,11 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	sb->bp_set_index_tsc += (end_tsc - start_tsc);
 	sb->bp_set_index_count++;
 
-	B_KEY_FREE(key);
-
 	return 0;
 }
 
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset){
-	bkey_t *key;
+	bkey_t key;
 	u32 dir_hash[2];	
 	u32 collision = ~0; 	
 	u32 c;	
@@ -880,7 +876,7 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	
 	master_node_t *master;
 
-	master = bp_init_master();
+	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;
 	bp_read_master(master);
@@ -890,12 +886,10 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		return 0;
 	}
 
-	key = B_KEY_ALLOC();
-
 	collision >>= NVFUSE_BP_COLLISION_BITS;
 	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
-	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
-	if (bp_find_key(master, key, offset) < 0) {
+	key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	if (bp_find_key(master, &key, offset) < 0) {
 		res = -1;
 		goto RES;
 	}
@@ -908,15 +902,13 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		*offset &= collision;
 RES:;
 
-	B_KEY_FREE(key);
-
 	bp_deinit_master(master);
 	return res;
 }
 
 
 s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset) {
-	bkey_t *key;
+	bkey_t key;
 	u32 dir_hash[2];
 	u32 collision = ~0;
 	u32 c;
@@ -924,7 +916,7 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 
 	master_node_t *master;
 
-	master = bp_init_master();
+	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;
 	bp_read_master(master);
@@ -934,12 +926,10 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 		return 0;
 	}
 
-	key = B_KEY_ALLOC();
-
 	collision >>= NVFUSE_BP_COLLISION_BITS;
 	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
-	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
-	if (bp_find_key(master, key, offset) < 0) {
+	key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	if (bp_find_key(master, &key, offset) < 0) {
 		res = -1;
 		goto RES;
 	}
@@ -952,52 +942,46 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 		*offset &= collision;
 RES:;
 
-	B_KEY_FREE(key);
-
 	bp_deinit_master(master);
 	return res;
 }
 
 s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename){
 	u32 dir_hash[2];
-	bkey_t *key;
+	bkey_t key;
 	bitem_t offset = 0;
 	u32 collision = ~0; 	
 	u32 c;
 	master_node_t *master = NULL;
 
-	master = bp_init_master();
+	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;
 	bp_read_master(master);
 
 	collision >>= NVFUSE_BP_COLLISION_BITS;	
-	
-	key = B_KEY_ALLOC();
-	
+		
 	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
-	*key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
+	key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
 
-	if(bp_find_key(master, key, &offset) < 0){
-		printf(" find key %lu \n", (unsigned long)*key);
+	if(bp_find_key(master, &key, &offset) < 0){
+		printf(" find key %lu \n", (unsigned long)key);
 		return -1;
 	}
 		
 	c = offset;
 	c >>= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
 	if(c == 0)
-		B_REMOVE(master, key);	
+		B_REMOVE(master, &key);	
 	else{
 		c--;
 		c <<= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
 		offset &= collision;
 		offset = c | offset;
 		//collision
-		B_UPDATE(master, key, &offset);
+		B_UPDATE(master, &key, &offset);
 	}
 	
-	B_KEY_FREE(key);
-
 	bp_write_master(master);
 	bp_deinit_master(master);
 	return 0;
@@ -1502,8 +1486,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	void *buf;
 	s32 i, j, res = 0;
 	
-	fprintf(stdout, "start %s\n", __FUNCTION__);
-	nvfuse_lock_init();
+	fprintf(stdout, "start %s\n", __FUNCTION__);	
 	
 	sb = nvfuse_read_super(nvh);
 			
@@ -1515,6 +1498,55 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	{
 		nvh->nvh_ipc_ctx.my_channel_id = nvfuse_get_channel_id(&nvh->nvh_ipc_ctx);
 		printf(" Obtained Channel ID = %d \n", nvh->nvh_ipc_ctx.my_channel_id);
+	}
+
+	{
+		s8 mempool_name[32];
+		s32 type;
+
+		for (type = 0; type < BP_MEMPOOL_NUM; type++)
+		{
+			u32 fanout = (CLUSTER_SIZE - BP_NODE_HEAD_SIZE) / (BP_PAIR_SIZE) * 2 + 1;
+			sprintf(mempool_name, "nvfuse_bp_%d_%d", type, rte_lcore_id());
+	
+			switch(type) {
+				case BP_MEMPOOL_MASTER:
+					printf(" mempool size for master: %d", (int)(NVFUSE_BPTREE_MEMPOOL_MASTER_TOTAL_SIZE * sizeof(master_node_t)));
+					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_MASTER_TOTAL_SIZE,
+											sizeof(master_node_t), NVFUSE_BPTREE_MEMPOOL_MASTER_CACHE_SIZE);
+					break;
+				case BP_MEMPOOL_INDEX:
+					printf(" mempool size for index: %d", (int)(NVFUSE_BPTREE_MEMPOOL_INDEX_TOTAL_SIZE * sizeof(index_node_t)));
+					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_INDEX_TOTAL_SIZE,
+											sizeof(index_node_t), NVFUSE_BPTREE_MEMPOOL_INDEX_CACHE_SIZE);					
+					break;
+				case BP_MEMPOOL_PAIR:
+					printf(" mempool size for pair: %d", (int)(NVFUSE_BPTREE_MEMPOOL_PAIR_TOTAL_SIZE * sizeof(key_pair_t)));
+					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_PAIR_TOTAL_SIZE,
+											sizeof(key_pair_t), NVFUSE_BPTREE_MEMPOOL_PAIR_CACHE_SIZE);
+					break;
+				case BP_MEMPOOL_KEY:
+					printf(" mempool size for key: %d", (int)(NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE * sizeof(bkey_t) * fanout));
+					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE,
+											sizeof(bkey_t) * fanout, NVFUSE_BPTREE_MEMPOOL_CACHE_SIZE);
+					break;
+				case BP_MEMPOOL_VALUE:
+					printf(" mempool size for value: %d", (int)(NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE * sizeof(bitem_t) * fanout));
+					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE,
+											sizeof(bitem_t) * fanout, NVFUSE_BPTREE_MEMPOOL_CACHE_SIZE);
+					break;
+				default:
+					fprintf(stderr, " Invalid mempool type = %d \n", type);
+					assert(0);					
+			}
+			
+			if (sb->bp_mempool[type] == NULL)
+			{
+				fprintf( stderr, " Error: allocation of mempool type = %d \n", type);
+				exit(0);
+			}
+			printf(" Allocation of BP_MEMPOOL type = %d %p \n", type, sb->bp_mempool[type]);
+		}		
 	}
 
 	res = nvfuse_init_buffer_cache(sb, NVFUSE_BUFFER_SIZE);
@@ -1599,7 +1631,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		        return ret;
 		}
 
-		memcpy(sb, &ipc_msg->superblock_copy_cpl.superblock_common, sizeof(struct nvfuse_superblock_common));
+		rte_memcpy(sb, &ipc_msg->superblock_copy_cpl.superblock_common, sizeof(struct nvfuse_superblock_common));
 		
 		printf(" Copied superblock info from primary process!\n");
 		printf(" no_of_sectors = %ld\n", sb->sb_no_of_sectors);
@@ -1661,7 +1693,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	{
 		u32 cno = NVFUSE_SUMMARY_OFFSET + i * sb->sb_no_of_blocks_per_seg;
 		nvfuse_read_cluster(buf, cno, sb->io_manager);
-		memcpy(sb->sb_ss + i, buf, sizeof(struct nvfuse_segment_summary));
+		rte_memcpy(sb->sb_ss + i, buf, sizeof(struct nvfuse_segment_summary));
 		//printf("seg %d ibitmap start = %d \n", i, g_nvfuse_sb->sb_ss[i].ss_ibitmap_start);
 		assert(sb->sb_ss[i].ss_id == i);		
 	}
@@ -1679,7 +1711,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	{
 		int container_id;
 		s32 nr_buffers;
-
+		s32 seg_count = 0;
 		do {
 			container_id = nvfuse_alloc_container_from_primary_process(nvh, CONTAINER_ALLOCATED_ALLOC);
 			if (container_id)
@@ -1694,7 +1726,28 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 					nvfuse_add_buffer_cache(sb, nr_buffers);
 				}
 			}
+			seg_count++;
 		} while (container_id);
+
+#ifdef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
+		/* fixed allocation (128G = 128M * 1024) */
+		while (seg_count < 1024) {
+			container_id = nvfuse_alloc_container_from_primary_process(nvh, CONTAINER_NEW_ALLOC);
+			if (container_id)
+			{
+				/* insert allocated container to process */
+				nvfuse_add_seg(sb, container_id);
+				/* try to allocate buffers from primary process */
+				nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
+				nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
+				if (nr_buffers > 0)
+				{
+					nvfuse_add_buffer_cache(sb, nr_buffers);
+				}
+			}
+			seg_count++;
+		}
+#endif
 	}
 	else 
 	{
@@ -1785,6 +1838,13 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 		nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, sb->io_manager);
 	}
 
+	/* deallocation of mempool for bptree*/
+	{
+		s32 type;
+		for (type = 0; type < BP_MEMPOOL_NUM; type++)
+			spdk_mempool_free(sb->bp_mempool[type]);
+	}
+
 	nvfuse_deinit_buffer_cache(sb);	
 	nvfuse_deinit_ictx_cache(sb);
 
@@ -1808,8 +1868,6 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	free(sb->sb_bm);
 	free(sb->sb_file_table);
 	
-	nvfuse_lock_exit();
-
 	nvh->nvh_mounted = 0;
 
 	nvfuse_free_aligned_buffer(buf);
@@ -1820,13 +1878,13 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 
 void nvfuse_copy_mem_sb_to_disk_sb(struct nvfuse_superblock *disk_sb, struct nvfuse_superblock *memory_sb)
 {
-	memcpy(disk_sb, memory_sb, sizeof(struct nvfuse_superblock_common));
+	rte_memcpy(disk_sb, memory_sb, sizeof(struct nvfuse_superblock_common));
 }
 
 
 void nvfuse_copy_disk_sb_to_sb(struct nvfuse_superblock *memory, struct nvfuse_superblock *disk)
 {
-	memcpy(memory, disk, sizeof(struct nvfuse_superblock_common));
+	rte_memcpy(memory, disk, sizeof(struct nvfuse_superblock_common));
 }
 
 s32 nvfuse_is_sb(s8 *buf){
@@ -1974,7 +2032,7 @@ u32 nvfuse_create_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode *inod
 	int ret;
 
 	/* make b+tree master and root nodes */
-	master = bp_init_master();
+	master = bp_init_master(sb);
 	ret = bp_alloc_master(sb, master);
 	if (ret < 0)
 	{
@@ -2265,14 +2323,14 @@ s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct n
 			return NVFUSE_ERROR;
 		}
 
-		memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
+		rte_memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
 
 		while(token = strtok(NULL,"/"))
 		{
 			local_dir_ino = dir_entry.d_ino;
 			if(nvfuse_lookup(sb, NULL, &dir_entry, token, local_dir_ino) < 0)
 				return NVFUSE_ERROR;
-			memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
+			rte_memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
 		}
 	}
 	else if(token == NULL)
@@ -2339,7 +2397,7 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct 
 			goto RES;
 		}
 
-		memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
+		rte_memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
 
 		while(token = strtok(NULL,"/"))
 		{
@@ -2347,7 +2405,7 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct 
 
 			if(nvfuse_lookup(sb, NULL, &dir_entry, token, local_dir_ino) < 0)
 				return NVFUSE_ERROR;
-			memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
+			rte_memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
 		}
 	}
 	
@@ -2870,21 +2928,4 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 RES:;	
 
 	return;
-}
-
-pthread_mutex_t mutex_lock;
-
-void nvfuse_lock_init(){	
-#if 1
-	pthread_mutex_init(&mutex_lock, NULL);
-#else
-	pthread_spin_init(&mutex_lock, NULL);
-#endif
-}
-void nvfuse_lock_exit(){
-#if 1
-	pthread_mutex_destroy(&mutex_lock);	
-#else
-	pthread_spin_destroy(&mutex_lock);
-#endif
 }

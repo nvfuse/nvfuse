@@ -360,7 +360,7 @@ int alloc_ntable()
 
 	return 0;
 }
-
+#if 0
 int make_index(master_node_t *master){	
 	int i, j;
 	int ret; 
@@ -593,7 +593,7 @@ int imark_main(int argc, char *argv[]) {
 	printf("\n ============== Format B+-tree ============== \n");
 	/* create master node and root node through making new inode on file system */
 	{
-		master = bp_init_master();				
+		master = bp_init_master(NULL);				
 		bp_alloc_master(sb, master);
 		bp_init_root(master);
 
@@ -643,3 +643,8 @@ int imark_main(int argc, char *argv[]) {
 
 	return 0;
 }
+#else
+int imark_main(int argc, char *argv[]) {
+	
+}
+#endif

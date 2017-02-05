@@ -159,7 +159,7 @@ typedef struct master_node{
 	//struct in-memory
 	struct nvfuse_inode_ctx *m_ictx;
 	inode_t m_ino;
-	pthread_mutex_t m_big_lock;
+	
 	struct nvfuse_superblock *m_sb;
 	struct nvfuse_buffer_head *m_bh;
 	int m_bitmap_ptr;
@@ -245,23 +245,23 @@ typedef struct {
 
 #define B_FLUSH_STACK(m) while(m->m_sp)B_POP(m);
 
-void *bp_malloc(u32 size);
-void bp_free(void *ptr);
+void *bp_malloc(struct nvfuse_superblock *sb, int mempool_type, int num);
+void bp_free(struct nvfuse_superblock *sb, int mempool_type, int num, void *ptr);
 
 #ifdef KEY_IS_INTEGER
 	#define B_KEY_MAKE(b, n) (*b = n)
 
-	#define B_PAIR_COPY_N(a, b,i,j,n) \
-			memcpy((char *)B_KEY_PAIR(a, i),(char *) B_KEY_PAIR(b, j), (n) * sizeof(bkey_t));\
-			memcpy((char *)B_ITEM_PAIR(a, i),(char *) B_ITEM_PAIR(b, j), (n) * sizeof(bitem_t));
+	#define B_PAIR_COPY_N(a, b, i, j, n) \
+			rte_memcpy((char *)B_KEY_PAIR(a, i),(char *) B_KEY_PAIR(b, j), (n) * sizeof(bkey_t));\
+			rte_memcpy((char *)B_ITEM_PAIR(a, i),(char *) B_ITEM_PAIR(b, j), (n) * sizeof(bitem_t));
 
 	#define B_PAIR_COPY(a,b,i,j) \
 			B_KEY_COPY(B_KEY_PAIR(a, i), B_KEY_PAIR(b, j)); \
 			B_ITEM_COPY(B_ITEM_PAIR(a, i), B_ITEM_PAIR(b, j));
 
 	#define B_PAIR_INIT_N(a, i, n)\
-		memset((char *)B_KEY_PAIR(a,i), 0x00, sizeof(bkey_t)*(n));\
-		memset((char *)B_ITEM_PAIR(a,i), 0x00, sizeof(bitem_t)*(n));
+			memset((char *)B_KEY_PAIR(a,i), 0x00, sizeof(bkey_t)*(n));\
+			memset((char *)B_ITEM_PAIR(a,i), 0x00, sizeof(bitem_t)*(n));
 
 	#define B_PAIR_INIT(a,i)\
 			B_KEY_INIT(B_KEY_PAIR(a,i));\
@@ -271,14 +271,14 @@ void bp_free(void *ptr);
 	//#define B_KEY_CMP(x, y)	(bkey_t)(*x - *y)
 	#define B_KEY_CMP(x, y) key_compare(x, y, 0, 0, 0)
 	#define B_KEY_INIT(x)	(*x =  0x00)
-	#define B_KEY_ALLOC() (bkey_t *)bp_malloc(sizeof(bkey_t));
+	#define B_KEY_ALLOC(sb, type, num) (bkey_t *)bp_malloc(sb, type, num);
 	#define B_KEY_FREE(p) bp_free((void *)(p))
 
 
 	#define B_ITEM_COPY(x,y)	(*x = *y)
 	#define B_ITEM_CMP(x,y)	(int)(*x - *y)
 	#define B_ITEM_INIT(x)	(*x =  0x00)
-	#define B_ITEM_ALLOC() (bitem_t *)bp_malloc(sizeof(bitem_t));
+	#define B_ITEM_ALLOC(sb, type, num) (bitem_t *)bp_malloc(sb, type, num);
 	#define B_ITEM_FREE(p) bp_free(p)
 	
 	#define B_KEY_ISNULL(p) (*p == 0)
@@ -296,8 +296,8 @@ void bp_free(void *ptr);
 #endif
 	
 	#define B_PAIR_COPY_N(a, b, i, j, n) \
-			memcpy((char *)B_KEY_PAIR(a, i),(char *) B_KEY_PAIR(b, j), (n) * BP_KEY_SIZE);\
-			memcpy((char *)B_ITEM_PAIR(a, i),(char *) B_ITEM_PAIR(b, j), (n) * BP_ITEM_SIZE);
+			rte_memcpy((char *)B_KEY_PAIR(a, i),(char *) B_KEY_PAIR(b, j), (n) * BP_KEY_SIZE);\
+			rte_memcpy((char *)B_ITEM_PAIR(a, i),(char *) B_ITEM_PAIR(b, j), (n) * BP_ITEM_SIZE);
 
 	#define B_PAIR_INIT_N(a, i, n)\
 		memset((char *)B_KEY_PAIR(a,i), 0x00, (n) * BP_KEY_SIZE);\
@@ -362,15 +362,15 @@ void bp_init_pair(key_pair_t *node, int num);
 int bp_dealloc_bitmap(master_node_t *master, index_node_t *p);
 void bp_write_master(master_node_t *master);
 void bp_init_root(master_node_t *master);
-master_node_t *bp_init_master(void);
+master_node_t *bp_init_master(struct nvfuse_superblock *sb);
 
 int key_compare(void *k1, void *k2,void *start, int num,int mid);
-key_pair_t *bp_alloc_pair(int num);
+key_pair_t *bp_alloc_pair(master_node_t *master, int num);
 int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t *value);
 int bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, char *buf, int offset);
 
 int bp_merge_key(master_node_t *master, index_node_t *dp, bkey_t *key,bitem_t *value);
-void bp_release_pair(key_pair_t *pair);
+void bp_release_pair(master_node_t *master, key_pair_t *pair, int num);
 int bp_merge_key2(key_pair_t *pair, bkey_t *key,bitem_t *value, int max);
 int bp_split_data_node(master_node_t *master,index_node_t *ip, index_node_t *dp,bkey_t *key,bitem_t *value,key_pair_t *pair);
 
@@ -378,7 +378,7 @@ int bp_read_master(master_node_t *master);
 int bp_find_key(master_node_t *master,bkey_t *key, bitem_t *value);
 
 void bp_print_node(index_node_t *node);
-void bubble_sort(key_pair_t *pair, int num, int(*compare)(void *src1, void *src2));
+void bubble_sort(master_node_t *master, key_pair_t *pair, int num, int(*compare)(void *src1, void *src2));
 int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master);
 void bp_deinit_master(master_node_t *master);
 offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx);

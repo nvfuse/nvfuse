@@ -285,7 +285,14 @@ struct nvfuse_superblock{
 		u64 nvme_io_tsc;
 		u64 nvme_io_count;
 
+		/* perf stat ipc */
 		union perf_stat perf_stat_ipc;
+		/* buffer head mempool */
+		struct spdk_mempool *bh_mempool;
+		/* buffer cache mempool */
+		struct spdk_mempool *bc_mempool;
+		/* bptree mempool */
+		struct spdk_mempool *bp_mempool[BP_MEMPOOL_NUM];
 	};
 };
 
@@ -294,7 +301,7 @@ struct seg_node{
  u32 seg_id;
 };
 
-struct nvfuse_file_table{	
+struct nvfuse_file_table{
 	inode_t	ino;
 	s64	size;
 	s32	used;
@@ -541,8 +548,6 @@ u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id);
 void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force);
 
 void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino);
-
-extern pthread_mutex_t mutex_lock;
 
 #define nvfuse_lock()	
 #define nvfuse_unlock() 

@@ -98,7 +98,8 @@ struct nvfuse_buffer_manager {
 struct nvfuse_ictx_manager {
 	struct list_head ictxc_list[BUFFER_TYPE_NUM];
 	struct hlist_head ictxc_hash[HASH_NUM + 1]; /* regular hash list and unused hash list (1) */
-
+	
+	void *ictx_buf; /* allocated by spdk_zmalloc() */
 	s32 ictxc_list_count[BUFFER_TYPE_NUM];
 	s32 ictxc_hash_count[HASH_NUM + 1];
 	s32 ictxc_cache_size;
@@ -110,7 +111,7 @@ struct nvfuse_ictx_manager {
 int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size);
 void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb);
 
-struct nvfuse_buffer_cache *nvfuse_alloc_bc(void);
+struct nvfuse_buffer_cache *nvfuse_alloc_bc(struct nvfuse_superblock *sb);
 struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 read, s32 is_meta);
 struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key, lbno_t lblock);
 struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb,u64 key);

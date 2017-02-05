@@ -30,6 +30,7 @@
 #include "spdk/nvme.h"
 #include "spdk/env.h"
 #include <rte_lcore.h>
+#include <rte_memcpy.h>
 #endif
 
 #include "nvfuse_core.h"
@@ -456,7 +457,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 				}
 				if (file_entry)
 				{
-					memcpy(file_entry, dir, DIR_ENTRY_SIZE);
+					rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
 				}
 
 				assert(dir->d_ino > 0 && dir->d_ino < sb->sb_no_of_inodes_per_seg * sb->sb_segment_num);
@@ -495,7 +496,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 					}
 					if (file_entry)
 					{
-						memcpy(file_entry, dir, DIR_ENTRY_SIZE);
+						rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
 					}
 
 					res = 0;
@@ -558,14 +559,8 @@ s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
 	struct nvfuse_dir_entry dir_entry;
 	unsigned int par_ino;	
 	int res;
-	s8 *filename;	
+	s8 filename[FNAME_SIZE];	
 		
-	filename = (s8 *)nvfuse_malloc(CLUSTER_SIZE);
-	if (filename == NULL) {
-		printf(" nvfuse_malloc error \n");
-		return -1;
-	}
-
 	res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
 	if (res < 0)
 		return res;
@@ -579,9 +574,7 @@ s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
 		}
 		par_ino = dir_entry.d_ino;
 	}
-		
-	nvfuse_free(filename);
-
+	
 	return par_ino;
 }
 
@@ -841,7 +834,7 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 			remain = count;
 
 		if (sync_read)
-			memcpy(buffer + rcount, &bh->bh_buf[offset], remain);
+			rte_memcpy(buffer + rcount, &bh->bh_buf[offset], remain);
 
 		rcount += remain;
 		of->rwoffset += remain;
@@ -984,7 +977,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		else
 			bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
 
-		memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
+		rte_memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
 		
 		wcount += remain;
 		of->rwoffset += remain;
@@ -1382,7 +1375,7 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 	dir_to += (to_entry % DIR_ENTRY_NUM);
 	assert(dir_to->d_flag == DIR_DELETED);
 
-	memcpy(dir_to, dir_from, DIR_ENTRY_SIZE);
+	rte_memcpy(dir_to, dir_from, DIR_ENTRY_SIZE);
 	
 	dir_from->d_flag = DIR_DELETED; /* FIXME: zeroing ?*/
 	//printf(" shrink_dentry: deleted = %s \n", dir_from->d_filename);

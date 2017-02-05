@@ -78,6 +78,7 @@ function configure_linux {
 		mount -t hugetlbfs nodev /mnt/huge
 	fi
 	echo "$NRHUGE" > /proc/sys/vm/nr_hugepages
+	echo "Allocating Huge Page $NRHUGE MB..."
 
 	if [ "$driver_name" = "vfio-pci" ]; then
 		if [ "$username" != "" ]; then

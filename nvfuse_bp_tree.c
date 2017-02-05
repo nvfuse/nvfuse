@@ -22,26 +22,52 @@
 #endif
 #ifdef SPDK_ENABLED
 #include "spdk/env.h"
+#include <rte_memcpy.h>
+#include <rte_mempool.h>
 #endif
 #include "nvfuse_core.h"
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_indirect.h"
 
-void *bp_malloc(u32 size) {	
-	return malloc(size);
+void *bp_malloc(struct nvfuse_superblock *sb, int mempool_type, int num) 
+{
+	struct rte_mempool *mp;
+	void *ptr;
+	s32 ret;
+	
+	assert (mempool_type >= 0 && mempool_type < BP_MEMPOOL_NUM);
+
+	mp = (struct rte_mempool *)sb->bp_mempool[mempool_type];
+
+	ret = rte_mempool_get(mp, &ptr);
+	if (ret < 0) 
+	{
+		fprintf( stderr, "ERROR: rte_mempool_get_bulk()\n");
+		return NULL;
+	}
+	//printf(" bpmalloc: type = %d ptr = %p, num = %d\n", mempool_type, ptr, num);
+	return ptr;
 }
 
-void bp_free(void *ptr) {	
-	free(ptr);
+void bp_free(struct nvfuse_superblock *sb, int mempool_type, int num, void *ptr)
+{
+	struct rte_mempool *mp;
+		
+	assert (mempool_type >= 0 && mempool_type < BP_MEMPOOL_NUM);
+
+	mp = (struct rte_mempool *)sb->bp_mempool[mempool_type];
+	rte_mempool_put(mp, ptr);
+
+	//printf(" bpfree: type = %d ptr = %p, num = %d \n", mempool_type, ptr, num);
 }
 
-master_node_t *bp_init_master()
+master_node_t *bp_init_master(struct nvfuse_superblock *sb)
 {
 	master_node_t *master;
 
 	// init master node 
-	master = (master_node_t *)bp_malloc(sizeof(master_node_t));
+	master = (master_node_t *)bp_malloc(sb, BP_MEMPOOL_MASTER, 1);
 	if (master == NULL) {
 		printf(" Error: malloc()\n");
 	}
@@ -66,12 +92,10 @@ master_node_t *bp_init_master()
 	master->m_root = 0;
 	
 	master->m_node_size = CLUSTER_SIZE;
-	master->m_fanout = (master->m_node_size - BP_NODE_HEAD_SIZE) / (BP_PAIR_SIZE);
+	master->m_fanout = (CLUSTER_SIZE - BP_NODE_HEAD_SIZE) / (BP_PAIR_SIZE);
 	if (master->m_fanout % 2 == 0)
 		master->m_fanout -= 1;
-	
-	pthread_mutex_init(&master->m_big_lock, NULL);
-	
+		
 	return master;
 }
 
@@ -79,9 +103,8 @@ void bp_deinit_master(master_node_t *master)
 {
 	nvfuse_release_inode(master->m_sb, master->m_ictx, 
 						test_bit(&master->m_ictx->ictx_status, BUFFER_STATUS_DIRTY) ? 1 : 0);
-
-	pthread_mutex_destroy(&master->m_big_lock);
-	bp_free((void *)master);
+	
+	bp_free(master->m_sb, BP_MEMPOOL_MASTER, 1, master);
 }
 
 s32 bp_read_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 master_id)
@@ -411,18 +434,31 @@ int bp_bin_search(bkey_t *key, key_pair_t *pair, int max,
 					int (*compare)(void *, void *, void * start, int num, int mid))
 {
 	int min = 0, mid = 0;	
+	#if 0
+	u64 key1, key2;
+	key1 = *key;
+	#endif
 
 	while(max >= min) {
-		mid = (min + max) / 2;
-				
+		mid = (min + max) >> 1;
+		#if 1		
 		if (compare( (void *)key, (void *)B_KEY_PAIR(pair, mid), (void *)pair, max, mid) == 0)
-			return mid;		
+			return mid;
 		else {			
 			if (compare( (void *)key, (void *)B_KEY_PAIR(pair, mid), (void *)pair, max, mid) < 0)
-				max = mid - 1;			
+				max = mid - 1;
 			else
-				min = mid + 1;			
+				min = mid + 1;
 		}
+		#else
+		key2 = *B_KEY_PAIR(pair, mid);	
+
+		asm ("cmpq %3, %2\n\tcmovg %4, %0\n\tcmovle %5, %1"
+                     : "+r" (min),
+                       "+r" (max)
+                     : "r" (key1), "g" (key2),
+                       "g" (mid + 1), "g" (mid));
+		#endif 
 	}
 
 	return -1;
@@ -435,6 +471,7 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	key_pair_t *pair;
 	key_pair_t *src, *dst;
 	int i, offset = 0;
+	int alloc_num;
 
 	dp_left = B_dALLOC(master, 0, ALLOC_CREATE);
 	B_READ(master, dp_left, dp_left->i_offset, 0, 0);
@@ -442,7 +479,8 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	dp_right = B_dALLOC(master, 0, ALLOC_CREATE);
 	B_READ(master, dp_right, dp_right->i_offset, 0, 0);
 	
-	pair = bp_alloc_pair(master->m_fanout * 2);
+	alloc_num = master->m_fanout * 2;
+	pair = bp_alloc_pair(master, alloc_num);
 	if (pair == NULL) {
 		printf(" alloc pair error ");
 		return NULL;
@@ -505,7 +543,7 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	B_RELEASE_BH(master, dp_right->i_bh);
 	B_RELEASE(master, dp_right);
 
-	bp_release_pair(pair);
+	bp_release_pair(master, pair, alloc_num);
 	
 	return parent_ip;
 }
@@ -587,7 +625,8 @@ int bp_split_data_node(master_node_t *master,
 	int i, offset = 0, count = 0;
 	int alloc_num = dp->i_num + 1;	
 	int seq_detection = 1;
-	pair_array = bp_alloc_pair(alloc_num);
+	
+	pair_array = bp_alloc_pair(master, alloc_num);
 	if (pair_array == NULL)
 		return 0;
 
@@ -679,7 +718,7 @@ int bp_split_data_node(master_node_t *master,
 	B_RELEASE(master, dp_left);
 	B_RELEASE(master, dp_right);
 
-	bp_release_pair(pair_array);
+	bp_release_pair(master, pair_array, alloc_num);
 
 	return 1;
 }
@@ -693,12 +732,15 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 	int count = 0; 
 	int i;			
 	int ip_offset = 0;	
-		
-	median = bp_alloc_pair(1);
+	int alloc_num;
+
+	median = bp_alloc_pair(master, 1);
 	ip_offset = B_POP(master);
 	ip = B_iALLOC(master, ip_offset, ALLOC_READ);
 	B_READ(master, ip, ip->i_offset, 1, 0);
-	pair_arr = bp_alloc_pair(master->m_fanout+1);
+
+	alloc_num = master->m_fanout+1;
+	pair_arr = bp_alloc_pair(master, master->m_fanout+1);
 	if (pair_arr == NULL) {
 		printf(" alloc pair error ");
 		return 0;
@@ -713,22 +755,15 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 			count = ip->i_num +1;
 			new_child = bp_split_index_node(master, ip, pair_arr, count, median, 1);
 		} else if (new_child) {				
-			bkey_t *k;
+			bkey_t key = 0;
 			int ptr = 0;
-
-			k = B_KEY_ALLOC();
-			if (k == NULL) {
-				printf(" malloc error \n");
-				return -1;
-			}
-			memset(k, 0x00, BP_KEY_SIZE);
-
+			
 			ip->i_num++;
 			count = ip->i_num+1;
 			
 			for (i =0;i < ip->i_num;i++) {				
 				if (!B_ITEM_CMP(B_ITEM_GET(ip,i), median->i_item)) {
-					B_KEY_COPY(k,B_KEY_GET(ip,i));					
+					B_KEY_COPY(&key,B_KEY_GET(ip,i));					
 				} else {					
 					B_PAIR_COPY(pair_arr,ip->i_pair, ptr,i);
 					ptr++;
@@ -738,14 +773,14 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 			bp_merge_key2(pair_arr, median->i_key, median->i_item, ip->i_num);
 			B_PAIR_INIT(median, 0);								
 						
-			if (B_KEY_CMP(k,B_KEY_GET(new_child,new_child->i_num)) > 0)
+			if (B_KEY_CMP(&key, B_KEY_GET(new_child,new_child->i_num)) > 0)
 			{
-				bp_merge_key2(pair_arr, k, &new_child->i_offset, ip->i_num+1);
+				bp_merge_key2(pair_arr, &key, &new_child->i_offset, ip->i_num+1);
 			} else {
 				bp_merge_key2(pair_arr, B_KEY_GET(new_child,new_child->i_num), &new_child->i_offset, ip->i_num+1);
 			}
 						
-			bubble_sort(pair_arr, count, compare_str);
+			bubble_sort(master, pair_arr, count, compare_str);
 
 			B_WRITE(master, new_child, new_child->i_offset);
 			B_RELEASE_BH(master, new_child->i_bh);
@@ -753,8 +788,7 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 
 			new_child = bp_split_index_node(master, ip, pair_arr, count, median, 0);			
 			if(new_child)
-				new_child = new_child;
-			B_KEY_FREE(k);
+				new_child = new_child;			
 		}
 		
 		B_WRITE(master, ip, ip->i_offset);
@@ -812,8 +846,8 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 	B_RELEASE_BH(master, ip->i_bh);
 	B_RELEASE(master, ip);
 		
-	bp_release_pair(median);
-	bp_release_pair(pair_arr);
+	bp_release_pair(master, median, 1);
+	bp_release_pair(master, pair_arr, alloc_num);
 	return 0;
 }
 
@@ -832,8 +866,6 @@ int bp_find_key(master_node_t *master, bkey_t *key, bitem_t *value) {
 	int index;
 	int res;
 	bitem_t temp;
-
-	pthread_mutex_lock(&master->m_big_lock);
 		
 	index = B_SEARCH(master, key, NULL);
 	if (index>= 0) {
@@ -846,8 +878,6 @@ int bp_find_key(master_node_t *master, bkey_t *key, bitem_t *value) {
 	B_RELEASE(master, master->m_cur);	
 	master->m_cur = 0;
 	
-	pthread_mutex_unlock(&master->m_big_lock);
-
 	return index;
 }
 
@@ -855,10 +885,7 @@ int bp_update_key_tree(master_node_t *master, bkey_t *key, bitem_t *value)
 {
 	int index;
 	int res;
-	res = pthread_mutex_lock(&master->m_big_lock);
-	if (res)
-		printf(" pthread mutex lock error  = %d\n", res);
-
+	
 	index = B_SEARCH(master, key, NULL);
 	if (index < 0) {
 		printf("not found \n");		
@@ -874,9 +901,6 @@ int bp_update_key_tree(master_node_t *master, bkey_t *key, bitem_t *value)
 	
 RES:;
 
-	res = pthread_mutex_unlock(&master->m_big_lock);
-	if (res)
-		printf(" pthread mutex unlock error  = %d\n", res);
 	return 0;
 
 }
@@ -936,10 +960,6 @@ int bp_insert_key_tree(master_node_t *master,
 	index_node_t *dp;
 	key_pair_t *pair;
 	
-	res = pthread_mutex_lock(&master->m_big_lock);
-	if (res)
-		printf(" pthread mutex lock error  = %d\n", res);
-
 	/* root node allocation */
 	root = B_dALLOC(master, master->m_root, ALLOC_READ);
 	/* read root node from disk */
@@ -999,8 +1019,6 @@ int bp_insert_key_tree(master_node_t *master,
 
 RES:;
 	
-	pthread_mutex_unlock(&master->m_big_lock);
-
 	return res;	
 }
 
@@ -1014,7 +1032,7 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 	int i,key_count = 0;		
 	int target1 = 0, target2 = 0;	
 	int max_count;
-
+	
 	for (i = 0;i < ip->i_num + 1;i++) {
 		if (!B_ITEM_CMP(B_ITEM_GET(ip,i), &child->i_offset)) {
 			target1 = i;
@@ -1029,7 +1047,8 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 	else
 		target2 = target1 + 1;
 	
-	pair = bp_alloc_pair(master->m_fanout * 2);
+	alloc_num = master->m_fanout * 2;
+	pair = bp_alloc_pair(master, master->m_fanout * 2);
 	if (pair == NULL) {
 		printf(" bp alloc error \n");
 		exit(1);
@@ -1057,7 +1076,7 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 		count = child->i_num +1 + child2->i_num + 1;
 	}
 	
-	bubble_sort(pair, count, compare_str);
+	bubble_sort(master, pair, count, compare_str);
 
 	if (data_node)
 		max_count = master->m_fanout;
@@ -1181,7 +1200,7 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 		}
 	}
 
-	bp_release_pair(pair);
+	bp_release_pair(master, pair, alloc_num);
 
 	if (de_alloc)
 	{
@@ -1431,7 +1450,6 @@ int get_pair_tree(index_node_t *dp, bkey_t *key)
 		return key_num;
 	else 
 		return key_num;
-
 }
 
 int bp_remove_key(master_node_t *master, bkey_t *key) {
@@ -1439,10 +1457,6 @@ int bp_remove_key(master_node_t *master, bkey_t *key) {
 	key_pair_t *pair,*base;
 	int  i;
 	int res = 0;
-
-	res = pthread_mutex_lock(&master->m_big_lock);
-	if (res)
-		printf(" pthread mutex lock error  = %d\n", res);
 
 	i = B_SEARCH(master, key, &dp);
 	if (i < 0) 
@@ -1485,10 +1499,6 @@ int bp_remove_key(master_node_t *master, bkey_t *key) {
 	master->m_key_count--;
 
 RES:;
-	res= pthread_mutex_unlock(&master->m_big_lock);
-	if (res)
-		printf(" pthread mutex unlock error  = %d\n", res);
-
 	return 1;	
 }
 
@@ -1500,7 +1510,7 @@ void bp_copy_node_to_raw(index_node_t *node, char *raw)
 		printf(" error copy node to raw \n");
 	}
 
-	memcpy(raw, node, BP_NODE_HEAD_SIZE);
+	rte_memcpy(raw, node, BP_NODE_HEAD_SIZE);
 	raw += BP_NODE_HEAD_SIZE;
 }
 
@@ -1516,7 +1526,7 @@ void bp_print_node(index_node_t *node)
 
 void bp_copy_raw_to_node(index_node_t *node, char *raw)
 {	
-	memcpy(node, raw, BP_NODE_HEAD_SIZE);
+	rte_memcpy(node, raw, BP_NODE_HEAD_SIZE);
 
 	if (node->i_flag != 0 && node->i_flag != 1)
 	{
@@ -1582,7 +1592,7 @@ int bp_read_master(master_node_t *master)
 	master->m_buf = bh->bh_buf;
 	master->m_bh = bh;
 		
-	memcpy(master, bh->bh_buf, CLUSTER_SIZE);
+	rte_memcpy(master, bh->bh_buf, CLUSTER_SIZE);
 			
 	B_RELEASE_BH(master, bh);
 
@@ -1598,7 +1608,7 @@ void bp_write_master(master_node_t *master)
 	master->m_buf = bh->bh_buf;
 	master->m_bh = bh;
 	
-	memcpy(bh->bh_buf, master, CLUSTER_SIZE);
+	rte_memcpy(bh->bh_buf, master, CLUSTER_SIZE);
 	
 	nvfuse_mark_dirty_bh(master->m_sb, bh);
 	B_RELEASE_BH(master, bh);
@@ -1734,7 +1744,7 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 {
 	index_node_t *node = NULL;		
 	
-	node = (index_node_t *)bp_malloc(sizeof(index_node_t));
+	node = (index_node_t *)bp_malloc(master->m_sb, BP_MEMPOOL_INDEX, 1);
 	if (node == NULL)
 	{
 		printf(" cannot allocate memory \n");
@@ -1756,7 +1766,7 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 		master->m_fsize += master->m_node_size;
 	}
 
-	node->i_pair = (key_pair_t *)bp_malloc(sizeof(key_pair_t));
+	node->i_pair = (key_pair_t *)bp_malloc(master->m_sb, BP_MEMPOOL_PAIR, 1);
 	if (node->i_pair == NULL) {
 		printf(" malloc error \n");
 		return NULL;
@@ -1784,12 +1794,12 @@ int bp_release_node(master_node_t *master, index_node_t *p) {
 	p->i_pair->i_item = NULL;
 	p->i_pair->i_key = NULL;
 
-	bp_free((void *)(p->i_pair));
+	bp_free(master->m_sb, BP_MEMPOOL_PAIR, 1, (void *)(p->i_pair));
 
 	p->i_pair = NULL;
 	
 	master->m_size -= sizeof(key_pair_t);
-	bp_free(p);
+	bp_free(master->m_sb, BP_MEMPOOL_INDEX, 1, p);
 	p = NULL;
 
 	master->m_size -= sizeof(index_node_t);	
@@ -1919,24 +1929,24 @@ u32 nvfuse_get_ino(bkey_t key)
 }
 #endif
 
-key_pair_t *bp_alloc_pair(int num) 
+key_pair_t *bp_alloc_pair(master_node_t *master, int num) 
 {
 	key_pair_t *pair;
 
-	pair = (key_pair_t *)bp_malloc(sizeof(key_pair_t));
+	pair = (key_pair_t *)bp_malloc(master->m_sb, BP_MEMPOOL_PAIR, 1);
 	if (pair == NULL) {
 		printf(" malloc error \n");
 		return NULL;
 	}
 
-	pair->i_key = (bkey_t *)bp_malloc(BP_KEY_SIZE * num);
+	pair->i_key = (bkey_t *)bp_malloc(master->m_sb, BP_MEMPOOL_KEY, num);
 	if (pair->i_key == NULL) {
 		printf(" malloc error \n");
 		return NULL;
 	}
 	memset(pair->i_key, 0x00, BP_KEY_SIZE * num);
 
-	pair->i_item = (bitem_t *)bp_malloc(BP_ITEM_SIZE * num);
+	pair->i_item = (bitem_t *)bp_malloc(master->m_sb, BP_MEMPOOL_VALUE, num);
 	if (pair->i_item == NULL) {
 		printf(" malloc error \n");
 		return NULL;
@@ -1946,37 +1956,33 @@ key_pair_t *bp_alloc_pair(int num)
 	return pair;
 }
 
-void bp_release_pair(key_pair_t *pair) 
+void bp_release_pair(master_node_t *master, key_pair_t *pair, int num) 
 {
-	bp_free((void *)pair->i_item);
-	bp_free((void *)pair->i_key);
-	bp_free((void *)pair);
+	bp_free(master->m_sb, BP_MEMPOOL_VALUE, num, (void *)pair->i_item);
+	bp_free(master->m_sb, BP_MEMPOOL_KEY, num, (void *)pair->i_key);
+	bp_free(master->m_sb, BP_MEMPOOL_PAIR, 1, (void *)pair);
 }
 
-void bubble_sort(key_pair_t *pair, int num, int(*compare)(void *src1, void *src2))
+void bubble_sort(master_node_t *master, key_pair_t *pair, int num, int(*compare)(void *src1, void *src2))
 {
 	int i, j;
 	int swap = 0;
-
+	bkey_t temp;
+	bitem_t r;
 	//sorting 
 	for (i = 0; i < num; i++) {
 		swap = 0;
 		for (j = 1; j <num - i; j++) {
 			if (compare(&pair->i_key[j - 1], &pair->i_key[j]) > 0) {
-				bkey_t *temp;
-				bitem_t *r;
-
-				temp = B_KEY_ALLOC();
-				B_KEY_COPY(temp, &pair->i_key[j]);
+						
+				B_KEY_COPY(&temp, &pair->i_key[j]);
 				B_KEY_COPY(&pair->i_key[j], &pair->i_key[j - 1]);
-				B_KEY_COPY(&pair->i_key[j - 1], temp);
-				B_KEY_FREE(temp);
-
-				r = B_ITEM_ALLOC();
-				B_ITEM_COPY(r, &pair->i_item[j]);
+				B_KEY_COPY(&pair->i_key[j - 1], &temp);
+			
+				B_ITEM_COPY(&r, &pair->i_item[j]);
 				B_ITEM_COPY(&pair->i_item[j], &pair->i_item[j - 1]);
-				B_ITEM_COPY(&pair->i_item[j - 1], r);
-				B_ITEM_FREE(r);
+				B_ITEM_COPY(&pair->i_item[j - 1], &r);
+
 				swap = 1;
 			}
 		}
