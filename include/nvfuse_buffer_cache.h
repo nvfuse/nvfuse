@@ -71,11 +71,11 @@ struct nvfuse_buffer_cache {
 	lbno_t bc_lbno;				/* logical block number */
 	inode_t bc_ino;				/* inode number */
 	pbno_t bc_pno;				/* physical block no*/
+
+	u32 bc_dirty:1;				/* dirty status */
+	u32 bc_load	:1;				/* data loaded from storage */
+	s32 bc_ref	:30;					/* reference count*/
 	
-	s32 bc_meta;				/* metadata buffer head*/
-	u32 bc_dirty;				/* dirty status */
-	u32 bc_load;				/* data loaded from storage */
-	s32 bc_ref;					/* reference count*/
 	s8 *bc_buf;					/* actual buffered data */
 
 	struct nvfuse_superblock *bc_sb; /* FIXME: it must be eliminated. */

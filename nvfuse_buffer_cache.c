@@ -15,6 +15,7 @@
 
 #include "spdk/env.h"
 #include <rte_lcore.h>
+#include <rte_mempool.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -347,7 +348,7 @@ struct nvfuse_buffer_cache *nvfuse_alloc_bc(struct nvfuse_superblock *sb){
 
 	bc = (struct nvfuse_buffer_cache *)spdk_mempool_get(sb->bc_mempool);
 	if (bc == NULL) {
-		printf(" nvfuse_malloc error \n");
+		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return bc;
 	}
 	memset(bc, 0x00, sizeof(struct nvfuse_buffer_cache));
@@ -376,7 +377,7 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 		bc->bc_buf = (s8 *)nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 		if (bc->bc_buf == NULL)
 		{
-			printf(" nvfuse_malloc error \n");
+			printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		#ifdef SPDK_ENABLED
 			printf(" Please, increase # of huge pages in scripts/setup.sh\n");
 		#endif
@@ -402,28 +403,50 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 	s32 recommended_size;
 	s32 buffer_size_in_4k;
 	s8 mempool_name[16];
+	s32 mempool_size;
 
 	sprintf(mempool_name, "nvfuse_bh_%d", rte_lcore_id());
-	sb->bh_mempool = spdk_mempool_create(mempool_name, NVFUSE_BH_MEMPOOL_TOTAL_SIZE,
+	if (!spdk_process_is_primary())
+		mempool_size = NVFUSE_BH_MEMPOOL_TOTAL_SIZE;
+	else
+		mempool_size = 2048;
+
+	printf(" mempool for bh head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_head)));
+	sb->bh_mempool = spdk_mempool_create(mempool_name, mempool_size,
 	                           sizeof(struct nvfuse_buffer_head), NVFUSE_BH_MEMPOOL_CACHE_SIZE);
 	if (sb->bh_mempool == NULL)
 	{
 		fprintf( stderr, " Error: allocation of bh mempool \n");
 		exit(0);
 	}
-
-	sprintf(mempool_name, "nvfuse_bc_%d", rte_lcore_id());
-	sb->bc_mempool = spdk_mempool_create(mempool_name, NVFUSE_BC_MEMPOOL_TOTAL_SIZE,
-	                           sizeof(struct nvfuse_buffer_head), NVFUSE_BC_MEMPOOL_CACHE_SIZE);
-	if (sb->bc_mempool == NULL)
+	
+	sprintf(mempool_name, "nvfuse_bc");
+	if (spdk_process_is_primary())
 	{
-		fprintf( stderr, " Error: allocation of bc mempool \n");
-		exit(0);
+		mempool_size = NVFUSE_BC_MEMPOOL_TOTAL_SIZE;		
+		printf(" mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
+		sb->bc_mempool = (struct spdk_mempool *)spdk_mempool_create(mempool_name, mempool_size,
+								sizeof(struct nvfuse_buffer_cache), NVFUSE_BC_MEMPOOL_CACHE_SIZE);
+		if (sb->bc_mempool == NULL)
+		{
+			fprintf( stderr, " Error: allocation of bc mempool \n");
+			exit(0);
+		}
+	}
+	else
+	{		
+		printf(" mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
+		sb->bc_mempool = (struct spdk_mempool *)rte_mempool_lookup(mempool_name);
+		if (sb->bc_mempool == NULL)
+		{
+			fprintf( stderr, " Error: allocation of bc mempool \n");
+			exit(0);
+		}		
 	}
 
 	bm = (struct nvfuse_buffer_manager *)nvfuse_malloc(sizeof(struct nvfuse_buffer_manager));
 	if (bm == NULL) {
-		printf(" nvfuse_malloc error \n");
+		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
 	}
 	memset(bm, 0x00, sizeof(struct nvfuse_buffer_manager));
@@ -1116,7 +1139,7 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 
 	ictxc = (struct nvfuse_ictx_manager *)nvfuse_malloc(sizeof(struct nvfuse_ictx_manager));
 	if (ictxc == NULL) {
-		printf(" nvfuse_malloc error \n");
+		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
 	}
 	memset(ictxc, 0x00, sizeof(struct nvfuse_ictx_manager));

@@ -59,15 +59,15 @@
 
 /* RATIO SEGMENT TO BUFFER Cache */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001) /* data optimized */
-//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
-#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
+#define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
+//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
 
 /* Buffer Head Mempool Settings */
 #define NVFUSE_BH_MEMPOOL_TOTAL_SIZE	(0x10000)
 #define NVFUSE_BH_MEMPOOL_CACHE_SIZE	2048
 
 /* Buffer Cache Mempool Settings */
-#define NVFUSE_BC_MEMPOOL_TOTAL_SIZE	(0x100000)
+#define NVFUSE_BC_MEMPOOL_TOTAL_SIZE	(0x1000000)
 #define NVFUSE_BC_MEMPOOL_CACHE_SIZE	2048
 
 /* Buffer Cache Mempool Settings */

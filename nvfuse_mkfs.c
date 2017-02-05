@@ -492,7 +492,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh) {
 	}
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL) {
-		printf(" nvfuse_malloc error \n");
+		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
 	}
 

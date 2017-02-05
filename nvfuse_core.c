@@ -1570,7 +1570,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 
 	sb->sb_file_table = (struct nvfuse_file_table *)nvfuse_malloc(sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
 	if (sb->sb_file_table == NULL) {
-		printf(" nvfuse_malloc error \n");
+		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
 	}
 	memset(sb->sb_file_table, 0x00, sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
@@ -1996,7 +1996,7 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 
 	buf = (s8 *)nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if(buf == NULL)	{
-		printf(" nvfuse_malloc error \n");
+		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 	}
 		
 	memset(buf, 0x00, CLUSTER_SIZE);
