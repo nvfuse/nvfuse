@@ -525,6 +525,11 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 		head = &sb->sb_bm->bm_list[type];
 		list_for_each_safe(ptr, temp, head) {
 			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+
+			if (bc->bc_bh_count)
+				nvfuse_remove_bh_in_bc(sb, bc);
+			
+			assert(!bc->bc_bh_count);
 			assert(!bc->bc_dirty);
 			list_del(&bc->bc_list);
 			nvfuse_free_aligned_buffer(bc->bc_buf);
@@ -532,14 +537,21 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 			removed_count++;
 		}
 	}
+
 	assert(removed_count == sb->sb_bm->bm_cache_size);
 	if (!spdk_process_is_primary())
 	{
 		nvfuse_send_dealloc_buffer_req(sb->sb_nvh, removed_count);
 	}
-
+	
+	//printf(" free bh mempool \n");
 	spdk_mempool_free(sb->bh_mempool);
-	spdk_mempool_free(sb->bc_mempool);
+
+	if (spdk_process_is_primary())
+	{		
+		//printf(" free bc mempool \n");
+		spdk_mempool_free(sb->bc_mempool);
+	}
 }
 
 s32 nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh) 

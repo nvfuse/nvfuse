@@ -1,2 +1,3 @@
 
 DEBUG = #-g
+OPTIMIZATION = -O3

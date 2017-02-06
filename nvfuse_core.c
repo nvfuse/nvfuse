@@ -380,6 +380,7 @@ u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx
 	/* debug info */
 	s32 count = 0;
 	s32 start_seg = 0;
+
 	if (!spdk_process_is_primary())
 		seg_id = nvfuse_get_curr_seg_id(sb, 1 /*inode type*/);		
 	else
@@ -517,10 +518,13 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 	assert(sb->sb_no_of_used_blocks >= 0);
 
 	/* removal of unused segment to primary process (e.g., control plane)*/
+#ifdef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
 	if (ss->ss_free_blocks + ss->ss_dtable_start == ss->ss_max_blocks)
 	{
 		nvfuse_remove_seg(sb, seg_id);
+		//printf(" Deallocate seg = %d \n", seg_id);
 	}
+#endif
 
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
@@ -1242,7 +1246,8 @@ s32 nvfuse_add_seg(struct nvfuse_superblock *sb, u32 seg_id)
 	struct seg_node *new_node;
 	s32 root_container = 0;
 
-	new_node = nvfuse_malloc(sizeof(struct seg_node));
+	new_node = spdk_mempool_get(sb->seg_mempool);
+
 	new_node->seg_id = seg_id;
 	list_add_tail(&new_node->list, head);
 	sb->sb_seg_list_count++;
@@ -1298,8 +1303,10 @@ s32 nvfuse_remove_seg(struct nvfuse_superblock *sb, u32 seg_id)
 	}
 
 	assert(node->seg_id == seg_id);
+	
 	/* deallocation of memory */
-	free(node);
+	spdk_mempool_put(sb->seg_mempool, node);
+	
 	sb->sb_seg_list_count--;
 
 	if (!spdk_process_is_primary())
@@ -1485,6 +1492,8 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	struct timeval start_tv, end_tv, result_tv;
 	void *buf;
 	s32 i, j, res = 0;
+	s8 mempool_name[32];
+	s32 mempool_size;
 	
 	fprintf(stdout, "start %s\n", __FUNCTION__);	
 	
@@ -1501,7 +1510,6 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 
 	{
-		s8 mempool_name[32];
 		s32 type;
 
 		for (type = 0; type < BP_MEMPOOL_NUM; type++)
@@ -1546,7 +1554,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 				exit(0);
 			}
 			printf(" Allocation of BP_MEMPOOL type = %d %p \n", type, sb->bp_mempool[type]);
-		}		
+		}
 	}
 
 	res = nvfuse_init_buffer_cache(sb, NVFUSE_BUFFER_SIZE);
@@ -1582,7 +1590,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		if (res < 0) {
 			printf(" invalid signature !!\n");
 			return res;
-		}	
+		}
 	}
 	else
 	{
@@ -1652,6 +1660,31 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		assert(sb->asb.asb_root_seg_id != 0);
 	}
 	
+	sprintf(mempool_name, "nvfuse_seg");
+	if (spdk_process_is_primary())
+	{
+		mempool_size = sb->sb_segment_num;
+		printf(" no_of_segments = %d\n", sb->sb_segment_num);
+		assert(mempool_size);
+		printf(" mempool for seg node size = %d \n", (int)(mempool_size * sizeof(struct seg_node)));
+		sb->seg_mempool = (struct spdk_mempool *)spdk_mempool_create(mempool_name, mempool_size,
+								sizeof(struct seg_node), 0x10);
+		if (sb->seg_mempool == NULL)
+		{
+			fprintf( stderr, " Error: allocation of bc mempool \n");
+			exit(0);
+		}
+	}
+	else
+	{		
+		printf(" mempool for seg node size = %d \n", (int)(mempool_size * sizeof(struct seg_node)));
+		sb->seg_mempool = (struct spdk_mempool *)rte_mempool_lookup(mempool_name);
+		if (sb->seg_mempool == NULL)
+		{
+			fprintf( stderr, " Error: allocation of bc mempool \n");
+			exit(0);
+		}
+	}
 	//gettimeofday(&end_tv, NULL);
 	//timeval_subtract(&result_tv, &end_tv, &start_tv);
 	//printf("\n scan time %.3d second\n", (s32)((float)result_tv.tv_sec + (float)result_tv.tv_usec / (float)1000000));
@@ -1841,8 +1874,17 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	/* deallocation of mempool for bptree*/
 	{
 		s32 type;
+
 		for (type = 0; type < BP_MEMPOOL_NUM; type++)
+		{
 			spdk_mempool_free(sb->bp_mempool[type]);
+			printf(" free bp mempool %d (num = %d)\n", type, BP_MEMPOOL_NUM);
+		}
+
+		if (spdk_process_is_primary()) 
+		{
+			spdk_mempool_free(sb->seg_mempool);
+		}
 	}
 
 	nvfuse_deinit_buffer_cache(sb);	

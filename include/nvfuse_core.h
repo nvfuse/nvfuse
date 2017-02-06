@@ -290,9 +290,11 @@ struct nvfuse_superblock{
 		/* buffer head mempool */
 		struct spdk_mempool *bh_mempool;
 		/* buffer cache mempool */
-		struct spdk_mempool *bc_mempool;
+		struct spdk_mempool *bc_mempool; /* allocated for primary core */
 		/* bptree mempool */
 		struct spdk_mempool *bp_mempool[BP_MEMPOOL_NUM];
+		/* seg node mempool*/
+		struct spdk_mempool *seg_mempool; /* allocated for primary core */
 	};
 };
 
