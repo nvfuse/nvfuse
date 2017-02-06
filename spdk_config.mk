@@ -1,5 +1,5 @@
-#DPDK_DIR = /home/foo/spdk/dpdk-16.11/x86_64-native-linuxapp-gcc/
-#SPDK_ROOT_DIR = /home/foo/spdk
+DPDK_DIR = /home/son/nvfuse/dpdk-16.11/x86_64-native-linuxapp-gcc/
+SPDK_ROOT_DIR = /home/son/nvfuse/spdk/
 
 ifneq "$(wildcard $(SPDK_ROOT_DIR) )" ""
 ifneq "$(wildcard $(DPDK_DIR) )" ""

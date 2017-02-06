@@ -1,7 +1,7 @@
 #
 #	NVFUSE (NVMe based File System in Userspace)
 #	Copyright (C) 2016 Yongseok Oh <yongseok.oh@sk.com>
-#	First Writing: 03/01/2017
+#	First Writing: 30/10/2016
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -13,26 +13,19 @@
 # more details.
 #
 
-NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
+NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
 include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 
-TARGET_NVFUSE = perf 
-TARGET_KERNEL = perf_kernel
-
-SRCS   = perf.o
-SRCS_KERNEL = perf_kernel.o
+TARGET = test
+SRCS   = test.o
 
 LDFLAGS += -lm -lpthread -laio -lrt
-LDFLAGS_KERNEL = -lpthread
-
-CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE
+CFLAGS += -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE
 CFLAGS += -w
 
-OBJS_NVFUSE=$(SRCS:.c=.o)
-OBJS_KERNEL=$(SRCS_KERNEL:.c=.o)
-
+OBJS=$(SRCS:.c=.o)
 
 CC=gcc
 
@@ -43,24 +36,21 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) -O2 -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
-$(TARGET_NVFUSE)	:	$(OBJS_NVFUSE)
-	$(CC) -g -o $(TARGET_NVFUSE) $(OBJS_NVFUSE) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
+$(TARGET)	:	$(OBJS)
+	$(CC) -o $(TARGET) $(OBJS)$(LIBS) $(LDFLAGS) $(NVFUSE_LIBS) #-L/home/son/nvfuse/spdk/build/lib 
 
-$(TARGET_KERNEL)	:	$(OBJS_KERNEL)
-	$(CC) -g -o $(TARGET_KERNEL) $(OBJS_KERNEL) $(LDFLAGS)
-
-all:  $(TARGET_NVFUSE) $(TARGET_KERNEL)
+all:  $(TARGET) 
 
 
 clean:
-	rm -f *.o *.a *~ $(TARGET_NVFUSE) $(TARGET_KERNEL)
+	rm -f *.o *.a *~ $(TARGET)
 
 distclean:
-	rm -f Makefile.bak *.o *.a *~ .depend $(TARGET_NVFUSE)
+	rm -f Makefile.bak *.o *.a *~ .depend $(TARGET)
 install: 
-	chmod 755 $(TARGET_NVFUSE)
+	chmod 755 $(TARGET)
 uninstall:
 
 dep:    depend

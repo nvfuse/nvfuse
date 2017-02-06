@@ -100,8 +100,8 @@ void nvfuse_aio_test_callback(void *arg)
 	latency_tsc = actx->actx_complete_tsc - actx->actx_submit_tsc;
 	aioq->aio_lat_total_tsc += latency_tsc;
 	aioq->aio_lat_total_count++;
-	aioq->aio_lat_min_tsc = MIN(latency_tsc, aioq->aio_lat_min_tsc);
-	aioq->aio_lat_max_tsc = MAX(latency_tsc, aioq->aio_lat_max_tsc);
+	aioq->aio_lat_min_tsc = MIN_NVFUSE(latency_tsc, aioq->aio_lat_min_tsc);
+	aioq->aio_lat_max_tsc = MAX_NVFUSE(latency_tsc, aioq->aio_lat_max_tsc);
 	aioq->aio_total_size += actx->actx_bytes;
 #endif
 

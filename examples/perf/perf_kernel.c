@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <assert.h>
 #include <dirent.h>
+#include <pthread.h>
 
 #define IS_NOTHING      0
 #define IS_OPEN_CLOSE   1
@@ -35,9 +36,11 @@
 #define IS_RENAME       5
 #define IS_MKDIR        6
 #define IS_RMDIR        7
-#define IS_OP           8
+#define IS_STAT         8
+#define IS_DSTAT        9
+#define IS_OP           10
 
-char *op_list[IS_OP] = {"nothing", "open_close","readdir", "unlink","creat", "rename", "mkdir", "rmdir"};
+char *op_list[IS_OP] = {"nothing", "open_close","readdir", "unlink","creat", "rename", "mkdir", "rmdir", "stat", "dstat"};
 
 #define KB (1024)
 #define MB (1024*1024)
@@ -61,55 +64,95 @@ typedef unsigned long long u64;
 #define ERROR -1
 
 #define DEBUG 0
-#define DEBUG_TIME 1
+#define DEBUG_TIME 0
 #define DEBUG_FSYNC 0
 
-static int print_timeval(struct timeval *tv, struct timeval *tv_end, int op_index){
+#define FNAME_SIZE 128
+#define DIR_SIZE 128
+
+#define DEFAULT_NUM 1
+#define DEFAULT_COUNT DEFAULT_NUM
+#define DEFAULT_THREAD DEFAULT_NUM
+
+struct thread_args{
+    int meta_check;
+    int count;
+    int cur_thread;
+};
+
+void perf_kernel_usage(char *cmd)
+{
+	printf("\nOptions for %s: \n",cmd);
+	printf("   -M: metadata intensive operation to measure (e.g., open_close , readdir , unlink , create , rename , mkdir , rmdir)\n");
+	printf("   -C: repetition to measure metadata intensice operation (default is 1)\n\n");
+	printf("   -T: number of threads (default is 1)\n\n");
+}
+
+long double get_time(struct timeval *tv, struct timeval *tv_end, int op_index){
 
     double tv_s = tv->tv_sec + (tv->tv_usec / 1000000.0);
     double tv_e = tv_end->tv_sec + (tv_end->tv_usec / 1000000.0);
-#if DEBUG_TIME
+#if 0
     printf("    %s start : %lf  micro seconds \n",op_list[op_index],tv_s);
     printf("    %s end   : %lf  micro seconds \n",op_list[op_index],tv_e);
+    printf("    %s : %lf              seconds \n", );
+
 #endif
-    printf("    %s : %lf              seconds \n", op_list[op_index],tv_e -tv_s);
+
+    return (tv_e -tv_s);
 }
 
+double *execution_time=NULL;
 
-int _perf_metadata(char* str,int meta_check,int count)
-{
+void* do_metadata_test(void *data){
+
+    struct thread_args th_args = *(struct thread_args*)data;
 	struct timeval tv, tv_end;
     struct dirent *dir_entry;
     int flags_create, flags_rdwr,fd, i;
+    int meta_check = th_args.meta_check;
+    int count = th_args.count;
+    int cur_thread = th_args.cur_thread;
+    int res,  state;
 
-    char *path_dir = "test_direcpty";
-    char *path_file = "test_file.txt";
     DIR *dir_info;
 
     char buf[20] = {0,};
     char rename_buf[20] = {0,};
+    char str_file[FNAME_SIZE] = {0,};
+    char str_file_name[FNAME_SIZE] ={0,};
+    char str_dir_name[FNAME_SIZE] ={0,};
 
-    s32 state;
-            
+    long double time = 0.0;
+
+    struct stat st;
+    
+
+	sprintf(str_file, "file_allocate_test");
+
     flags_create = O_WRONLY | O_CREAT | O_TRUNC;
     flags_rdwr = O_RDWR;
 
 #if DEBUG
     int test_val = 0;
+#endif
+
+#if DEBUG
     printf("_perf_metadata %d \n",test_val++);
 #endif
+
     if(meta_check != IS_NOTHING){
- 
+
         switch(meta_check){
             case IS_OPEN_CLOSE :
-                printf("metadata operation - open_close operation ...\n");
 
-                fd = open(path_file,flags_create,0644);
-                if (fd < 0){
-                    printf("Error in meta check(IS_OPEN) : %s file open error (before open/close) \n",path_file);
+                sprintf(str_file_name,"./%d/tmp_file.txt",cur_thread);
+                fd = open(str_file_name,flags_create,0644);
+                if (fd < 0){ 
+                    perror("Error in meta check(IS_OPEN) : file open error (before open/close) \n");
                     goto ERRORS;
                 }
-                write(fd,str,strlen(str));
+                write(fd,str_file,strlen(str_file));
 #if DEBUG_FSYNC
                 fsync(fd);
 #endif
@@ -120,9 +163,9 @@ int _perf_metadata(char* str,int meta_check,int count)
                 gettimeofday(&tv,NULL);                                   
                 /* measure point  */
                 for(i=0; i < count ; i++){
-                    fd = open(path_file,flags_rdwr,0644);
+                    fd = open(str_file_name,flags_rdwr,0644);
                     if (fd < 0){
-                        printf("Error in meta check(IS_OPEN) : %s  existing file open error (measuring open/close) \n", path_file);
+                        perror("Error in meta check(IS_OPEN) : existing file open error (measuring open/close) \n");
                         goto ERRORS;
                     }
                     close(fd);
@@ -130,25 +173,25 @@ int _perf_metadata(char* str,int meta_check,int count)
                 /* measure point  */
                 gettimeofday(&tv_end,NULL);
 
-                state = unlink(path_file);
+                state = unlink(str_file_name);
                 if(state != SUCCESS){
-                    printf("Error in meta check(IS_OPEN) : %s file delelte error (after open/close) \n",path_file);
+                    perror("Error in meta check(IS_OPEN) : file delelte error (after open/close) \n");
                     goto ERRORS;
                 }
 
-                print_timeval(&tv,&tv_end,IS_OPEN_CLOSE);
+                time = get_time(&tv,&tv_end,IS_OPEN_CLOSE);
                 break;
 
             case IS_READDIR :
-                printf("metadata operation - readdir operation ...\n");
-                state = mkdir(path_dir, 0755);
+                sprintf(str_dir_name, "./%d/tmp_dir",cur_thread);
+                state = mkdir(str_dir_name, 0755);
                 if(state == ERROR){
-                    printf("Error in meta check(IS_READDIR) : %s mkdir error (before readdir) \n",path_dir);                    
+                    perror("Error in meta check(IS_READDIR) : mkdir error (before readdir) \n");                    
                     goto ERRORS;
                 }
 
                 for(i=0; i < 3 ; i++){
-                    sprintf(buf,"%s/%d.txt",path_dir,i);
+                    sprintf(buf,"./%d/%s/%d.txt",cur_thread,str_dir_name,i);
                     fd = open(buf,flags_create,0644);
                     if (fd < 0){
                         printf("Error in meta check(IS_READDIR) : %s file  create error (before readdir) \n",buf);
@@ -160,7 +203,7 @@ int _perf_metadata(char* str,int meta_check,int count)
 #endif                    
                     close(fd);
                 }
-                dir_info = opendir(path_dir);
+                dir_info = opendir(str_dir_name);
                 i = 0;
 
                 gettimeofday(&tv,NULL);
@@ -177,7 +220,7 @@ int _perf_metadata(char* str,int meta_check,int count)
                 gettimeofday(&tv_end,NULL);
 
                 for(i=0; i < 3 ; i++){
-                    sprintf(buf,"%s/%d.txt",path_dir,i);
+                    sprintf(buf,"./%d/%s/%d.txt",cur_thread,str_dir_name,i);
                     state = unlink(buf);
                     if(state != SUCCESS){
                         printf("Error in meta check(IS_READDIR) : %s unlink error (after readdir) \n",buf);
@@ -187,20 +230,19 @@ int _perf_metadata(char* str,int meta_check,int count)
                     memset(buf,0x0,sizeof(buf));
                 }
 
-                state = rmdir(path_dir);
+                state = rmdir(str_dir_name);
                 if(state == ERROR){
-                    printf("Error in meta check(IS_READDIR) : %s  rmdir error (after readdir) \n",path_dir);                    
+                    perror("Error in meta check(IS_READDIR) : %s  rmdir error (after readdir) \n");                    
                     goto ERRORS;
                 }
-                print_timeval(&tv,&tv_end,IS_READDIR);
+                time = get_time(&tv,&tv_end,IS_READDIR);
                 break;
 
                 /* measure the unlink operation to empty file */
             case IS_UNLINK :
-                printf("metadata operation - unlink operation ...\n");
 
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d.txt",i);
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
                     fd = open(buf,flags_create,0644);
                     if (fd < 0){
                         printf("Error in meta check(IS_UNLINK) : %s create error (before unlink) \n",buf);
@@ -216,7 +258,7 @@ int _perf_metadata(char* str,int meta_check,int count)
                 gettimeofday(&tv,NULL);
                 /* measure point  */
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d.txt",i);
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
                     state = unlink(buf);
                     if(state == ERROR){
                         printf("Error in meta check(IS_UNLINK) : %s file unlink error (measuring unlink) \n", buf);
@@ -226,17 +268,16 @@ int _perf_metadata(char* str,int meta_check,int count)
                 }
                 /* measure point  */
                 gettimeofday(&tv_end,NULL);
-                print_timeval(&tv,&tv_end,IS_UNLINK);
+                time = get_time(&tv,&tv_end,IS_UNLINK);
                 break;
 
                 /* measure the create operation to empty file */
             case IS_CREATE :
-                printf("metadata operation - create operation ...\n");
 
                 gettimeofday(&tv,NULL);
                 /* measure point  */
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d.txt",i);
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
                     fd = open(buf,flags_create,0644);
                     if (fd < 0){
                         printf("Error in meta check(IS_CREATE) : %s creat error (measuring create) \n",buf);
@@ -253,7 +294,7 @@ int _perf_metadata(char* str,int meta_check,int count)
                 gettimeofday(&tv_end,NULL);
 
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d.txt",i);
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
                     state = unlink(buf);
                     if(state == ERROR){
                         printf("Error in meta check(IS_CREATE) : %s unlink error (after create) \n", buf);
@@ -261,15 +302,14 @@ int _perf_metadata(char* str,int meta_check,int count)
                     }
                     memset(buf,0x0,sizeof(buf));
                 }
-                print_timeval(&tv,&tv_end,IS_CREATE);
+                time = get_time(&tv,&tv_end,IS_CREATE);
 
                 break;
 
                 /* measure the rename operation to existing file */
             case IS_RENAME :
-                printf("metadata operation - rename operation ...\n");
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d.txt",i);
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
                     fd = open(buf,flags_create,0664);
                     if (fd < 0){
                         printf("Error in meta check(IS_RENAME) : %s  file create error (before rename) \n", buf);
@@ -286,8 +326,8 @@ int _perf_metadata(char* str,int meta_check,int count)
 
                 /* measure point  */
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d.txt",i);
-                    sprintf(rename_buf, "%d_rename.txt",i);
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
+                    sprintf(rename_buf, "./%d/%d_rename.txt",cur_thread,i);
                     state = rename(buf,rename_buf); 
                     if(state == ERROR){
                         printf("Error in meta check(IS_RENAME) : rename %s to %s  error (measuring rename) \n", buf,rename_buf);
@@ -299,7 +339,7 @@ int _perf_metadata(char* str,int meta_check,int count)
 
                 gettimeofday(&tv_end,NULL);
                 for(i=0; i < count ; i++){
-                    sprintf(rename_buf, "%d_rename.txt",i);
+                    sprintf(rename_buf, "./%d/%d_rename.txt",cur_thread,i);
                     state = unlink(rename_buf);
                     if(state == ERROR){
                         printf("Error in meta check(IS_RENAME) : %s  file delelte error (after rename) \n",rename_buf);
@@ -308,17 +348,16 @@ int _perf_metadata(char* str,int meta_check,int count)
                     memset(rename_buf,0x0,sizeof(rename_buf));
                 }
 
-                print_timeval(&tv,&tv_end,IS_RENAME);
+                time = get_time(&tv,&tv_end,IS_RENAME);
                 break;
 
             case IS_MKDIR :
-                printf("metadata operation - mkdir operation ...\n");
 
                 gettimeofday(&tv,NULL);
 
                 /* measure point  */
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d",i);
+                    sprintf(buf,"./%d/%d",cur_thread,i);
                     state = mkdir(buf, 0755);
                     if(state == ERROR){
                         printf("Error in meta check(IS_MKDIR) : %s  directory create error (measuring mkdir) \n",buf);
@@ -331,7 +370,7 @@ int _perf_metadata(char* str,int meta_check,int count)
                 gettimeofday(&tv_end,NULL);
 
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d",i);
+                    sprintf(buf,"./%d/%d",cur_thread,i);
                     state = rmdir(buf);
                     if(state == ERROR){
                         printf("Error in meta check(IS_MKDIR) : %s  directory delete error (after mkdir) \n", buf);
@@ -340,13 +379,12 @@ int _perf_metadata(char* str,int meta_check,int count)
                     memset(buf,0x0,sizeof(buf));
                 }
 
-                print_timeval(&tv,&tv_end,IS_MKDIR);               
+                time = get_time(&tv,&tv_end,IS_MKDIR);               
                 break;
             case IS_RMDIR :
-                printf("metadata operation - rmdir operation ...\n");
 
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d",i);
+                    sprintf(buf,"./%d/%d",cur_thread,i);
                     state = mkdir(buf, 0755);                
                     if(state == ERROR){
                         printf("Error in meta check(IS_RMDIR) : %s  directory create error (before rmdir) \n",buf );
@@ -358,7 +396,7 @@ int _perf_metadata(char* str,int meta_check,int count)
 
                 /* measure point  */
                 for(i=0; i < count ; i++){
-                    sprintf(buf,"%d",i);
+                    sprintf(buf,"./%d/%d",cur_thread,i);
                     state = rmdir(buf);
                     if(state == ERROR){
                         printf("Error in meta check(IS_RMDIR) : %s  directory delete error (measuring rmdir) \n",buf );
@@ -370,8 +408,97 @@ int _perf_metadata(char* str,int meta_check,int count)
                 /* measure point */
                 gettimeofday(&tv_end,NULL);
 
-                print_timeval(&tv,&tv_end,IS_RMDIR);               
+                time = get_time(&tv,&tv_end,IS_RMDIR);               
                 break;
+
+            case IS_STAT :
+                 gettimeofday(&tv,NULL);                 
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
+                    fd = open(buf,flags_create,0644);
+                    if (fd < 0){
+                        printf("Error in meta check(IS_STAT) : stat error (before stat) \n");
+                        goto ERRORS;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+#if DEBUG_FSYNC
+                    fsync(fd);
+#endif              
+                    close(fd);
+                }
+        
+//                 gettimeofday(&tv,NULL);                 
+                /* measure point  */
+                for(i=0; i < count ; i++){
+                    memset(&st, 0x0, sizeof(struct stat));
+                    memset(buf,0x0,sizeof(buf));
+                    sprintf(buf,"./%d/%d.txt",cur_thread,i);
+                    state = stat(buf, &st);
+                    if(state == ERROR){
+                        printf("Error in meta check(IS_STAT) : %s  stat error (measuring stat) \n",buf );
+                        goto ERRORS;
+                    }
+                }
+                /* measure point */
+//                gettimeofday(&tv_end,NULL);
+              
+                for(i=0; i < count ; i++){
+                    sprintf(buf, "./%d/%d.txt",cur_thread,i);
+                    state = unlink(buf);
+                    if(state == ERROR){
+                        printf("Error in meta check(IS_STAT) : stat error (after stat) \n");
+                        goto ERRORS;
+                    }
+                    memset(rename_buf,0x0,sizeof(buf));
+                }
+                gettimeofday(&tv_end,NULL);
+                time = get_time(&tv,&tv_end,IS_STAT);
+                break;
+
+            case IS_DSTAT :
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"./%d/%d",cur_thread,i);
+                    state = mkdir(buf, 0755);                
+                    if(state == ERROR){
+                        printf("Error in meta check(IS_DSATA) : %s  directory create error (before rmdir) \n",buf );
+                        goto ERRORS;
+                    }                        
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+                gettimeofday(&tv,NULL);
+                /* measure point  */
+                
+                for(i=0; i < count ; i++){
+                    memset(&st, 0x0, sizeof(struct stat));
+                    memset(buf,0x0,sizeof(buf));
+                    sprintf(buf,"./%d/%d",cur_thread,i);
+                    state = stat(buf, &st);
+                    if(state == ERROR){
+                        printf("Error in meta check(IS_DSTAT) : %s  stat error (measuring stat) \n",buf );
+                        goto ERRORS;
+                    }
+                }
+
+                /* measure point */
+                gettimeofday(&tv_end,NULL);
+
+                for(i=0; i < count ; i++){
+                    sprintf(buf,"./%d/%d",cur_thread,i);
+                    state = rmdir(buf);
+                    if(state == ERROR){
+                        printf("Error in meta check(IS_DSTAT) : %s  directory delete error (measuring rmdir) \n",buf );
+                        goto ERRORS;
+                    }
+                    memset(buf,0x0,sizeof(buf));
+                }
+
+
+
+                time = get_time(&tv,&tv_end,IS_RMDIR);               
+                break;
+
 
             default:
                 printf("Invalid metadata type setting  Error\n");
@@ -379,25 +506,89 @@ int _perf_metadata(char* str,int meta_check,int count)
 
         }
 
+        execution_time[cur_thread] = time;
     }
-     
-    return SUCCESS;
+    printf("End thread %d : %Lf sec \n", cur_thread,time);
+    return (void*)SUCCESS;
 
 ERRORS:
 
-	return ERROR;
+	return (void*)ERROR;
+
 }
 
-#define FNAME_SIZE 128
+int _perf_metadata(int meta_check,int count, int threads)
+{
+    pthread_t *pthreads = NULL;
+    int res=-1;
+    int i, state;        
+    char str_dir[1024] = {0,};
+    long double result= 0.0;
 
-static int perf_metadata(s32 meta_check, s32 count)
+    execution_time = (double*)malloc(sizeof(double) * threads);
+    memset(execution_time, 0x0, sizeof(double)*threads);
+
+    pthreads = (pthread_t*)malloc(sizeof(pthread_t)*threads);
+    memset(pthreads, 0x0, sizeof(pthread_t) * threads);
+
+    for(i=0 ; i< threads ; i++){
+        memset(str_dir, 0x0, 1024);
+        sprintf(str_dir,"%d",i);
+        state = mkdir(str_dir, 0755);
+        if(state == ERROR){
+            perror("_perf_metadata - mkdir");
+            printf(" _perf_metadata - mkdir error before test in %d \n", i);
+            return ERROR;
+        }
+    }
+
+    struct thread_args *args = (struct thread_args*)malloc(sizeof(struct thread_args)*threads);
+    for(i = 0; i< threads ; i++){
+        args[i].meta_check = meta_check;
+        args[i].count = count;
+        args[i].cur_thread = i;
+    }
+
+    for(i = 0 ; i < threads; i++){ 
+        res = pthread_create(&pthreads[i], NULL, do_metadata_test,(void*)&args[i]);
+        if(res == ERROR){
+            printf(" Error: _perf_metadata - pthread_create error \n");
+            goto TEST_ERROR;
+        }
+    }
+
+    for(i = 0 ; i < threads ; i++){
+        pthread_join(pthreads[i], (void**)&res);
+    }
+ 
+    for(i=0 ; i < threads ; i++){
+        memset(str_dir, 0x0, 1024);
+        sprintf(str_dir,"%d",i);
+        state = rmdir(str_dir);
+        if(state == ERROR){
+            printf(" _perf_metadata - rmdir error after test  %d \n", i);
+            goto TEST_ERROR;
+        }
+    }
+    
+    for(i=0 ; i< threads ; i++){
+        result += execution_time[i];
+    }
+
+    printf("execution_time : %Lf sec \n",result);
+
+    return SUCCESS;
+TEST_ERROR:
+    free(pthreads);
+    return ERROR;
+}
+
+
+static int perf_metadata(s32 meta_check, s32 count, s32 threads)
 {	
-	char str[FNAME_SIZE];
-	s32 res;
+    int res;
 
-	sprintf(str, "file_allocate_test");
-
-	res = _perf_metadata(str,meta_check,count);
+	res = _perf_metadata(meta_check,count, threads);
 	if (res < 0)
 	{
 		printf(" Error: metadata DEBUG \n");
@@ -407,17 +598,9 @@ static int perf_metadata(s32 meta_check, s32 count)
 	return SUCCESS;
 }
 
-void perf_kernel_usage(char *cmd)
-{
-	printf("\nOptions for %s: \n",cmd);
-	printf("   -M: metadata intensive operation to measure (e.g., open_close , readdir , unlink , create , rename , mkdir , rmdir)\n");
-	printf("   -C: repetition to measure metadata intensice operation (default is 1)\n\n");
-}
-
-
 int main(int argc, char *argv[])
 {
-	int ret = 0, count = 0;  
+	int ret = 0, count = DEFAULT_COUNT, threads = DEFAULT_THREAD;  
     int meta_check = IS_NOTHING; 
 	char op;
     int need_debug=0;
@@ -432,7 +615,7 @@ int main(int argc, char *argv[])
 	
 	/* optind must be reset before using getopt() */
 	optind = 0;
-	while ((op = getopt(argc,argv,"M:C:")) != -1) {
+	while ((op = getopt(argc,argv,"M:C:T:")) != -1) {
         switch (op) {
             case 'M':
                 if (!strcmp(optarg, "open_close")){
@@ -452,6 +635,10 @@ int main(int argc, char *argv[])
                     meta_check = IS_MKDIR;
                 }else if (!strcmp(optarg, "rmdir")){
                     meta_check = IS_RMDIR;
+                }else if (!strcmp(optarg, "stat")){
+                    meta_check = IS_STAT;
+                }else if (!strcmp(optarg, "dstat")){
+                    meta_check = IS_DSTAT;
                 }else{
                     fprintf( stderr, " Invalid ioengine type = %s", optarg);
                     goto INVALID_ARGS;
@@ -459,6 +646,9 @@ int main(int argc, char *argv[])
                 break;
             case 'C':
                 count = atoi(optarg);
+                break;
+            case 'T':
+                threads= atoi(optarg);
                 break;
             default:
                 goto INVALID_ARGS;
@@ -475,7 +665,7 @@ int main(int argc, char *argv[])
 #if DEBUG
         printf("main %d\n",test_val++);
 #endif
-		ret = perf_metadata(meta_check, count);
+		ret = perf_metadata(meta_check, count, threads);
 #if DEBUG
         printf("main %d\n",test_val++);
 #endif
