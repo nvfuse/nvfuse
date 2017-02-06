@@ -655,7 +655,7 @@ int bp_split_data_node(master_node_t *master,
 
 	if (seq_detection)
 	{
-	//	printf(" Need to optimize that data node contains consecutive keys \n");
+		printf(" Need to optimize that data node contains consecutive keys \n");
 	}
 #endif
 
@@ -1480,7 +1480,11 @@ int bp_remove_key(master_node_t *master, bkey_t *key) {
 	B_PAIR_INIT(dp->i_pair, i);
 	dp->i_num--;
 
+#ifdef NVFUSE_USE_DELAYED_REDISTRIBUTION_BPTREE
+	if (dp->i_num >= 1)	
+#else
 	if (dp->i_num >= (master->m_fanout / 2 + 1))
+#endif
 	{//INDEX_MIN_WAY
 		B_WRITE(master, master->m_cur, master->m_cur->i_offset);
 		if (dp != master->m_cur)
@@ -1491,6 +1495,7 @@ int bp_remove_key(master_node_t *master, bkey_t *key) {
 	}
 	else
 	{
+		//printf(" key merge num = %d\n ", dp->i_num);
 		bp_merge_key_tree(master, key, dp, i);
 	}
 		
