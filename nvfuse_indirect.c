@@ -282,11 +282,13 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		}
 
 		//printf("1. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
+		#if 1
 		if (once)
 		{
 			nvfuse_move_curr_seg_id(sb, seg_id, 0 /* data type */);
 			once--;
 		}
+		#endif
 		//printf("2. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
 		seg_id = nvfuse_get_next_seg_id(sb, 0 /* data type */);
 		//printf("3. alloc block: cur seg = %d, next_seg = %d \n", seg_id, next_id);

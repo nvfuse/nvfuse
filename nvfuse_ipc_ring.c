@@ -646,6 +646,7 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 	
 	switch (ipc_msg->opcode) {
 			case CONTAINER_ALLOC_REQ:
+			case CONTAINER_RELEASE_REQ:
 			case HEALTH_CHECK_REQ:
 			case BUFFER_ALLOC_REQ:
 				break;
@@ -666,6 +667,7 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 	
 	switch (ipc_msg->opcode) {
 			case CONTAINER_ALLOC_CPL:
+			case CONTAINER_RELEASE_CPL:
 			case HEALTH_CHECK_CPL:
 			case BUFFER_ALLOC_CPL:
 				break;

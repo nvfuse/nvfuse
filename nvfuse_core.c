@@ -306,7 +306,9 @@ void nvfuse_move_curr_seg_id(struct nvfuse_superblock *sb, s32 seg_id, s32 is_in
 		assert(first_node != NULL);
 		assert(first_node != &sb->sb_seg_list);
 
-		do {		
+		do {
+			//if (is_inode == 0)
+			//	nvfuse_print_seg_list(sb);
 			seg_node = container_of(first_node, struct seg_node, list);
 			if (seg_node->seg_id == seg_id)
 			{
@@ -471,6 +473,15 @@ void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 	}	
 	assert(ss->ss_free_inodes <= ss->ss_max_inodes);
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);	
+
+#ifndef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT	
+	//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
+	if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
+	{
+		//printf(" %s Deallocate seg = %d \n", __FUNCTION__, seg_id);
+		nvfuse_remove_seg(sb, seg_id);		
+	}
+#endif
 }
 
 void nvfuse_dec_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
@@ -518,11 +529,12 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 	assert(sb->sb_no_of_used_blocks >= 0);
 
 	/* removal of unused segment to primary process (e.g., control plane)*/
-#ifdef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
-	if (ss->ss_free_blocks + ss->ss_dtable_start == ss->ss_max_blocks)
+#ifndef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
+	//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
+	if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
 	{
-		nvfuse_remove_seg(sb, seg_id);
-		//printf(" Deallocate seg = %d \n", seg_id);
+		//printf(" %s Deallocate seg = %d \n", __FUNCTION__, seg_id);
+		nvfuse_remove_seg(sb, seg_id);		
 	}
 #endif
 
@@ -1280,7 +1292,8 @@ s32 nvfuse_remove_seg(struct nvfuse_superblock *sb, u32 seg_id)
 		return 0;
 
 	list_for_each_entry_safe(node, temp, head, list) {
-		if (node->seg_id == seg_id) {			
+		if (node->seg_id == seg_id) {
+			//printf(" found seg = %d %d %p\n", seg_id, node->seg_id, node);
 			if (&node->list == sb->sb_seg_search_ptr_for_inode)
 			{
 				next = node->list.next;
@@ -1294,14 +1307,14 @@ s32 nvfuse_remove_seg(struct nvfuse_superblock *sb, u32 seg_id)
 				next = node->list.next;
 				while(next == &sb->sb_seg_list)
 					next = next->next;
-				sb->sb_seg_search_ptr_for_inode = next;
+				sb->sb_seg_search_ptr_for_data = next;
 			}
 
 			list_del(&node->list);
 			break;	
 		}
 	}
-
+	//printf(" found seg = %d %p\n", node->seg_id, node);
 	assert(node->seg_id == seg_id);
 	
 	/* deallocation of memory */

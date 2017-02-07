@@ -179,6 +179,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 		
 		switch (ipc_msg->opcode) {
 			case CONTAINER_ALLOC_REQ:
+			case CONTAINER_RELEASE_REQ:
 			case HEALTH_CHECK_REQ:
 			case BUFFER_ALLOC_REQ:
 				break;
@@ -195,6 +196,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 
 		switch (ipc_msg->opcode) {
 			case CONTAINER_ALLOC_CPL:
+			case CONTAINER_RELEASE_CPL:
 			case HEALTH_CHECK_CPL:
 			case BUFFER_ALLOC_CPL:
 				break;
@@ -256,6 +258,8 @@ int main(int argc, char *argv[])
 	{
 	    printf(" Warning: This process is not a primary process!.\n");
 	}
+	
+	rte_malloc_dump_stats(stdout, NULL);
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 	
