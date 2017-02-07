@@ -237,7 +237,7 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nv
 	if(!bc->bc_pno)
 	{	/* logical to physical address translation */
 		bc->bc_pno = nvfuse_get_pbn(sb, ictx, ino, lblock);
-		assert(bc->bc_pno);
+		//assert(bc->bc_pno);
 	}
 
 	if(bc->bc_pno)
@@ -253,7 +253,7 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nv
 		/* FIXME: how can we handle this case? */
 		printf(" Error: bc has no pblock addr \n");
 		bc->bc_pno = nvfuse_get_pbn(sb, ictx, ino, lblock);		
-		assert(0);
+		//assert(0);
 	}
 	
 	bh->bh_bc = bc;
@@ -270,7 +270,7 @@ FOUND_BH:;
 	bc->bc_lbno = lblock;
 	bc->bc_ref++;
 	assert(bc->bc_ref >= 0);
-	assert(bc->bc_pno);
+	//assert(bc->bc_pno);
 	assert(bh->bh_bc);
 
 	if (bc->bc_ref && bc->bc_list_type != BUFFER_TYPE_REF)
