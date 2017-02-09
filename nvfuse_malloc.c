@@ -46,6 +46,7 @@ void *nvfuse_alloc_aligned_buffer(size_t size)
 	p = rte_malloc(NULL, size, 0x200);
 	if (p == NULL) {
 		fprintf(stderr, "rte_malloc failed\n");
+		rte_malloc_dump_stats(stdout, NULL);
 		return NULL;
 	}
 #endif

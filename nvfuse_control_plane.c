@@ -27,6 +27,7 @@
 #include <rte_eal.h>
 #include <rte_lcore.h>
 #include <rte_memcpy.h>
+#include <rte_malloc.h>
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
@@ -714,6 +715,7 @@ s32 nvfuse_control_plane_buffer_alloc(struct nvfuse_handle *nvh, s32 size)
     if (cp->curr_buffer_size < size)
     {
         fprintf( stderr, " buffers are not sufficient. \n");
+		rte_malloc_dump_stats(stdout, NULL);
         return 0;
     }
 	

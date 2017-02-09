@@ -53,14 +53,19 @@
 #define HASH_NUM (52631)
 
 /* Default Buffer Cache Size */
-#define NVFUSE_BUFFER_SIZE (16) //16MB
+#define NVFUSE_INITIAL_BUFFER_SIZE_DATA (128) //128MB
+#define NVFUSE_INITIAL_BUFFER_SIZE_CONTROL (16) //16MB
+
+/* Maximum Buffer Size per Data Plane*/
+#define NVFUSE_MAX_BUFFER_SIZE_DATA (2048) // 2048MB
+
 /* Default Inode Context Size */
 #define NVFUSE_ICTXC_SIZE (32*1024)
 
 /* RATIO SEGMENT TO BUFFER Cache */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001) /* data optimized */
-#define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
-//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
+//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
+#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
 
 /* Buffer Head Mempool Settings */
 #define NVFUSE_BH_MEMPOOL_TOTAL_SIZE	(0x10000) /* 256MB */

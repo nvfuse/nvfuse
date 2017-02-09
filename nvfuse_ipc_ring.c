@@ -47,6 +47,7 @@
 //#include "mp_commands.h"
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
+#include "nvfuse_buffer_cache.h"
 
 #include "nvfuse_ipc_ring.h"
 
@@ -739,11 +740,21 @@ s32 nvfuse_send_app_unregister_req(struct nvfuse_handle *nvh, s32 destroy_contai
 s32 nvfuse_send_alloc_buffer_req(struct nvfuse_handle *nvh, s32 buffer_size)
 {
 	struct nvfuse_superblock *sb = &nvh->nvh_sb;
+	struct nvfuse_buffer_manager *bm = sb->sb_bm;	
 	struct rte_ring *send_ring, *recv_ring;
 	struct rte_mempool *mempool;		
 	union nvfuse_ipc_msg *ipc_msg;
+	s32 remain_buffers;
 	s32 ret;	
 
+	remain_buffers = NVFUSE_MAX_BUFFER_SIZE_DATA * 256 - bm->bm_cache_size;
+
+	buffer_size = (buffer_size <= remain_buffers) ? buffer_size : remain_buffers;
+	if (buffer_size <= 0)
+		return 0;
+
+	assert (buffer_size > 0);
+	
 	/* INITIALIZATION OF TX/RX RING BUFFERS */
 	send_ring = nvfuse_ipc_get_sendq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
 	recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);

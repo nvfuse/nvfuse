@@ -16,6 +16,7 @@
 #include "spdk/env.h"
 #include <rte_lcore.h>
 #include <rte_mempool.h>
+#include <rte_malloc.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -363,6 +364,12 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 	
 	assert (nr > 0);
 	
+	if (bm->bm_cache_size / 256 >= NVFUSE_MAX_BUFFER_SIZE_DATA)
+	{
+		printf(" Current buffer size = %.3f \n", (double)bm->bm_cache_size / 256);
+		return 0;
+	}
+
 	//printf(" Add buffer cache (%d 4K pages) to process\n", nr);
 
 	while (nr--)
@@ -393,6 +400,7 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 		bm->bm_cache_size++;
 	}	
 
+	printf(" Buffer Size = %.3f MB\n", (double)bm->bm_cache_size / 256);
 	return 0;
 }
 
@@ -509,6 +517,8 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 		}
 	}	
 	
+	rte_malloc_dump_stats(stdout, NULL);
+
 	return 0;
 }
 

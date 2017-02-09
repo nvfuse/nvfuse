@@ -634,7 +634,7 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 			/* insert allocated container to process */
 			nvfuse_add_seg(sb, container_id);
 			/* try to allocate buffers from primary process */
-			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);			
+			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
 			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
 			if (nr_buffers > 0)
 			{
@@ -1569,8 +1569,10 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 			printf(" Allocation of BP_MEMPOOL type = %d %p \n", type, sb->bp_mempool[type]);
 		}
 	}
-
-	res = nvfuse_init_buffer_cache(sb, NVFUSE_BUFFER_SIZE);
+	if (spdk_process_is_primary())
+		res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_CONTROL);
+	else
+		res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_DATA);
 	if (res < 0)
 	{
 		printf(" Error: initialization of buffer cache \n");
