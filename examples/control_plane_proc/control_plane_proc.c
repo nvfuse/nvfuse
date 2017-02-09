@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdlib.h>
 
 //NDEBUG
 #include <assert.h>
@@ -43,6 +44,8 @@
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_control_plane.h"
 #include "nvfuse_aio.h"
+#include "nvfuse_misc.h"
+#include "nvfuse_gettimeofday.h"
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
@@ -229,6 +232,9 @@ int main(int argc, char *argv[])
 	struct nvfuse_io_manager io_manager;
 	struct nvfuse_ipc_context ipc_ctx;
 	struct nvfuse_params params;
+	struct perf_stat_rusage rusage_stat;
+	struct timeval tv;
+	double execution_time;
 	int ret;
 
 	/* register signal handler (e.g., Ctrl + C) */
@@ -249,6 +255,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
+	
+	gettimeofday(&tv, NULL);	
+	getrusage(RUSAGE_THREAD, &rusage_stat.start);
 
 	if (spdk_process_is_primary())
 	{
@@ -258,8 +267,13 @@ int main(int argc, char *argv[])
 	{
 	    printf(" Warning: This process is not a primary process!.\n");
 	}
-	
-	rte_malloc_dump_stats(stdout, NULL);
+	getrusage(RUSAGE_THREAD, &rusage_stat.end);
+	nvfuse_rusage_diff(&rusage_stat.start, &rusage_stat.end, &rusage_stat.result);
+	execution_time = time_since_now(&tv);
+	printf(" exectime = %f \n", execution_time);
+	print_rusage(&rusage_stat.result, "control_plane", 1, execution_time);
+
+	//rte_malloc_dump_stats(stdout, NULL);
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 	

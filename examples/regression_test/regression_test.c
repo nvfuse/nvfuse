@@ -679,7 +679,10 @@ static int rt_main(void *arg)
 	struct rte_ring *stat_rx_ring;
 	struct ret_mempool *stat_message_pool;
 	union perf_stat perf_stat;	
+	union perf_stat _perf_stat_rusage;
+	struct perf_stat_rusage *rusage_stat = &_perf_stat_rusage;
 	struct timeval tv;
+	double execution_time;
 	s32 ret;
 
 	printf(" Perform test %s thread id = %d... \n", rt_decode_test_type(test_type), (s32)arg);
@@ -691,6 +694,7 @@ static int rt_main(void *arg)
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
+
 	/* stat ring lookup */
 	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RT_STAT);
 	if (ret < 0) 
@@ -700,10 +704,10 @@ static int rt_main(void *arg)
 
 	cur_rt_ctx = rt_ctx;
 
+	getrusage(RUSAGE_THREAD, &rusage_stat->start);
 	/* Test Case Handler with Regression Test Context Array */
 	while (cur_rt_ctx < rt_ctx + NUM_ELEMENTS(rt_ctx))
-	{
-		double execution_time;
+	{	
 		s32 index = cur_rt_ctx - rt_ctx + 1;
 
 		printf(" lcore = %d Regression Test %d: %s\n", rte_lcore_id(), index, cur_rt_ctx->test_name);
@@ -731,11 +735,26 @@ static int rt_main(void *arg)
 		printf(" lcore = %d Regression Test %d: passed successfully.\n\n", rte_lcore_id(), index);
 		cur_rt_ctx++;
 	}
-	
+	/* rusage */
+	getrusage(RUSAGE_THREAD, &rusage_stat->end);
+	nvfuse_rusage_diff(&rusage_stat->start, &rusage_stat->end, &rusage_stat->result);
+	print_rusage(&rusage_stat->result, "test", 1, execution_time);
+	//rusage_stat->tag = 0xDEADDEAD;
+
+	{
+		/* stat ring lookup */
+		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RUSAGE_STAT);
+		if (ret < 0) 
+			return -1;
+
+		nvfuse_stat_ring_put(stat_rx_ring, stat_message_pool, rusage_stat);
+	}
+
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 RET:
 	return 0;
 }
+
 
 static void print_stats(s32 num_cores, s32 num_tc)
 {
@@ -802,7 +821,10 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		printf(" Avg execution = %.6f sec \n", tc, rt_ctx[tc].test_name, tc_total / num_cores);
 		printf("\n");
 	}
-	printf("Summary: Avg execution = %.6f sec\n", group_exec_time / num_cores);
+	
+	group_exec_time /= num_cores;
+
+	printf("Summary: Avg execution = %.6f sec\n", group_exec_time);
 	
 	free(per_core_stat);
 
@@ -874,10 +896,50 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			printf(" Core %d BUFFER Free Latency = %f us\n", i, (double)cur_stat->total_tsc[BUFFER_FREE_REQ]/cur_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
 		}
 
-		printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-		printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
-		printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-		printf(" Avg BUF FER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
+		if (num_cores > 1)
+		{
+			printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+			printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
+			printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+			printf(" Avg BUF FER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
+		}		
+	}
+
+	printf("\n");
+	/* Rusage Stat */
+	{
+		union perf_stat _sum_stat;
+		struct perf_stat_rusage *sum_stat = &_sum_stat;
+		struct perf_stat_rusage *cur_stat;
+		s32 type;
+
+		memset(sum_stat, 0x00, sizeof(struct perf_stat_rusage));
+
+		/* stat ring lookup */
+		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RUSAGE_STAT);
+		if (ret < 0) 
+			return -1;
+
+		/* gather rusage stats */
+		for (i = 0;i < num_cores; i++) {
+			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
+			if (ret < 0)
+				return -1;
+						
+			cur_stat = (struct perf_stat_rusage *)&temp_stat;
+			
+			//(group_exec_time / num_cores);			
+			sprintf(name, "core %d", i);
+			print_rusage(&cur_stat->result, name, 1, group_exec_time);
+			
+			nvfuse_rusage_add(&cur_stat->result, &sum_stat->result);
+			//printf(" tag = %x\n", cur_stat->tag);
+		}
+
+		if (num_cores > 1)
+		{
+			print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
+		}
 	}
 }
 

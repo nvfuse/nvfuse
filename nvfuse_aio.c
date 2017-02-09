@@ -24,6 +24,8 @@
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_gettimeofday.h"
+#include "nvfuse_misc.h"
+
 #ifdef SPDK_ENABLED
 #include "spdk/env.h"
 #include "rte_lcore.h"
@@ -78,17 +80,26 @@ void nvfuse_aio_queue_deinit(struct nvfuse_handle *nvh, struct nvfuse_aio_queue 
 	double average_latency, min_latency, max_latency;
 	u64 tsc_rate = spdk_get_ticks_hz();
 	struct nvfuse_ipc_context *ipc_ctx = &nvh->nvh_ipc_ctx;
+	struct rusage rusage_end;
 
 	aioq->aio_stat->aio_end_tsc = spdk_get_ticks();
 
 	aioq->aio_stat->aio_execution_tsc = (aioq->aio_stat->aio_end_tsc - aioq->aio_stat->aio_start_tsc);
-	getrusage(RUSAGE_THREAD, &aioq->aio_stat->aio_end_rusage);
+
+	getrusage(RUSAGE_THREAD, &rusage_end);
+	
+	#if 0
 	timeval_subtract(&aioq->aio_stat->aio_sys_time, 
 					&aioq->aio_stat->aio_end_rusage.ru_stime, 
 					&aioq->aio_stat->aio_start_rusage.ru_stime);
+
 	timeval_subtract(&aioq->aio_stat->aio_usr_time, 
 					&aioq->aio_stat->aio_end_rusage.ru_utime, 
 					&aioq->aio_stat->aio_start_rusage.ru_utime);
+	#endif
+
+	nvfuse_rusage_diff(&aioq->aio_stat->aio_start_rusage, &rusage_end, 
+						&aioq->aio_stat->aio_result_rusage);
 	
 	assert(aioq->aio_stat->aio_lat_total_count > 0);
 	assert(aioq->aio_stat->aio_total_size > 0);

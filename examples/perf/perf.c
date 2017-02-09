@@ -221,6 +221,8 @@ static void print_stats(s32 num_cores)
 
 		timeval_add(&sum_stat.stat_aio.aio_sys_time, &cur_stat->stat_aio.aio_sys_time);
 		timeval_add(&sum_stat.stat_aio.aio_usr_time, &cur_stat->stat_aio.aio_usr_time);
+
+		nvfuse_rusage_add(&sum_stat.stat_aio.aio_result_rusage, &cur_stat->stat_aio.aio_result_rusage);
 	}
 	
 	sum_stat.stat_aio.aio_execution_tsc /= num_cores;

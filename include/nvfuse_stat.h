@@ -24,7 +24,8 @@ enum stat_type{
     AIO_STAT		= 1,
     RT_STAT			= 2,
     IPC_STAT        = 3,
-    NUM_STAT_TYPE	= 4
+    RUSAGE_STAT     = 4,
+    NUM_STAT_TYPE	= 5
 };
 
 /* aio perf stat */
@@ -43,7 +44,7 @@ struct perf_stat_aio {
     u64 aio_lat_max_tsc;
     u64 aio_total_size;
     struct rusage aio_start_rusage;
-    struct rusage aio_end_rusage;
+    struct rusage aio_result_rusage;
     struct timeval aio_usr_time;
     struct timeval aio_sys_time;
 };
@@ -79,6 +80,13 @@ struct perf_stat_ipc {
     u64 total_count[22];
 };
 
+struct perf_stat_rusage {
+    struct rusage start;
+    struct rusage end;
+    struct rusage result;
+    u32 tag;
+};
+
 union perf_stat {
     
     struct {
@@ -91,6 +99,7 @@ union perf_stat {
     struct perf_stat_rt stat_rt;
     struct perf_stat_dev stat_dev;    
     struct perf_stat_ipc stat_ipc;
+    struct perf_stat_rusage stat_rusage;
 };
 
 

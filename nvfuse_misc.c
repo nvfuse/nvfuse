@@ -603,3 +603,80 @@ s64 nvfuse_rand()
 #endif
 	return val;
 }
+
+void nvfuse_rusage_diff(struct rusage *x, struct rusage *y, struct rusage *result)
+{
+	timeval_subtract(&result->ru_stime,
+					&y->ru_stime,
+					&x->ru_stime);
+
+	timeval_subtract(&result->ru_utime,
+					&y->ru_utime,
+					&x->ru_utime);
+
+	result->ru_maxrss = y->ru_maxrss - x->ru_maxrss;        /* maximum resident set size */
+	result->ru_ixrss = y->ru_ixrss - x->ru_ixrss;         /* integral shared memory size */
+    result->ru_idrss = y->ru_idrss - x->ru_idrss;         /* integral unshared data size */
+	result->ru_isrss = y->ru_isrss - x->ru_isrss;         /* integral unshared stack size */
+    result->ru_minflt = y->ru_minflt - x->ru_minflt;        /* page reclaims (soft page faults) */
+    result->ru_majflt = y->ru_majflt - x->ru_majflt;        /* page faults (hard page faults) */
+    result->ru_nswap = y->ru_nswap - x->ru_nswap;         /* swaps */
+    result->ru_inblock = y->ru_inblock - x->ru_inblock;       /* block input operations */
+	result->ru_oublock = y->ru_oublock - x->ru_oublock;       /* block output operations */
+    result->ru_msgsnd = y->ru_msgsnd - x->ru_msgsnd;        /* IPC messages sent */    
+    result->ru_msgrcv = y->ru_msgrcv - x->ru_msgrcv;        /* IPC messages received */
+    result->ru_nsignals = y->ru_nsignals - x->ru_nsignals;      /* signals received */
+    result->ru_nvcsw = y->ru_nvcsw - x->ru_nvcsw;         /* voluntary context switches */
+    result->ru_nivcsw = y->ru_nivcsw - x->ru_nivcsw;        /* involuntary context switches */
+}
+
+void nvfuse_rusage_add(struct rusage *x, struct rusage *result)
+{
+	timeval_add(&result->ru_stime,
+					&x->ru_stime);
+
+	timeval_add(&result->ru_utime,
+					&x->ru_utime);
+
+	result->ru_maxrss += x->ru_maxrss;        /* maximum resident set size */
+	result->ru_ixrss += x->ru_ixrss;         /* integral shared memory size */
+    result->ru_idrss += x->ru_idrss;         /* integral unshared data size */
+	result->ru_isrss += x->ru_isrss;         /* integral unshared stack size */
+    result->ru_minflt += x->ru_minflt;        /* page reclaims (soft page faults) */
+    result->ru_majflt += x->ru_majflt;        /* page faults (hard page faults) */
+    result->ru_nswap += x->ru_nswap;         /* swaps */
+    result->ru_inblock += x->ru_inblock;       /* block input operations */
+	result->ru_oublock += x->ru_oublock;       /* block output operations */
+    result->ru_msgsnd += x->ru_msgsnd;        /* IPC messages sent */    
+    result->ru_msgrcv += x->ru_msgrcv;        /* IPC messages received */
+    result->ru_nsignals += x->ru_nsignals;      /* signals received */
+    result->ru_nvcsw += x->ru_nvcsw;         /* voluntary context switches */
+    result->ru_nivcsw += x->ru_nivcsw;        /* involuntary context switches */
+}
+
+void print_rusage(struct rusage *rusage, char *prefix, int divisor, double total_exec)
+{
+//	printf(" usr %f sec \n", (double)tv_to_sec(&rusage->ru_utime));
+//	printf(" sys %f sec \n", (double)tv_to_sec(&rusage->ru_stime));
+
+	printf(" %s usr cpu utilization = %3.0f %% (%f sec)\n", prefix, 
+			(double)tv_to_sec(&rusage->ru_utime) / (double)divisor / total_exec * 100,
+			total_exec);
+	printf(" %s sys cpu utilization = %3.0f %% (%f sec)\n", prefix, 
+			(double)tv_to_sec(&rusage->ru_stime) / (double)divisor / total_exec * 100,
+			total_exec);
+	printf(" %s max resider set size = %ld \n", prefix, rusage->ru_maxrss / divisor);
+	printf(" %s integral share memory size = %ld \n", prefix, rusage->ru_ixrss / divisor);
+	printf(" %s integral unshared data size = %ld \n", prefix, rusage->ru_idrss / divisor);
+	printf(" %s integral unshared stack size = %ld \n", prefix, rusage->ru_isrss / divisor);
+	printf(" %s page reclaims (soft page faults) = %ld \n", prefix, rusage->ru_minflt / divisor);
+	printf(" %s page reclaims (hard page faults) = %ld \n", prefix, rusage->ru_majflt / divisor);
+	printf(" %s swaps = %ld \n", prefix, rusage->ru_nswap / divisor);
+	printf(" %s block input operations = %ld \n", prefix, rusage->ru_inblock / divisor);
+	printf(" %s block output operations = %ld \n", prefix, rusage->ru_oublock / divisor);
+	printf(" %s IPC messages sent = %ld \n", prefix, rusage->ru_msgsnd / divisor);
+	printf(" %s IPC messages received = %ld \n", prefix, rusage->ru_msgrcv / divisor);
+	printf(" %s signals received = %ld \n", prefix, rusage->ru_nsignals / divisor);
+	printf(" %s voluntary context switches = %ld \n", prefix, rusage->ru_nvcsw / divisor);
+	printf(" %s involuntary context switches = %ld \n", prefix, rusage->ru_nivcsw / divisor);
+}
