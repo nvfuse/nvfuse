@@ -429,13 +429,19 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 
 	dir_inode = dir_ictx->ictx_inode;
 
-#if NVFUSE_USE_DIR_INDEXING == 1	
-	res = nvfuse_get_dir_indexing(sb, dir_inode, (char *)filename, &offset);
-	if (res < 0) {
+	if (dir_inode->i_bpino) {
+	#if NVFUSE_USE_DIR_INDEXING == 1	
+		res = nvfuse_get_dir_indexing(sb, dir_inode, (char *)filename, &offset);
+		if (res < 0) {
+			goto RES;
+		}
+	#endif 
+	} 
+	else 
+	{
+		res = -1;
 		goto RES;
 	}
-#endif 
-
 	res = -1;
 
 	dir_size = dir_inode->i_size;
@@ -1197,6 +1203,7 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 	u32 search_lblock = 0, search_entry = 0;
 	u32 dir_num;
 	s32 num_block;
+	s32 ret;
 
 	if (strlen(fiename) < 1 || strlen(fiename) >= FNAME_SIZE) {
 		printf("create file : name  = %s, %d\n", fiename, (int)strlen(fiename));
@@ -1219,6 +1226,18 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
 		return -1;
 	}
+
+#ifdef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
+	if (dir_inode->i_links_count == 2 && dir_inode->i_bpino == 0)
+	{
+		ret = nvfuse_make_first_directory(sb, dir_ictx, dir_inode);
+		if (ret)
+		{
+			fprintf( stderr, " Error: mkdir_first_directory()\n");
+			return -1;
+		}
+	}
+#endif
 
 retry:
 
@@ -1247,8 +1266,6 @@ retry:
 						
 			if (nvfuse_dir_is_invalid(dir + search_entry)) {
 				flag = 1;
-				dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
-				dir_inode->i_links_count++;
 				goto find;
 			}
 		}
@@ -1283,7 +1300,20 @@ retry:
 	}
 
 find:
-
+#ifdef NVFUSE_USE_DELAYED_BPTREE_CREATION
+	if (dir_inode->i_bpino == 0 && dir_inode->i_links_count == 2) {
+		/* create bptree related nodes for new directory's dentries */
+		ret = nvfuse_create_bptree(sb, dir_inode);
+		if (ret)
+		{
+			printf(" bptree allocation fails.");
+			return NVFUSE_ERROR;
+		}
+	}
+#endif
+	
+	dir_inode->i_links_count++;
+	dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
 	assert(dir_inode->i_links_count == dir_inode->i_ptr + 1);
 
 	{
@@ -1309,6 +1339,7 @@ find:
 		new_ictx = nvfuse_read_inode(sb, new_ictx, ino);
 		nvfuse_insert_ictx(sb, new_ictx);
 	}
+	
 	new_inode = new_ictx->ictx_inode;
 	new_inode->i_type = NVFUSE_TYPE_FILE;
 	new_inode->i_size = 0;
@@ -1616,6 +1647,7 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	nvfuse_del_dir_indexing(sb, dir_inode, filename);
 #endif 
 	/* delete allocated b+tree inode */
+	if (inode->i_bpino)
 	{
 		struct nvfuse_inode_ctx *bp_ictx;		
 		bp_ictx = nvfuse_read_inode(sb, NULL, inode->i_bpino);
@@ -1675,6 +1707,40 @@ s32 nvfuse_rmdir_path(struct nvfuse_handle *nvh, const char *path)
 	return res;
 }
 
+s32 nvfuse_make_first_directory(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, struct nvfuse_inode *inode)
+{
+	struct nvfuse_buffer_head *dir_bh;
+	struct nvfuse_dir_entry *dir;
+	s32 ret;
+
+	assert(inode->i_size == 0);
+
+	ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL, 1);
+	if (ret)
+	{
+		printf(" data block allocation fails.");
+		return NVFUSE_ERROR;
+	}
+	inode->i_size = CLUSTER_SIZE;
+
+	nvfuse_mark_inode_dirty(ictx);
+
+	dir_bh = nvfuse_get_bh(sb, ictx, inode->i_ino, 0, WRITE, NVFUSE_TYPE_META);
+	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
+
+	strcpy(dir[0].d_filename, "."); // current dir
+	dir[0].d_ino = inode->i_ino;
+	dir[0].d_flag = DIR_USED;
+
+	strcpy(dir[1].d_filename, ".."); // parent dir
+	dir[1].d_ino = inode->i_ino;
+	dir[1].d_flag = DIR_USED;
+	
+	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
+
+	return 0;
+}
+
 s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *dirname, inode_t *new_ino, const mode_t mode)
 {
 	struct nvfuse_dir_entry *dir;
@@ -1716,6 +1782,19 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 		return -1;
 	}
 	assert(dir_inode->i_ptr + 1 == dir_inode->i_links_count);
+
+	
+#ifdef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
+	if (dir_inode->i_links_count == 2 && dir_inode->i_bpino == 0)
+	{
+		ret = nvfuse_make_first_directory(sb, dir_ictx, dir_inode);
+		if (ret)
+		{
+			fprintf( stderr, " Error: mkdir_first_directory()\n");
+			return -1;
+		}
+	}
+#endif
 
 retry:
 
@@ -1782,6 +1861,18 @@ retry:
 	}
 
 find:
+#ifdef NVFUSE_USE_DELAYED_BPTREE_CREATION
+	if (dir_inode->i_bpino == 0 && dir_inode->i_links_count == 2) {
+		/* create bptree related nodes for new directory's dentries */
+		ret = nvfuse_create_bptree(sb, dir_inode);
+		if (ret)
+		{
+			printf(" bptree allocation fails.");
+			return NVFUSE_ERROR;
+		}
+	}
+#endif
+
 	dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
 	dir_inode->i_links_count++;
 	
@@ -1825,28 +1916,24 @@ find:
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
-	ret = nvfuse_get_block(sb, new_ictx, NVFUSE_SIZE_TO_BLK(new_inode->i_size), 1/* num block */, NULL, NULL, 1);
+#ifndef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
+	ret = nvfuse_make_first_directory(sb, new_ictx, new_inode);
 	if (ret)
 	{
-		printf(" data block allocation fails.");
-		return NVFUSE_ERROR;
+		fprintf( stderr, " Error: mkdir_first_directory()\n");
+		return -1;
 	}
-	dir_bh = nvfuse_get_bh(sb, new_ictx, new_inode->i_ino, 0, WRITE, NVFUSE_TYPE_META);
-	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
-
-	strcpy(dir[0].d_filename, "."); // current dir
-	dir[0].d_ino = new_inode->i_ino;
-	dir[0].d_flag = DIR_USED;
-
-	strcpy(dir[1].d_filename, ".."); // parent dir
-	dir[1].d_ino = dir_inode->i_ino;
-	dir[1].d_flag = DIR_USED;
+#endif
 
 	if (new_ino)
 		*new_ino = new_inode->i_ino;
 
 	new_inode->i_type = NVFUSE_TYPE_DIRECTORY;
+#ifndef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
 	new_inode->i_size = CLUSTER_SIZE;
+#else
+	new_inode->i_size = 0;
+#endif
 	new_inode->i_ptr = 1;
 	new_inode->i_mode = (mode & 0777) | S_IFDIR;
 	new_inode->i_gid = 0;
@@ -1856,6 +1943,7 @@ find:
 	new_inode->i_ctime = time(NULL);
 	new_inode->i_mtime = time(NULL);
 
+#ifndef NVFUSE_USE_DELAYED_BPTREE_CREATION
 	/* create bptree related nodes for new directory's dentries */
 	ret = nvfuse_create_bptree(sb, new_inode);
 	if (ret)
@@ -1863,8 +1951,10 @@ find:
 		printf(" bptree allocation fails.");
 		return NVFUSE_ERROR;
 	}
-		
-	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
+#else
+	new_inode->i_bpino = 0; /* marked as unallocated */
+#endif
+
 	nvfuse_release_inode(sb, new_ictx, DIRTY);
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);

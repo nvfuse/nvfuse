@@ -722,8 +722,9 @@ s32 nvfuse_control_plane_buffer_alloc(struct nvfuse_handle *nvh, s32 size)
     cp->curr_buffer_size -= size;
     allocated_size = size;
 
-	printf(" Remaining buffers = %.3f%%\n", 
-		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size);
+	printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
+		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
+		(double)cp->curr_buffer_size / 256 / 1024);
 
     assert(allocated_size);
 
@@ -742,8 +743,9 @@ s32 nvfuse_control_plane_buffer_free(struct nvfuse_handle *nvh, s32 size)
     cp->curr_buffer_size += size;
     assert(cp->curr_buffer_size <= cp->total_buffer_size);
 
-	printf(" Remaining buffers = %.3f%%\n", 
-		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size);
+	printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
+		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
+		(double)cp->curr_buffer_size / 256 / 1024);
 
     return 0;
 }
@@ -765,7 +767,6 @@ s32 nvfuse_control_plane_container_table_init(struct nvfuse_handle *nvh, s32 num
 	cp->container_generation = 1;
 	cp->container_cur_log_file = 0;
 	cp->container_max_log_file = 2;
-
 
 	cp->nr_containers = num_containers;
 	cp->free_containers = num_containers;

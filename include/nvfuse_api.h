@@ -124,5 +124,6 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filename, struct nvfuse_dir_entry *direntry);
 s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, s32 *num_alloc);
 void nvfuse_core_usage(char *cmd);
+s32 nvfuse_make_first_directory(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, struct nvfuse_inode *inode);
 
 #endif

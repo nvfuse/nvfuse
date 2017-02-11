@@ -124,7 +124,13 @@ enum bp_mempool_type {
 //#define NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
 #define NVFUSE_CONTAINER_PERALLOCATION_SIZE	1024 /* in 128MB unit */
 
+/*	*/
 #define NVFUSE_USE_DELAYED_REDISTRIBUTION_BPTREE
+/*	*/
+#define NVFUSE_USE_DELAYED_BPTREE_CREATION
+
+/* actual dir blocks are allocated lazyily */
+#define NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
 
 #define USE_RBNODE
 

@@ -849,6 +849,8 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u64 end_tsc;
 	master_node_t *master;
 
+	assert(inode->i_bpino);
+
 	master= bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;	
@@ -888,9 +890,10 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u32 dir_hash[2];	
 	u32 collision = ~0; 	
 	u32 c;	
-	int res = 0;
-	
+	int res = 0;	
 	master_node_t *master;
+	
+	assert(inode->i_bpino);
 
 	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
@@ -932,6 +935,8 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 
 	master_node_t *master;
 
+	assert(inode->i_bpino);
+
 	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;
@@ -969,6 +974,8 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u32 collision = ~0; 	
 	u32 c;
 	master_node_t *master = NULL;
+	
+	assert(inode->i_bpino);
 
 	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
