@@ -1013,6 +1013,8 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 			nvfuse_fsync_ictx(sb, ictx);
 			nvfuse_release_inode(sb, ictx, CLEAN);
 		}
+		/* flush cmd to nvme ssd */
+		nvfuse_dev_flush(sb->io_manager);
 	}
 	
 	return wcount;
@@ -2662,6 +2664,9 @@ s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd)
 	
 	/* flush dirty pages associated with inode context including meta and data pages */
 	nvfuse_fsync_ictx(sb, ictx);
+
+	/* flush cmd to nvme ssd */
+	nvfuse_dev_flush(sb->io_manager);
 
 	nvfuse_release_inode(sb, ictx, CLEAN);
 	nvfuse_release_super(sb);

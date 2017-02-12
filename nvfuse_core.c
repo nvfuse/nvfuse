@@ -3003,6 +3003,9 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 			break;
 	}
 
+	/* flush cmd to nvme ssd */
+	nvfuse_dev_flush(sb->io_manager);
+
 	sb->nvme_io_tsc += (spdk_get_ticks() - start_tsc);
 	sb->nvme_io_count ++;
 	

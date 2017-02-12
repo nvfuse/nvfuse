@@ -21,15 +21,6 @@
 #include "nvfuse_stat.h"
 
 #include <pthread.h>
-
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-
-#	include <Windows.h>
-#	include "nvfuse_gettimeofday.h"
-#	define _CRT_SECURE_NO_DEPRECATE 1
-#	pragma warning(disable:4996)
-
-#else
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/mount.h>
@@ -37,11 +28,9 @@
 #include <sys/stat.h>
 #include <pthread.h>
 #include <string.h>
-#endif
 
-#ifndef _NVFUSE_HEADER_H
-#define _NVFUSE_HEADER_H
-
+#ifndef __NVFUSE_HEADER_H__
+#define __NVFUSE_HEADER_H__
 
 /* NVFUSE SPECIAL SIGNATURE */
 #define NVFUSE_SB_SIGNATURE	0x756c6673
@@ -580,4 +569,4 @@ s32 nvfuse_check_free_block(struct nvfuse_superblock *sb, u32 num_blocks);
 void nvfuse_print_seg_list(struct nvfuse_superblock *sb);
 void nvfuse_update_owner_in_ss(struct nvfuse_superblock *sb, s32 seg_id);
 
-#endif /* NVFUSE_HEADER_H*/
+#endif /* NVFUSE_HEADER_H */

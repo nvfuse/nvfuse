@@ -504,6 +504,29 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
     return wbytes;
 }
 
+static int spdk_flush(struct nvfuse_io_manager *io_manager){	
+    struct ns_entry *ns_entry;
+    struct spdk_job job;    
+    int res;
+    
+    ns_entry = g_namespaces;    
+    job.is_completed = 0;
+    job.ns_entry = ns_entry;
+
+    res = spdk_nvme_ns_cmd_flush(ns_entry->ns, io_manager->spdk_queue[SPDK_QUEUE_SYNC], 
+	    sync_req_complete, &job);
+
+    if (res != 0) {
+		fprintf(stderr, "starting write I/O failed\n");
+		exit(1);
+    }
+
+    while (!job.is_completed) {
+		spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_SYNC], 0);
+    }
+
+    return 0;
+}
 
 static int spdk_cancel(struct nvfuse_io_manager *io_manager, struct io_job *job)
 {
@@ -707,6 +730,7 @@ void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char
     io_manager->aio_resetnextcjob = spdk_resetnextcjob;
     io_manager->aio_cancel = spdk_cancel;
     io_manager->dev_format = spdk_dev_format;
+    io_manager->dev_flush = spdk_flush;
 
     printf("Initialization complete.\n");    
 }
