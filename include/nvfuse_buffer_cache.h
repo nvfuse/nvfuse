@@ -75,6 +75,7 @@ struct nvfuse_buffer_cache {
 	u32 bc_dirty:1;				/* dirty status */
 	u32 bc_load	:1;				/* data loaded from storage */
 	s32 bc_ref	:30;					/* reference count*/
+	u32 bc_hit;
 	
 	s8 *bc_buf;					/* actual buffered data */
 

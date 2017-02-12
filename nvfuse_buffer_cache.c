@@ -79,7 +79,7 @@ void nvfuse_init_buffer_head(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, u64 key){	
 	
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;
-	struct nvfuse_buffer_cache *bh;
+	struct nvfuse_buffer_cache *bc;
 	struct list_head *remove_ptr;
 	s32 type = 0;
 
@@ -102,8 +102,8 @@ struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, 
 	assert(bm->bm_list_count[type]);
 	remove_ptr = (struct list_head *)(&bm->bm_list[type])->prev;
 	do {
-		bh = list_entry(remove_ptr, struct nvfuse_buffer_cache, bc_list);
-		if (bh->bc_ref == 0 && bh->bc_bh_count == 0) {
+		bc = list_entry(remove_ptr, struct nvfuse_buffer_cache, bc_list);
+		if (bc->bc_ref == 0 && bc->bc_bh_count == 0) {
 			break;
 		}
 		remove_ptr = remove_ptr->prev;
@@ -113,17 +113,19 @@ struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, 
 		}
 		assert(remove_ptr != &bm->bm_list[type]);
 	} while (1);
-
+	
+	//if (bc->bc_hit)
+	//	printf(" bc hit = %d ino = %d\n", bc->bc_hit, bc->bc_ino);
 	/* remove list */
-	list_del(&bh->bc_list);
+	list_del(&bc->bc_list);
 	/* remove hlist */
-	hlist_del(&bh->bc_hash);
+	hlist_del(&bc->bc_hash);
 	bm->bm_list_count[type]--;
 	if (type == BUFFER_TYPE_UNUSED)
 		bm->bm_hash_count[HASH_NUM]--;
 	else
-		bm->bm_hash_count[bh->bc_bno % HASH_NUM]--;
-	return bh;
+		bm->bm_hash_count[bc->bc_bno % HASH_NUM]--;
+	return bc;
 }
 
 struct nvfuse_buffer_cache *nvfuse_hash_lookup(struct nvfuse_buffer_manager *bm, u64 key)
@@ -147,7 +149,8 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;
 	struct nvfuse_buffer_cache *bc;
 	s32 status;
-
+	
+	bm->bm_cache_ref++;
 	bc = nvfuse_hash_lookup(sb->sb_bm, key);
 	if(bc)
 	{ /* in case of cache hit */
@@ -159,6 +162,10 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 
 		list_add(&bc->bc_list, &bm->bm_list[bc->bc_list_type]);
 		bm->bm_list_count[bc->bc_list_type]++;
+		bc->bc_hit++;
+		bm->bm_cache_hit++;
+		//printf(" hit count = %d, inode = %d, hit rate = %f \n", bc->bc_hit, bc->bc_ino, 
+		//(double)bm->bm_cache_hit/bm->bm_cache_ref);
 	}
 	else
 	{
@@ -180,6 +187,7 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 			bc->bc_list_type = status;
 			INIT_LIST_HEAD(&bc->bc_bh_head);			
 			bc->bc_bh_count = 0;
+			bc->bc_hit = 0;
 		}
 	}
 	
@@ -562,6 +570,7 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 		//printf(" free bc mempool \n");
 		spdk_mempool_free(sb->bc_mempool);
 	}
+	printf(" > buffer cache hit rate = %f \n", (double)sb->sb_bm->bm_cache_hit/sb->sb_bm->bm_cache_ref);
 }
 
 s32 nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh) 
