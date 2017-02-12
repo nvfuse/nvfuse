@@ -143,6 +143,9 @@ int primary_poll(struct nvfuse_handle *nvh)
 	union nvfuse_ipc_msg *ipc_msg;
 	int i;
 	int ret;
+	u64 start_ticks = 0;
+	u64 busy_waiting_ticks = 0;
+	u64 ring_ticks = 0;
 
 	printf(" Process performs as primary process.\n");
 	printf(" sizeof(ipc_msg) = %d bytes\n", sizeof(union nvfuse_ipc_msg));
@@ -172,19 +175,27 @@ int primary_poll(struct nvfuse_handle *nvh)
 	/* set as PROC_RUNNING */
 	status = PROC_RUNNING;
 	
+	start_ticks = spdk_get_ticks();
+
 	while (status == PROC_RUNNING) {
 		ipc_msg = NULL;
 
+		if (ring_ticks) {
+			busy_waiting_ticks += (spdk_get_ticks() - ring_ticks);
+			ring_ticks = 0;
+		}
+
 		if (rte_ring_dequeue(recv_ring, &ipc_msg) < 0) {
-			//rte_pause();
+			ring_ticks = spdk_get_ticks();			
 			continue;
 		}
-		
+
 		switch (ipc_msg->opcode) {
 			case CONTAINER_ALLOC_REQ:
 			case CONTAINER_RELEASE_REQ:
 			case HEALTH_CHECK_REQ:
 			case BUFFER_ALLOC_REQ:
+			case BUFFER_FREE_REQ:
 				break;
 			default:
 				printf(" %ld Resv msg (%p:%d:%s) from secondary.\n",
@@ -202,6 +213,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 			case CONTAINER_RELEASE_CPL:
 			case HEALTH_CHECK_CPL:
 			case BUFFER_ALLOC_CPL:
+			case BUFFER_FREE_CPL:
 				break;
 			default:
 			printf(" %ld Send cpl (opcode = %d:%s) to core = %d via channel = %d\n\n",
@@ -215,6 +227,12 @@ int primary_poll(struct nvfuse_handle *nvh)
 			rte_mempool_put(mempool, ipc_msg);
 		}
 	}
+	
+	//if (ring_ticks)
+	//	busy_wating_ticks += (spdk_get_ticks() - ring_ticks);
+
+	printf(" > control palne total time %.6f sec\n", (double)(spdk_get_ticks() - start_ticks) / spdk_get_ticks_hz());
+	printf(" > control palne busy wating time %.6f sec\n", (double)busy_waiting_ticks / spdk_get_ticks_hz());
 
 	nvfuse_control_plane_exit(nvh);	
 }

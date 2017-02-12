@@ -9,9 +9,9 @@ fi
 
 $SPDK_RESET_PATH reset
 DEV_NAME=/dev/nvme0n1
-MOUNT_PATH=/media/xfs
+MOUNT_PATH=/media/ext4
 
-mkfs.xfs $DEV_NAME -f -K
+mkfs.ext4 $DEV_NAME -E nodiscard
 
 if [ ! -d $MOUNT_PATH ] ; then
     mkdir $MOUNT_PATH
@@ -31,8 +31,8 @@ do
 		    block_size=$((4096))
 		fi
 
-		echo $FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60 --numjobs=${numjobs} --thread=1
-		$FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60 --numjobs=${numjobs} --thread=1 --minimal --output=${OUTPUT_PATH}/kernel_xfs_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log
+		echo $FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60 --numjobs=$numjobs --thread=1
+		$FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=60 --numjobs=$numjobs --thread=1 --minimal --output=${OUTPUT_PATH}/kernel_ext4_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log
 
 	    done
     done

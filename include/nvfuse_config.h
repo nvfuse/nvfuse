@@ -53,11 +53,11 @@
 #define HASH_NUM (52631)
 
 /* Default Buffer Cache Size */
-#define NVFUSE_INITIAL_BUFFER_SIZE_DATA (128) //128MB
+#define NVFUSE_INITIAL_BUFFER_SIZE_DATA (16) //128MB
 #define NVFUSE_INITIAL_BUFFER_SIZE_CONTROL (16) //16MB
 
 /* Maximum Buffer Size per Data Plane*/
-#define NVFUSE_MAX_BUFFER_SIZE_DATA (2048) // 2048MB
+#define NVFUSE_MAX_BUFFER_SIZE_DATA (4096) // 4096MB
 
 /* Default Inode Context Size */
 #define NVFUSE_ICTXC_SIZE (32*1024)
@@ -65,7 +65,8 @@
 /* RATIO SEGMENT TO BUFFER Cache */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001) /* data optimized */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
-#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
+//#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
+#define NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG 1
 
 /* Buffer Head Mempool Settings */
 #define NVFUSE_BH_MEMPOOL_TOTAL_SIZE	(0x10000) /* 256MB */
@@ -98,7 +99,7 @@ enum bp_mempool_type {
 };
 
 #define NVFUSE_SYNC_TIME	30 /* seconds */
-#define NVFUSE_SYNC_DIRTY_COUNT (1024) /* blocks */
+#define NVFUSE_SYNC_DIRTY_COUNT (2048) /* blocks */
 //#define NVFUSE_SYNC_DIRTY_COUNT (256) /* blocks */
 
 /* Use Async Write */

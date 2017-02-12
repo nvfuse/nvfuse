@@ -146,5 +146,6 @@ struct nvfuse_inode_ctx *nvfuse_replcae_ictx(struct nvfuse_superblock *sb);
 int nvfuse_rbnode_insert(struct rb_root *root, struct nvfuse_buffer_head *bh);
 struct nvfuse_buffer_head *nvfuse_rbnode_search(struct rb_root *root, u64 bno);
 int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr);
+s32 nvfuse_remove_buffer_cache(struct nvfuse_superblock *sb, s32 nr_buffers);
 
 #endif

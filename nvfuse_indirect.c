@@ -242,7 +242,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 			
 			/* insert allocated container to process */
 			nvfuse_add_seg(sb, container_id);
-
+#if 0
 			/* try to allocate buffers from primary process */			
 			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
 			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
@@ -250,6 +250,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 			{
 				nvfuse_add_buffer_cache(sb, nr_buffers);
 			}
+#endif
 			assert (nvfuse_check_free_block(sb, num_blocks) == 1);
 		} else {
 			assert(0);

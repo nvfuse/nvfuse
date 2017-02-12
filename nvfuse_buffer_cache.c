@@ -83,6 +83,21 @@ struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, 
 	struct list_head *remove_ptr;
 	s32 type = 0;
 
+	/* if buffers are insufficient, it sens buffer allocation mesg to control plane */
+	if (bm->bm_list_count[BUFFER_TYPE_UNUSED] == 0)
+	{
+		s32 nr_buffers;
+
+		/* try to allocate buffers from primary process */
+		nr_buffers = NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG;
+		nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
+		if (nr_buffers > 0)
+		{
+			nvfuse_add_buffer_cache(sb, nr_buffers);
+			assert(bm->bm_list_count[BUFFER_TYPE_UNUSED]);
+		}
+	}
+
 	if (bm->bm_list_count[BUFFER_TYPE_UNUSED])
 	{
 		type = BUFFER_TYPE_UNUSED;
@@ -365,6 +380,55 @@ struct nvfuse_buffer_cache *nvfuse_alloc_bc(struct nvfuse_superblock *sb){
 	return bc;
 }
 
+s32 nvfuse_remove_buffer_cache(struct nvfuse_superblock *sb, s32 nr_buffers)
+{
+	struct nvfuse_buffer_manager *bm = sb->sb_bm;
+	struct nvfuse_buffer_cache *bc;
+	struct list_head *head;
+	struct list_head *ptr, *temp;
+
+	assert (nr_buffers > 0);
+	
+	if (bm->bm_cache_size - nr_buffers < NVFUSE_INITIAL_BUFFER_SIZE_DATA)
+	{
+		printf(" Warninig: current buffer size = %.3f \n", (double)bm->bm_cache_size / 256);
+		return -1;
+	}
+
+	if (nr_buffers < bm->bm_list_count[BUFFER_TYPE_UNUSED])
+	{
+		printf(" Warninig: current unused buffer size = %.3f \n", (double)bm->bm_list_count[BUFFER_TYPE_UNUSED] / 256);
+		return -1;
+	}
+
+	//printf(" remove buffer cache (%d 4K pages) to process\n", nr);
+	head = &sb->sb_bm->bm_list[BUFFER_TYPE_UNUSED];
+	list_for_each_safe(ptr, temp, head) {
+		bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+
+		if (bc->bc_bh_count)
+			nvfuse_remove_bh_in_bc(sb, bc);
+		
+		assert(!bc->bc_bh_count);
+		assert(!bc->bc_dirty);
+		list_del(&bc->bc_list);
+		hlist_del(&bc->bc_hash);
+
+		nvfuse_free_aligned_buffer(bc->bc_buf);
+		nvfuse_free_bc(sb, bc);
+		
+		bm->bm_hash_count[HASH_NUM]--;
+		bm->bm_list_count[BUFFER_TYPE_UNUSED]--;
+		bm->bm_cache_size--;
+
+		if (--nr_buffers == 0)
+			break;
+	}
+	
+	return 0;
+}
+
+
 int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 {
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;
@@ -408,7 +472,7 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 		bm->bm_cache_size++;
 	}	
 
-	printf(" Buffer Size = %.3f MB\n", (double)bm->bm_cache_size / 256);
+	//printf(" Buffer Size = %.3f MB\n", (double)bm->bm_cache_size / 256);
 	return 0;
 }
 
@@ -429,7 +493,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 
 	printf(" mempool for bh head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_head)));
 	sb->bh_mempool = spdk_mempool_create(mempool_name, mempool_size,
-	                           sizeof(struct nvfuse_buffer_head), NVFUSE_BH_MEMPOOL_CACHE_SIZE);
+	                           sizeof(struct nvfuse_buffer_head), NVFUSE_BH_MEMPOOL_CACHE_SIZE, -1);
 	if (sb->bh_mempool == NULL)
 	{
 		fprintf( stderr, " Error: allocation of bh mempool \n");
@@ -442,7 +506,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 		mempool_size = NVFUSE_BC_MEMPOOL_TOTAL_SIZE;		
 		printf(" mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
 		sb->bc_mempool = (struct spdk_mempool *)spdk_mempool_create(mempool_name, mempool_size,
-								sizeof(struct nvfuse_buffer_cache), NVFUSE_BC_MEMPOOL_CACHE_SIZE);
+								sizeof(struct nvfuse_buffer_cache), NVFUSE_BC_MEMPOOL_CACHE_SIZE, -1);
 		if (sb->bc_mempool == NULL)
 		{
 			fprintf( stderr, " Error: allocation of bc mempool \n");

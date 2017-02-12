@@ -154,6 +154,8 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
+	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
+
 	printf(" Finish: creating null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 	printf(" bp tree cpu = %f sec\n", (double)nvh->nvh_sb.bp_set_index_tsc/(double)spdk_get_ticks_hz());
 	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc/(double)spdk_get_ticks_hz());
@@ -202,6 +204,8 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 	}
 	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
+
+	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
 	return 0;
 }
@@ -255,8 +259,9 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		}
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
-
 	}
+	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
+
 	printf(" Finish: creating null directories (0x%x) %.3f OPS (%.f sec). \n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 	printf(" bp tree cpu = %f sec\n", (double)nvh->nvh_sb.bp_set_index_tsc/(double)spdk_get_ticks_hz());
 	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc/(double)spdk_get_ticks_hz());
@@ -302,8 +307,11 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, max_inodes);
 	}
-	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
+	
+	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
+	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
+	
 	return 0;
 }
 
@@ -901,8 +909,8 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
 			printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
 			printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg BUF FER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
-		}		
+			printf(" Avg BUFFER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
+		}
 	}
 
 	printf("\n");
@@ -938,6 +946,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 
 		if (num_cores > 1)
 		{
+			sprintf(name, "Avg", i);
 			print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
 		}
 	}

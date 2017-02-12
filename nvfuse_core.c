@@ -633,6 +633,7 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 		{			
 			/* insert allocated container to process */
 			nvfuse_add_seg(sb, container_id);
+			#if 0
 			/* try to allocate buffers from primary process */
 			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
 			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
@@ -640,6 +641,7 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 			{
 				nvfuse_add_buffer_cache(sb, nr_buffers);
 			}
+			#endif
 			assert (nvfuse_check_free_inode(sb) == 1);
 		}
 		else
@@ -750,9 +752,9 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 	struct nvfuse_buffer_cache *bc;
 	lbno_t offset;
 	u32 num_block, trun_num_block;
-	u32 deleted_bno;	
 	s32 res;
 	u64 key;
+	s32 unused_count = 0;
 
 	inode = ictx->ictx_inode;
 
@@ -784,10 +786,24 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 			bc->bc_ref = 0;
 
 			nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_UNUSED, INSERT_HEAD);
+			unused_count++;
 		}
 
 		if(offset == 0)
 			break;	
+	}
+
+	if (unused_count) 
+	{
+		if (sb->sb_bm->bm_list_count[BUFFER_TYPE_UNUSED] >= NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG)
+		{			
+			res = nvfuse_remove_buffer_cache(sb, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+			if (res == 0)
+			{
+				nvfuse_send_dealloc_buffer_req(sb->sb_nvh, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+			}			
+		}
+		
 	}
 
 	/* truncate blocks */
@@ -1541,27 +1557,27 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 				case BP_MEMPOOL_MASTER:
 					printf(" mempool size for master: %d", (int)(NVFUSE_BPTREE_MEMPOOL_MASTER_TOTAL_SIZE * sizeof(master_node_t)));
 					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_MASTER_TOTAL_SIZE,
-											sizeof(master_node_t), NVFUSE_BPTREE_MEMPOOL_MASTER_CACHE_SIZE);
+											sizeof(master_node_t), NVFUSE_BPTREE_MEMPOOL_MASTER_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 					break;
 				case BP_MEMPOOL_INDEX:
 					printf(" mempool size for index: %d", (int)(NVFUSE_BPTREE_MEMPOOL_INDEX_TOTAL_SIZE * sizeof(index_node_t)));
 					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_INDEX_TOTAL_SIZE,
-											sizeof(index_node_t), NVFUSE_BPTREE_MEMPOOL_INDEX_CACHE_SIZE);					
+											sizeof(index_node_t), NVFUSE_BPTREE_MEMPOOL_INDEX_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);					
 					break;
 				case BP_MEMPOOL_PAIR:
 					printf(" mempool size for pair: %d", (int)(NVFUSE_BPTREE_MEMPOOL_PAIR_TOTAL_SIZE * sizeof(key_pair_t)));
 					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_PAIR_TOTAL_SIZE,
-											sizeof(key_pair_t), NVFUSE_BPTREE_MEMPOOL_PAIR_CACHE_SIZE);
+											sizeof(key_pair_t), NVFUSE_BPTREE_MEMPOOL_PAIR_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 					break;
 				case BP_MEMPOOL_KEY:
 					printf(" mempool size for key: %d", (int)(NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE * sizeof(bkey_t) * fanout));
 					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE,
-											sizeof(bkey_t) * fanout, NVFUSE_BPTREE_MEMPOOL_CACHE_SIZE);
+											sizeof(bkey_t) * fanout, NVFUSE_BPTREE_MEMPOOL_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 					break;
 				case BP_MEMPOOL_VALUE:
 					printf(" mempool size for value: %d", (int)(NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE * sizeof(bitem_t) * fanout));
 					sb->bp_mempool[type] = spdk_mempool_create(mempool_name, NVFUSE_BPTREE_MEMPOOL_TOTAL_SIZE,
-											sizeof(bitem_t) * fanout, NVFUSE_BPTREE_MEMPOOL_CACHE_SIZE);
+											sizeof(bitem_t) * fanout, NVFUSE_BPTREE_MEMPOOL_CACHE_SIZE, SPDK_ENV_SOCKET_ID_ANY);
 					break;
 				default:
 					fprintf(stderr, " Invalid mempool type = %d \n", type);
@@ -1690,10 +1706,10 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		assert(mempool_size);
 		printf(" mempool for seg node size = %d \n", (int)(mempool_size * sizeof(struct seg_node)));
 		sb->seg_mempool = (struct spdk_mempool *)spdk_mempool_create(mempool_name, mempool_size,
-								sizeof(struct seg_node), 0x10);
+								sizeof(struct seg_node), 0x10, SPDK_ENV_SOCKET_ID_ANY);
 		if (sb->seg_mempool == NULL)
 		{
-			fprintf( stderr, " Error: allocation of bc mempool \n");
+			fprintf( stderr, " Error: allocaNVFUSE_BUFFER_RATIO_TO_DATAtion of bc mempool \n");
 			exit(0);
 		}
 	}
@@ -1773,6 +1789,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 			{
 				/* insert allocated container to process */
 				nvfuse_add_seg(sb, container_id);
+				#if 0
 				/* try to allocate buffers from primary process */
 				nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
 				nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
@@ -1780,6 +1797,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 				{
 					nvfuse_add_buffer_cache(sb, nr_buffers);
 				}
+				#endif
 			}
 			seg_count++;
 		} while (container_id);
@@ -1792,6 +1810,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 			{
 				/* insert allocated container to process */
 				nvfuse_add_seg(sb, container_id);
+				#if 0
 				/* try to allocate buffers from primary process */
 				nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
 				nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
@@ -1799,6 +1818,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 				{
 					nvfuse_add_buffer_cache(sb, nr_buffers);
 				}
+				#endif
 			}
 			seg_count++;
 		}
@@ -1808,8 +1828,8 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	{
 		/*add root container */
 		nvfuse_add_seg(sb, sb->asb.asb_root_seg_id);
-		nvfuse_add_buffer_cache(sb, 
-		(int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA));
+		//nvfuse_add_buffer_cache(sb, 
+		//(int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA));
 	}
 
 	/* create b+tree index for root directory at first mount after formattming */

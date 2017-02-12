@@ -24,49 +24,52 @@ rm $WRITE_LAT_MAX_LOG
 
 for workload in randread randwrite
 do
-    for qdepth in 1 2 4 8 16 32 64 128 256
+    for coremask in 2 6 14 30 62 126
     do
-	if [ $workload = read ] ; then 
-	    cat ${OUTPUT_PATH}/128K_read_${qdepth}_qdepth_${file_size}G_seq.log 
-	elif [ $workload = write ] ; then 
-	    cat ${OUTPUT_PATH}/128K_write_${qdepth}_qdepth_${file_size}G_seq.log
-	elif [ $workload = randread ] ; then 
-	
-	    # IOPS
-	    ret=$(cat ${OUTPUT_PATH}/4K_read_${qdepth}_qdepth_${file_size}G_random.log | grep iops)
-	    echo qdepth	$qdepth	$ret >> $READ_IOPS_LOG
+	    for qdepth in 1 2 4 8 16 32 64 128 256
+	    do
+		if [ $workload = read ] ; then 
+		    cat ${OUTPUT_PATH}/128K_read_${qdepth}_qdepth_${file_size}G_seq.log 
+		elif [ $workload = write ] ; then 
+		    cat ${OUTPUT_PATH}/128K_write_${qdepth}_qdepth_${file_size}G_seq.log
+		elif [ $workload = randread ] ; then 
+		
+		    # IOPS
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'group iops')
+		    echo coremask ${coremask} qdepth	$qdepth	$ret >> $READ_IOPS_LOG
 
-	    # LAT AVG
-	    ret=$(cat ${OUTPUT_PATH}/4K_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'avg latency')
-	    echo qdepth	$qdepth	$ret >> $READ_LAT_AVG_LOG
+		    # LAT AVG
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'group avg latency')
+		    echo coremask ${coremask}  qdepth	$qdepth	$ret >> $READ_LAT_AVG_LOG
 
-	    # LAT MIN
-	    ret=$(cat ${OUTPUT_PATH}/4K_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'min latency')
-	    echo qdepth	$qdepth	$ret >> $READ_LAT_MIN_LOG
+		    # LAT MIN
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'group min latency')
+		    echo coremask ${coremask}  qdepth	$qdepth	$ret >> $READ_LAT_MIN_LOG
 
-	    # LAT MAX
-	    ret=$(cat ${OUTPUT_PATH}/4K_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'max latency')
-	    echo qdepth	$qdepth	$ret >> $READ_LAT_MAX_LOG
+		    # LAT MAX
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'group max latency')
+		    echo coremask ${coremask}  qdepth	$qdepth	$ret >> $READ_LAT_MAX_LOG
 
-	elif [ $workload = randwrite ] ; then 
+		elif [ $workload = randwrite ] ; then 
 
-	    # IOPS
-	    ret=$(cat ${OUTPUT_PATH}/4K_write_${qdepth}_qdepth_${file_size}G_random.log | grep iops)
-	    echo qdepth	$qdepth	$ret >> $WRITE_IOPS_LOG
+		    # IOPS
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'group iops')
+		    echo coremask ${coremask}  qdepth	$qdepth	$ret >> $WRITE_IOPS_LOG
 
-	    # LAT AVG
-	    ret=$(cat ${OUTPUT_PATH}/4K_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'avg latency')
-	    echo qdepth	$qdepth	$ret >> $WRITE_LAT_AVG_LOG
+		    # LAT AVG
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'group avg latency')
+		    echo coremask ${coremask}  qdepth	$qdepth	$ret >> $WRITE_LAT_AVG_LOG
 
-	    # LAT MIN
-	    ret=$(cat ${OUTPUT_PATH}/4K_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'min latency')
-	    echo qdepth	$qdepth	$ret >> $WRITE_LAT_MIN_LOG
+		    # LAT MIN
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'group min latency')
+		    echo coremask ${coremask}  qdepth	$qdepth	$ret >> $WRITE_LAT_MIN_LOG
 
-	    # LAT MAX
-	    ret=$(cat ${OUTPUT_PATH}/4K_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'max latency')
-	    echo qdepth	$qdepth	$ret >> $WRITE_LAT_MAX_LOG
+		    # LAT MAX
+		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_write_${qdepth}_qdepth_${file_size}G_random.log | grep 'group max latency')
+		    echo  coremask ${coremask} qdepth	$qdepth	$ret >> $WRITE_LAT_MAX_LOG
 
-	fi
+		fi
+	    done
     done
 done
 

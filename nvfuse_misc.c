@@ -38,7 +38,7 @@
 
 s64 nvfuse_rand();
 
-extern struct nvfuse_handle *g_nvh;
+//extern struct nvfuse_handle *g_nvh;
 
 s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 {

@@ -665,6 +665,7 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 			case CONTAINER_RELEASE_REQ:
 			case HEALTH_CHECK_REQ:
 			case BUFFER_ALLOC_REQ:
+			case BUFFER_FREE_REQ:
 				break;
 			default:
 			printf(" %ld send req (%p:%d:%s) to primary core\n", 
@@ -686,6 +687,7 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 			case CONTAINER_RELEASE_CPL:
 			case HEALTH_CHECK_CPL:
 			case BUFFER_ALLOC_CPL:
+			case BUFFER_FREE_CPL:
 				break;
 			default:
 			printf(" %ld recv cpl (%d:%s, ret = %d) from primary core\n", 

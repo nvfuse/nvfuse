@@ -34,58 +34,61 @@ do
 #for workload in read randread
     for workload in randread randwrite
     do
-	for qdepth in 1 2 4 8 16 32 64 128 256
+	for numjobs in {1..6} 
 	do
-	    if [ $workload = read -o $workload = write ] ; then 
-		block_size=$((64*1024))
-	    else
-		block_size=$((4096))
-	    fi
+		for qdepth in 1 2 4 8 16 32 64 128 256
+		do
+		    if [ $workload = read -o $workload = write ] ; then 
+			block_size=$((64*1024))
+		    else
+			block_size=$((4096))
+		    fi
 
-	    output=${OUTPUT_PATH}/${PREFIX}_q_${qdepth}_block_${block_size}_workload_${workload}.log
-	    if [ $workload = randread ] ; then 
+		    output=${OUTPUT_PATH}/${PREFIX}_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log
+		    if [ $workload = randread ] ; then 
 
-		# IOPS
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_iops | head -n 1)
-		echo $ret
-		echo qd $qdepth  $ret >> ${READ_IOPS_LOG}
+			# IOPS
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_iops | head -n 1)
+			echo $ret
+			echo qd $qdepth  $ret >> ${READ_IOPS_LOG}
 
-		# AVG LAT 
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_lat_mean)
-		echo $ret
-		echo qd $qdepth  $ret >> ${READ_LAT_AVG_LOG}
+			# AVG LAT 
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_lat_mean)
+			echo $ret
+			echo qd $qdepth  $ret >> ${READ_LAT_AVG_LOG}
 
-		# MAX LAT 
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_lat_max)
-		echo $ret
-		echo qd $qdepth  $ret >> ${READ_LAT_MAX_LOG}
+			# MAX LAT 
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_lat_max)
+			echo $ret
+			echo qd $qdepth  $ret >> ${READ_LAT_MAX_LOG}
 
-		# MIN LAT 
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_lat_min)
-		echo $ret
-		echo qd $qdepth  $ret >> ${READ_LAT_MIN_LOG}
-	    else
+			# MIN LAT 
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep read_lat_min)
+			echo $ret
+			echo qd $qdepth  $ret >> ${READ_LAT_MIN_LOG}
+		    else
 
-		# IOPS
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_iops | head -n 1)
-		echo $ret
-		echo qd $qdepth  $ret >> ${WRITE_IOPS_LOG}
+			# IOPS
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_iops | head -n 1)
+			echo $ret
+			echo qd $qdepth  $ret >> ${WRITE_IOPS_LOG}
 
-		# AVG LAT 
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_lat_mean)
-		echo $ret
-		echo qd $qdepth  $ret >> ${WRITE_LAT_AVG_LOG}
+			# AVG LAT 
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_lat_mean)
+			echo $ret
+			echo qd $qdepth  $ret >> ${WRITE_LAT_AVG_LOG}
 
-		# MAX LAT 
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_lat_max)
-		echo $ret
-		echo qd $qdepth  $ret >> ${WRITE_LAT_MAX_LOG}
+			# MAX LAT 
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_lat_max)
+			echo $ret
+			echo qd $qdepth  $ret >> ${WRITE_LAT_MAX_LOG}
 
-		# MIN LAT 
-		ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_lat_min)
-		echo $ret
-		echo qd $qdepth  $ret >> ${WRITE_LAT_MIN_LOG}
-	    fi
+			# MIN LAT 
+			ret=$($FIO_MINIMAL_DECODER $output | awk '{print $2"\t"$3}' | grep write_lat_min)
+			echo $ret
+			echo qd $qdepth  $ret >> ${WRITE_LAT_MIN_LOG}
+		    fi
+		done
 	done
     done
 

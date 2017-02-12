@@ -317,7 +317,7 @@ s32 nvfuse_store_container_table(struct nvfuse_handle *nvh)
 	cp = nvh->nvh_sb.sb_control_plane_ctx;
 
 	ct_size = cp->reservation_table_size;
-	printf(" %s: Container Table Size = %d bytes \n", __FUNCTION__, ct_size);
+	//printf(" %s: Container Table Size = %d bytes \n", __FUNCTION__, ct_size);
 
 	/* 4KB memory allocation */
 	buf = nvfuse_alloc_aligned_buffer(chunk_size);
@@ -721,11 +721,11 @@ s32 nvfuse_control_plane_buffer_alloc(struct nvfuse_handle *nvh, s32 size)
 	
     cp->curr_buffer_size -= size;
     allocated_size = size;
-
+#if 0
 	printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
 		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
 		(double)cp->curr_buffer_size / 256 / 1024);
-
+#endif
     assert(allocated_size);
 
     return allocated_size;
@@ -743,9 +743,9 @@ s32 nvfuse_control_plane_buffer_free(struct nvfuse_handle *nvh, s32 size)
     cp->curr_buffer_size += size;
     assert(cp->curr_buffer_size <= cp->total_buffer_size);
 
-	printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
-		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
-		(double)cp->curr_buffer_size / 256 / 1024);
+	//printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
+	//	(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
+	//	(double)cp->curr_buffer_size / 256 / 1024);
 
     return 0;
 }
@@ -894,6 +894,9 @@ s32 nvfuse_control_plane_container_alloc(struct nvfuse_handle *nvh, s32 core_id,
     }
 
     //fprintf( stdout, " allocated container id = %d, remained containers = %d \n", container_id, free_containers);
+	
+	/* logging container allocation table */
+	nvfuse_store_container_table(nvh);
 RET:
 
     return container_id;
