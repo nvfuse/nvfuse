@@ -665,18 +665,22 @@ void print_rusage(struct rusage *rusage, char *prefix, int divisor, double total
 	printf(" %s sys cpu utilization = %3.0f %% (%f sec)\n", prefix, 
 			(double)tv_to_sec(&rusage->ru_stime) / (double)divisor / total_exec * 100,
 			total_exec);
+	#if 0
 	printf(" %s max resider set size = %ld \n", prefix, rusage->ru_maxrss / divisor);
 	printf(" %s integral share memory size = %ld \n", prefix, rusage->ru_ixrss / divisor);
 	printf(" %s integral unshared data size = %ld \n", prefix, rusage->ru_idrss / divisor);
 	printf(" %s integral unshared stack size = %ld \n", prefix, rusage->ru_isrss / divisor);
+	#endif
 	printf(" %s page reclaims (soft page faults) = %ld \n", prefix, rusage->ru_minflt / divisor);
 	printf(" %s page reclaims (hard page faults) = %ld \n", prefix, rusage->ru_majflt / divisor);
+	#if 0
 	printf(" %s swaps = %ld \n", prefix, rusage->ru_nswap / divisor);
 	printf(" %s block input operations = %ld \n", prefix, rusage->ru_inblock / divisor);
 	printf(" %s block output operations = %ld \n", prefix, rusage->ru_oublock / divisor);
 	printf(" %s IPC messages sent = %ld \n", prefix, rusage->ru_msgsnd / divisor);
 	printf(" %s IPC messages received = %ld \n", prefix, rusage->ru_msgrcv / divisor);
 	printf(" %s signals received = %ld \n", prefix, rusage->ru_nsignals / divisor);
+	#endif
 	printf(" %s voluntary context switches = %ld \n", prefix, rusage->ru_nvcsw / divisor);
 	printf(" %s involuntary context switches = %ld \n", prefix, rusage->ru_nivcsw / divisor);
 }

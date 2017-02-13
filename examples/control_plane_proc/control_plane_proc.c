@@ -181,7 +181,9 @@ int primary_poll(struct nvfuse_handle *nvh)
 
 	/* set as PROC_RUNNING */
 	status = PROC_RUNNING;
-	
+
+	printf(" Control Plane is Running ... \n");
+
 	start_ticks = spdk_get_ticks();
 
 	while (status == PROC_RUNNING) {
@@ -246,10 +248,10 @@ int primary_poll(struct nvfuse_handle *nvh)
 	
 	printf(" ----------------------------------------\n");
 	printf(" > Control Plane Analysis \n");
-	printf(" > total time %.6f sec\n", (double)(spdk_get_ticks() - start_ticks) / spdk_get_ticks_hz());
-	printf(" > busy wating time %.6f sec\n", (double)busy_waiting_ticks / spdk_get_ticks_hz());
+	printf(" > total time %.6f sec\n", (double)(spdk_get_ticks() - start_ticks) / spdk_get_ticks_hz());	
 	printf(" > tx time %.6f sec\n", (double)ring_tx_ticks / spdk_get_ticks_hz());
-	printf(" > rx wating time %.6f sec\n", (double)ring_rx_ticks / spdk_get_ticks_hz());
+	printf(" > rx time %.6f sec\n", (double)ring_rx_ticks / spdk_get_ticks_hz());
+	printf(" > rx retry time %.6f sec\n", (double)busy_waiting_ticks / spdk_get_ticks_hz());
 	printf(" > processing time %.6f sec\n", (double)processing_ticks / spdk_get_ticks_hz());
 	printf(" ----------------------------------------\n");
 	nvfuse_control_plane_exit(nvh);	
