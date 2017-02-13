@@ -395,7 +395,7 @@ s32 nvfuse_remove_buffer_cache(struct nvfuse_superblock *sb, s32 nr_buffers)
 		return -1;
 	}
 
-	if (nr_buffers < bm->bm_list_count[BUFFER_TYPE_UNUSED])
+	if (nr_buffers > bm->bm_list_count[BUFFER_TYPE_UNUSED])
 	{
 		printf(" Warninig: current unused buffer size = %.3f \n", (double)bm->bm_list_count[BUFFER_TYPE_UNUSED] / 256);
 		return -1;
