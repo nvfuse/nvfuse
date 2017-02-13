@@ -145,7 +145,14 @@ int primary_poll(struct nvfuse_handle *nvh)
 	int ret;
 	u64 start_ticks = 0;
 	u64 busy_waiting_ticks = 0;
-	u64 ring_ticks = 0;
+	u64 ring_rx_ticks = 0;
+	u64 ring_tx_ticks = 0;
+	u64 processing_ticks = 0;
+
+	u64 ring_wait_start = 0;
+	u64 ring_rx_start = 0;
+	u64 ring_tx_start = 0;
+	u64 processing_start = 0;
 
 	printf(" Process performs as primary process.\n");
 	printf(" sizeof(ipc_msg) = %d bytes\n", sizeof(union nvfuse_ipc_msg));
@@ -180,15 +187,21 @@ int primary_poll(struct nvfuse_handle *nvh)
 	while (status == PROC_RUNNING) {
 		ipc_msg = NULL;
 
-		if (ring_ticks) {
-			busy_waiting_ticks += (spdk_get_ticks() - ring_ticks);
-			ring_ticks = 0;
+		if (ring_wait_start) {
+			busy_waiting_ticks += (spdk_get_ticks() - ring_wait_start);
+			ring_wait_start = 0;
 		}
-
+		
+		ring_rx_start = spdk_get_ticks();
 		if (rte_ring_dequeue(recv_ring, &ipc_msg) < 0) {
-			ring_ticks = spdk_get_ticks();			
+			ring_rx_ticks += (spdk_get_ticks() - ring_rx_start);
+
+			ring_wait_start = spdk_get_ticks();			
 			continue;
 		}
+		ring_rx_ticks += (spdk_get_ticks() - ring_rx_start);
+
+		processing_start = spdk_get_ticks();
 
 		switch (ipc_msg->opcode) {
 			case CONTAINER_ALLOC_REQ:
@@ -221,19 +234,24 @@ int primary_poll(struct nvfuse_handle *nvh)
 			ipc_msg->opcode, nvfuse_ipc_opcode_decode(ipc_msg->opcode), ipc_msg->chan_id, 
 			ipc_msg->chan_id);
 		}
+		processing_ticks += (spdk_get_ticks() - processing_start);
 
+		ring_tx_start = spdk_get_ticks();
 		if (rte_ring_enqueue(send_ring[ipc_msg->chan_id], ipc_msg) < 0) {
 			printf("Failed to send message - message discarded\n");
 			rte_mempool_put(mempool, ipc_msg);
 		}
+		ring_tx_ticks += (spdk_get_ticks() - ring_tx_start);
 	}
 	
-	//if (ring_ticks)
-	//	busy_wating_ticks += (spdk_get_ticks() - ring_ticks);
-
-	printf(" > control palne total time %.6f sec\n", (double)(spdk_get_ticks() - start_ticks) / spdk_get_ticks_hz());
-	printf(" > control palne busy wating time %.6f sec\n", (double)busy_waiting_ticks / spdk_get_ticks_hz());
-
+	printf(" ----------------------------------------\n");
+	printf(" > Control Plane Analysis \n");
+	printf(" > total time %.6f sec\n", (double)(spdk_get_ticks() - start_ticks) / spdk_get_ticks_hz());
+	printf(" > busy wating time %.6f sec\n", (double)busy_waiting_ticks / spdk_get_ticks_hz());
+	printf(" > tx time %.6f sec\n", (double)ring_tx_ticks / spdk_get_ticks_hz());
+	printf(" > rx wating time %.6f sec\n", (double)ring_rx_ticks / spdk_get_ticks_hz());
+	printf(" > processing time %.6f sec\n", (double)processing_ticks / spdk_get_ticks_hz());
+	printf(" ----------------------------------------\n");
 	nvfuse_control_plane_exit(nvh);	
 }
 
