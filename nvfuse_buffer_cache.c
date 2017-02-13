@@ -589,7 +589,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 		}
 	}	
 	
-	rte_malloc_dump_stats(stdout, NULL);
+	//rte_malloc_dump_stats(stdout, NULL);
 
 	return 0;
 }

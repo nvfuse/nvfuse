@@ -45,7 +45,7 @@ CC=gcc
 	@$(RM) $@
 	$(CC) $(OPTIMIZATION) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
-all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test perf control_plane_proc
+all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test perf control_plane_proc fsync_test
 
 $(LIB_NVFUSE)	:	$(OBJS)
 	$(AR) rcv $@ $(OBJS)
@@ -62,6 +62,9 @@ libfuse:
 regression_test:
 	make -C examples/regression_test
 
+fsync_test:
+	make -C examples/fsync_test
+
 perf:
 	make -C examples/perf
 
@@ -74,6 +77,7 @@ clean:
 	make -C examples/nvfuse_cli/ clean
 	make -C examples/libfuse/ clean
 	make -C examples/regression_test/ clean
+	make -C examples/fsync_test/ clean
 	make -C examples/perf/ clean
 	make -C examples/control_plane_proc/ clean
 
