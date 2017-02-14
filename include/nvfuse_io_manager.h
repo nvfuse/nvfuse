@@ -212,7 +212,7 @@ void nvfuse_init_memio(struct nvfuse_io_manager *io_manager, char *name, char *p
 
 static inline s32 cjob_empty(struct nvfuse_io_manager *io_manager)
 {
-    return io_manager->cjob_head == io_manager->cjob_head;
+    return io_manager->cjob_head == io_manager->cjob_tail;
 }
  
 static inline s32 cjob_full(struct nvfuse_io_manager *io_manager)
