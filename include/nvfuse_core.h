@@ -414,7 +414,7 @@ struct iovec{
 struct control_plane_context;
 struct nvfuse_params {
 	s8 appname[128];
-	s8 cpu_core_mask;
+	s32 cpu_core_mask;
 	s32 buffer_size; /* in MB units */
 	s32 qdepth;
 	s32 need_format;

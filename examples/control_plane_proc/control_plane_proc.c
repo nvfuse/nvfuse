@@ -286,6 +286,9 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		return -1;
 
+	/* memory debugging */
+    //rte_malloc_dump_stats(stdout, NULL);
+
 	/* create nvfuse_handle with user spcified parameters */
 	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
 	if (nvh == NULL)

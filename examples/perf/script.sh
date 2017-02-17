@@ -16,7 +16,7 @@ app_name=perf
 
 for workload in randread randwrite
 do
-    for qdepth in 1 2 4 8 16 32 64 128 256
+    for qdepth in 1 2 4 8 16 32 64 128 254
     do
 	if [ $workload = read ] ; then 
 	    echo "${file_size}G file size, 128K block size, libaio, $qdepth qdepth, seq workload, direct I/O, read workload"

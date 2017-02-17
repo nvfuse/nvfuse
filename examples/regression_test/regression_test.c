@@ -904,13 +904,10 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			printf(" Core %d BUFFER Free Latency = %f us\n", i, (double)cur_stat->total_tsc[BUFFER_FREE_REQ]/cur_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
 		}
 
-		if (num_cores > 1)
-		{
-			printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg BUFFER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
-		}
+		printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg BUFFER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
 	}
 
 	printf("\n");

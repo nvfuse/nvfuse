@@ -22,6 +22,8 @@ rm $WRITE_LAT_AVG_LOG
 rm $WRITE_LAT_MIN_LOG
 rm $WRITE_LAT_MAX_LOG
 
+file_size=128
+
 for workload in randread randwrite
 do
     for coremask in 2 6 14 30 62 126
@@ -36,6 +38,7 @@ do
 		
 		    # IOPS
 		    ret=$(cat ${OUTPUT_PATH}/4K_coremask_${coremask}_read_${qdepth}_qdepth_${file_size}G_random.log | grep 'group iops')
+            echo $ret
 		    echo coremask ${coremask} qdepth	$qdepth	$ret >> $READ_IOPS_LOG
 
 		    # LAT AVG

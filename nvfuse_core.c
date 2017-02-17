@@ -793,18 +793,23 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 			break;	
 	}
 
-	if (unused_count) 
+#ifndef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT	
+	while (unused_count--)
 	{
 		if (sb->sb_bm->bm_list_count[BUFFER_TYPE_UNUSED] >= NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG)
-		{			
+		{
 			res = nvfuse_remove_buffer_cache(sb, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
 			if (res == 0)
 			{
 				nvfuse_send_dealloc_buffer_req(sb->sb_nvh, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
-			}			
+			}
 		}
-		
+		else
+		{
+			break;
+		}
 	}
+#endif
 
 	/* truncate blocks */
 	nvfuse_truncate_blocks(sb, ictx, size);	
