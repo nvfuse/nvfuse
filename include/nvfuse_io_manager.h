@@ -15,12 +15,7 @@
 
 #include <stdio.h>
 #include <pthread.h>
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-#include <Windows.h>
-struct iocb;
-typedef struct io_context io_context_t;
-struct io_event;
-#endif 
+
 #include "nvfuse_types.h"
 #include "nvfuse_stat.h"
 

@@ -44,7 +44,7 @@ do
 			block_size=$((4096))
 		    fi
 
-		    output=${OUTPUT_PATH}/${PREFIX}_aio_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log
+		    output=${OUTPUT_PATH}/${PREFIX}_async_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log
 		    if [ $workload = randread ] ; then 
 
 			# IOPS

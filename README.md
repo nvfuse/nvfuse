@@ -28,7 +28,7 @@ Building
 
 Once the prerequisites are installed, run 'make' within the NVFUSE directory to build the NVFUSE library and examples.
 
-    # make SPDK_ROOT_DIR=/home/spdk DPDK_DIR=/home/spdk/dpdk-16.11/x86_64-native-linuxapp-gcc
+    # make SPDK_ROOT_DIR=/home/spdk DPDK_DIR=/home/spdk/dpdk-17.02/x86_64-native-linuxapp-gcc
 
 Before conducting an NVFUSE application, the kernel NVMe driver must be unloaded and some hugepages must be allocated. It can be done with the automation script like the below command line.
 

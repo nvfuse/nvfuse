@@ -1031,26 +1031,12 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	return 0;
 }
 
-s32 nvfuse_make_jobs(struct io_job **jobs, int numjobs)
-{
-	*jobs = (struct io_job *)malloc(sizeof(struct io_job) * numjobs);
-	if (!jobs) 
-	{
-		printf("  Malloc Error: allocate jobs \n");
-		*jobs = NULL;
-		return -1;
-	}
-
-	//printf(" make jobs has completed successfully\n");
-	return 0;
-}
-
-void io_cancel_incomplete_ios(struct nvfuse_superblock *sb, struct io_job *jobq, int job_cnt){
+void io_cancel_incomplete_ios(struct nvfuse_superblock *sb, struct io_job **jobq, int job_cnt){
     struct io_job *job;
     int i;
 
     for(i = 0;i < job_cnt;i++){
-        job = jobq + i;
+        job = jobq[i];
 
         if(job && job->complete)
             continue;
@@ -1059,7 +1045,7 @@ void io_cancel_incomplete_ios(struct nvfuse_superblock *sb, struct io_job *jobq,
     }
 }
 
-s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct io_job *jobq, int job_cnt)
+s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct io_job **jobq, int job_cnt)
 {
 	struct io_job *job;
 	unsigned long blkno;
@@ -1093,44 +1079,60 @@ s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct io_job *jobq
 	return 0;
 }
 
+s32 nvfuse_make_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int numjobs)
+{
+	s32 res;
+
+	res = rte_mempool_get_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);
+	if (res != 0) 
+	{
+		fprintf( stderr, "mempool get error for io job \n");
+		/* FIXME: how can we handle this error? */
+		exit(0);
+	}
+	return 0;
+}
+
+void nvfuse_release_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int numjobs)
+{
+	rte_mempool_put_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);
+}
+
 s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head, s32 num_blocks)
 {	
 	struct list_head *ptr, *temp;
 	struct nvfuse_buffer_head *bh;
 	struct nvfuse_buffer_cache *bc;
 
-#if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	struct io_job *jobs;
-	struct iocb **iocb;
+	struct io_job *jobs[AIO_MAX_QDEPTH];
+	struct iocb *iocb[AIO_MAX_QDEPTH];
 	s32 count = 0;	
-#endif
-	
 	s32 res = 0;
+
+	assert(num_blocks <= AIO_MAX_QDEPTH);
+
 #if (NVFUSE_OS==NVFUSE_OS_LINUX)
 	if (sb->io_manager->type == IO_MANAGER_SPDK || sb->io_manager->type == IO_MANAGER_UNIXIO)
 	{
-		res = nvfuse_make_jobs(&jobs, num_blocks);
-		if (res < 0) {
-			return res;
-		}
-
-		iocb = (struct iocb **)malloc(sizeof(struct iocb *) * num_blocks);
-		if (!iocb) {
-			printf(" Malloc error: struct iocb\n");
-			return -1;
+		
+		res = nvfuse_make_jobs(sb, jobs, num_blocks);
+		if (res != 0)
+		{
+			/* FIXME: */
+			fprintf( stderr, "mempool get error for io job \n");	
 		}
 
 		list_for_each_safe(ptr, temp, head) {
 			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
 			assert(bc->bc_dirty);
 
-			(*(jobs + count)).offset = (s64)bc->bc_pno * CLUSTER_SIZE;
-			(*(jobs + count)).bytes = (size_t)CLUSTER_SIZE;
-			(*(jobs + count)).ret = 0;
-			(*(jobs + count)).req_type = WRITE;
-			(*(jobs + count)).buf = bc->bc_buf;
-			(*(jobs + count)).complete = 0;
-			iocb[count] = &((*(jobs + count)).iocb);
+			jobs[count]->offset = (s64)bc->bc_pno * CLUSTER_SIZE;
+			jobs[count]->bytes = (size_t)CLUSTER_SIZE;
+			jobs[count]->ret = 0;
+			jobs[count]->req_type = WRITE;
+			jobs[count]->buf = bc->bc_buf;
+			jobs[count]->complete = 0;
+			iocb[count] = &jobs[count]->iocb;
 			count++;
 
 		}
@@ -1138,7 +1140,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 		count = 0;
 		while(count < num_blocks)
 		{
-			nvfuse_aio_prep(jobs + count, sb->io_manager);
+			nvfuse_aio_prep(jobs[count], sb->io_manager);
 			count++;
 		}
 
@@ -1147,8 +1149,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 
 		nvfuse_wait_aio_completion(sb, jobs, num_blocks);
 
-		free(iocb);
-		free(jobs);
+		nvfuse_release_jobs(sb, jobs, num_blocks);
 	}
 	else
 #endif
@@ -1597,6 +1598,17 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 			printf(" Allocation of BP_MEMPOOL type = %d %p \n", type, sb->bp_mempool[type]);
 		}
 	}
+
+	sprintf(mempool_name, "nvfuse_iojob_%d", rte_lcore_id());
+	printf(" mempool size for value: %d", (int)(sizeof(struct io_job) * AIO_MAX_QDEPTH * 2));
+	sb->io_job_mempool = spdk_mempool_create(mempool_name, (sizeof(struct io_job) * AIO_MAX_QDEPTH * 2),
+							sizeof(struct io_job), 128, SPDK_ENV_SOCKET_ID_ANY);
+	if (sb->io_job_mempool == NULL)
+	{
+		fprintf( stderr, " Error: allocation of mempool io_jobs \n");
+		exit(0);
+	}
+
 	if (spdk_process_is_primary())
 		res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_CONTROL);
 	else
@@ -1932,6 +1944,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 		{
 			spdk_mempool_free(sb->seg_mempool);
 		}
+
+		spdk_mempool_free(sb->io_job_mempool);
 	}
 
 	nvfuse_deinit_buffer_cache(sb);	

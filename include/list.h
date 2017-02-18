@@ -16,7 +16,6 @@ struct hlist_node {
 	struct hlist_node *next, **pprev;
 };
 
-#define prefetch
 /*
  * Simple doubly linked list implementation.
  *
@@ -355,6 +354,11 @@ static inline void list_splice_tail_init(struct list_head *list,
 		INIT_LIST_HEAD(list);
 	}
 }
+
+#ifdef container_of
+#undef container_of
+#endif
+
 #define container_of(ptr, type, member) \
 	((type *)((char *)(ptr)-(unsigned long)(&((type *)0)->member)))
 

@@ -11,7 +11,7 @@ $SPDK_RESET_PATH reset
 DEV_NAME=/dev/nvme0n1
 MOUNT_PATH=/media/ext2
 
-mkfs.ext2 $DEV_NAME -E nodiscard
+yes | mkfs.ext2 $DEV_NAME -E nodiscard
 
 if [ ! -d $MOUNT_PATH ] ; then
     mkdir $MOUNT_PATH
@@ -31,7 +31,7 @@ do
 		    block_size=$((4096))
 		fi
 
-		str="$FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=120 --numjobs=$numjobs --thread=1 --group_reporting --minimal --output=${OUTPUT_PATH}/kernel_ext2_async_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log"
+		str="$FIO_PERF_PATH --name=test --directory=${MOUNT_PATH}/ --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=120 --numjobs=$numjobs --thread=1 --group_reporting --minimal --output=${OUTPUT_PATH}/kernel_ext2_async_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log"
         echo $str
         eval $str
 

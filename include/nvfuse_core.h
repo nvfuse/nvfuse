@@ -284,6 +284,8 @@ struct nvfuse_superblock{
 		struct spdk_mempool *bp_mempool[BP_MEMPOOL_NUM];
 		/* seg node mempool*/
 		struct spdk_mempool *seg_mempool; /* allocated for primary core */
+		/* io job mempool */
+		struct spdk_mempool *io_job_mempool;		
 	};
 };
 
@@ -548,7 +550,10 @@ void nvfuse_lock_exit(void);
 
 s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir);
 
-s32 nvfuse_make_jobs(struct io_job **jobs, int numjobs);
+struct io_job;
+
+s32 nvfuse_make_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int numjobs);
+void nvfuse_release_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int numjobs);
 
 void nvfuse_release_ibitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 ino);
 s32 nvfuse_is_directio(struct nvfuse_superblock *sb, s32 fid);

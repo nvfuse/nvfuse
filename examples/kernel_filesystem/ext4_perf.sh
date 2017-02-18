@@ -31,7 +31,7 @@ do
 		    block_size=$((4096))
 		fi
 
-		str="$FIO_PERF_PATH --name=test --filename=${MOUNT_PATH}/test.dat --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=120 --numjobs=$numjobs --thread=1  --group_reporting --minimal --output=${OUTPUT_PATH}/kernel_ext4_aio_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log"
+		str="$FIO_PERF_PATH --name=test --directory=${MOUNT_PATH} --direct=1 --size=128G --ioengine=libaio --iodepth=$qdepth --bs=$block_size --rw=$workload --runtime=120 --numjobs=$numjobs --thread=1  --group_reporting --minimal --output=${OUTPUT_PATH}/kernel_ext4_aio_numjobs_${numjobs}_q_${qdepth}_block_${block_size}_workload_${workload}.log"
         echo $str
         eval $str
 
