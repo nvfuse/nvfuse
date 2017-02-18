@@ -311,6 +311,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	group_exec_time /= num_cores;
 
 	printf("Summary: Avg execution = %.6f sec\n", group_exec_time);
+	printf("Summary: Avg bandwidth = %.3f MB/s\n", (double)g_file_size * __builtin_popcount((u32)g_params->cpu_core_mask) / MB / group_exec_time);
 	
 	free(per_core_stat);
 
@@ -382,13 +383,10 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			printf(" Core %d BUFFER Free Latency = %f us\n", i, (double)cur_stat->total_tsc[BUFFER_FREE_REQ]/cur_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
 		}
 
-		if (num_cores > 1)
-		{
-			printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
-			printf(" Avg BUFFER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
-		}
+		printf(" Avg Container Alloc Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_ALLOC_REQ]/sum_stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg Container Free Latency = %f us\n", (double)sum_stat->total_tsc[CONTAINER_RELEASE_REQ]/sum_stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg BUFFER Alloc Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_ALLOC_REQ]/sum_stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz()*1000000);
+		printf(" Avg BUFFER Free Latency = %f us\n", (double)sum_stat->total_tsc[BUFFER_FREE_REQ]/sum_stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz()*1000000);
 	}
 
 	printf("\n");
@@ -422,11 +420,8 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			//printf(" tag = %x\n", cur_stat->tag);
 		}
 
-		if (num_cores > 1)
-		{
-			sprintf(name, "Avg", i);
-			print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
-		}
+		sprintf(name, "Avg", i);
+		print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
 	}
 }
 

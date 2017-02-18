@@ -55,7 +55,7 @@ static struct nvfuse_params _g_params;
 static struct nvfuse_params *g_params = &_g_params;
 
 static s32 last_percent;
-static s32 test_type = QUICK_TEST;
+static s32 test_type = MILL_TEST;
 
 void rt_progress_reset()
 {
@@ -665,6 +665,7 @@ struct regression_test_ctx
 rt_ctx[] = 
 {
 	{ rt_create_files, "Creating Max Number of Files.", 0, 0, 0},
+#if 0
 	{ rt_create_dirs, "Creating Max Number of Directories.", 0, 0, 0},
 	{ rt_create_max_sized_file, "Creating Maximum Sized Single File.", 0, 0, 0},
 	{ rt_create_max_sized_file_aio_4KB, "Creating Maximum Sized Single File with 4KB Sequential AIO Read and Write.", SEQUENTIAL, 0, 0},
@@ -672,6 +673,7 @@ rt_ctx[] =
 	{ rt_create_max_sized_file_aio_128KB, "Creating Maximum Sized Single File with 128KB Sequential AIO Read and Write.", SEQUENTIAL, 0, 0 },
 	{ rt_create_max_sized_file_aio_128KB, "Creating Maximum Sized Single File with 128KB Random AIO Read and Write.", RANDOM, 0, 0 },
 	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0, 0}
+#endif
 };
 
 void rt_usage(char *cmd)
@@ -763,6 +765,7 @@ RET:
 	return 0;
 }
 
+
 static void print_stats(s32 num_cores, s32 num_tc)
 {
 	struct rte_ring *stat_rx_ring;
@@ -807,8 +810,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		printf(" stat type = %d \n", temp_stat.stat_rt.stat_type);
 		printf(" seq = %d \n", temp_stat.stat_rt.sequence);
 		printf(" core = %d \n", temp_stat.stat_rt.lcore_id);
-		printf(" index = %d \n", (temp_stat.stat_rt.sequence * num_cores + temp_ssprintf(name, "Avg", i);
-		print_rusage(&sum_stat->result, name, num_cores, group_exec_time);tat.stat_rt.lcore_id));
+		printf(" index = %d \n", (temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id));
 		printf(" \n");
 #endif
 		cur_stat = per_core_stat + (temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id);
@@ -941,8 +943,11 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			//printf(" tag = %x\n", cur_stat->tag);
 		}
 
-		sprintf(name, "Avg", i);
-		print_rusage(&sum_stat->result, name, num_cores, group_exec_time);		
+		if (num_cores > 1)
+		{
+			sprintf(name, "Avg", i);
+			print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
+		}
 	}
 }
 
@@ -979,6 +984,7 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		return -1;
 
+#if 0
 	/* optind must be reset before using getopt() */
 	optind = 0;
 	while ((op = getopt(app_argc, app_argv, "T:")) != -1) {
@@ -995,6 +1001,7 @@ int main(int argc, char *argv[])
 			goto INVALID_ARGS;
 		}
 	}
+#endif
 	
 	/* call lcore_recv() on every slave lcore */
 	RTE_LCORE_FOREACH_SLAVE(lcore_id) {		

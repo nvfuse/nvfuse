@@ -44,3 +44,4 @@ do
 	ret=$(grep 'Avg execution'  $OUTPUT/result_core_mask_${core_mask}.txt)
 	echo coremask $core_mask $ret
 done
+

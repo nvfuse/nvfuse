@@ -39,4 +39,14 @@ do
 	echo coremask $core_mask $ret
 done
 
+for core_mask in 2 6 14 30 62 126 254
+do
+	ret=$(grep 'Avg execution'  $OUTPUT/result_core_mask_${core_mask}.txt)
+	echo coremask $core_mask $ret
+done
 
+for core_mask in 2 6 14 30 62 126 254
+do
+	ret=$(grep 'Avg bandwidth'  $OUTPUT/result_core_mask_${core_mask}.txt)
+	echo coremask $core_mask $ret
+done
