@@ -144,6 +144,12 @@ typedef u32 lbno_t;//logical block num
 
 #define CEIL(x, y)  ((x + y - 1) / y)
 #define DIV_UP(x, y)  ((x + y - 1) / y * y)
+#ifdef MAX
+#undef MAX
+#endif
 #define	MAX(x,y)	((x) > (y) ? (x) : (y))
+#ifdef MIN
+#undef MIN
+#endif
 #define	MIN(x,y)	((x) < (y) ? (x) : (y))
 #endif 
