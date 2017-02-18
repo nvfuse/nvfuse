@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+//#define NDEBUG
 #include <assert.h>
 
 #ifdef __linux__
@@ -1633,7 +1634,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		return -1;
 	}
 
-	sb->sb_file_table = (struct nvfuse_file_table *)nvfuse_malloc(sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
+	sb->sb_file_table = (struct nvfuse_file_table *)spdk_malloc(sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE, 0, NULL);
 	if (sb->sb_file_table == NULL) {
 		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
@@ -1763,7 +1764,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		sb->sb_umount = 0;
 	}
 
-	sb->sb_ss = (struct nvfuse_segment_summary *)nvfuse_malloc(sizeof(struct nvfuse_segment_summary) * sb->sb_segment_num);
+	sb->sb_ss = (struct nvfuse_segment_summary *)spdk_malloc(sizeof(struct nvfuse_segment_summary) * sb->sb_segment_num, 0, NULL);
 	if (sb->sb_ss == NULL) 
 	{
 		printf("nvfuse_malloc error = %d\n", __LINE__);
@@ -1969,9 +1970,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 		printf(" BUFFER Free Latency = %f us\n", (double)stat->total_tsc[BUFFER_FREE_REQ]*1000000/stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz());
 	}
 
-	free(sb->sb_ss);	
-	free(sb->sb_bm);
-	free(sb->sb_file_table);
+	spdk_free(sb->sb_ss);
+	spdk_free(sb->sb_file_table);
 	
 	nvh->nvh_mounted = 0;
 

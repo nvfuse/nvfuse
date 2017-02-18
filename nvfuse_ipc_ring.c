@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/queue.h>
+//#define NDEBUG
 #include <assert.h>
 
 #include "spdk/env.h"

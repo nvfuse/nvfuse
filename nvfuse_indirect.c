@@ -42,6 +42,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+//#define NDEBUG
 #include <assert.h>
 #include <errno.h>
 #include "spdk/env.h"

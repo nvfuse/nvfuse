@@ -387,7 +387,7 @@ static inline void list_splice_tail_init(struct list_head *list,
  * @pos:	the &struct list_head to use as a loop cursor.
  * @head:	the head for your list.
  */
-#if 0 
+#if 1
 #define list_for_each(pos, head) \
 	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
         	pos = pos->next)

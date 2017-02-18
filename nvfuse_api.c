@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+//#define NDEBUG
 #include <assert.h>
 #include <errno.h>
 
@@ -311,7 +312,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 	s32 ret;	
 		
 	/* allocation of nvfuse handle */
-	nvh = malloc(sizeof(struct nvfuse_handle));
+	nvh = spdk_zmalloc(sizeof(struct nvfuse_handle), 0, NULL);
 	if (nvh == NULL)
 	{
 		printf(" Error: nvfuse_create_handle due to lack of free memory \n");
@@ -402,6 +403,8 @@ void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_u
                         &nvh->nvh_sb.perf_stat_ipc);
 
 	spdk_release_qpair(io_manager);
+
+	spdk_free(nvh);
 }
 /* 
 * namespace lookup function with given file name and paraent inode number

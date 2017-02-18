@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+//#define NDEBUG
 #include <assert.h>
 #ifndef __linux__
 	#include <windows.h>
@@ -1912,7 +1913,7 @@ bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno, bkey_t *key, u32 type)
 }
 #endif
 
-u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type)
+inline u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type)
 {
 	type <<= (NVFUSE_BP_HIGH_BITS - NVFUSE_BP_TYPE_BITS);
 
