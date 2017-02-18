@@ -326,6 +326,11 @@ s32 nvfuse_aio_gen_dev_reqs_buffered(struct nvfuse_superblock *sb, struct nvfuse
 #endif
 	}
 	
+	if (count < actx->actx_bh_count)
+	{
+		nvfuse_release_jobs(sb, jobs + count, actx->actx_bh_count - count);
+	}
+	
 #if (NVFUSE_OS == NVFUSE_OS_LINUX)
 	count = 0;
 	while(count < actx->actx_bh_count)
@@ -415,6 +420,11 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		req_count++;
 	}
 	
+	if (req_count < actx->actx_bh_count)
+	{
+		nvfuse_release_jobs(sb, jobs + req_count, actx->actx_bh_count - req_count);
+	}
+
 	assert(req_count <= count);
 	assert(count == actx->actx_bh_count);
 

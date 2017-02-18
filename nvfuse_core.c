@@ -1083,12 +1083,14 @@ s32 nvfuse_make_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int num
 {
 	s32 res;
 
+	assert(numjobs <= AIO_MAX_QDEPTH);
+	
 	res = rte_mempool_get_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);
 	if (res != 0) 
 	{
-		fprintf( stderr, "mempool get error for io job \n");
+		fprintf( stderr, "mempool get error for io job \n");		
 		/* FIXME: how can we handle this error? */
-		exit(0);
+		assert(0);
 	}
 	return 0;
 }
@@ -1601,7 +1603,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 
 	sprintf(mempool_name, "nvfuse_iojob_%d", rte_lcore_id());
 	printf(" mempool size for value: %d", (int)(sizeof(struct io_job) * AIO_MAX_QDEPTH * 2));
-	sb->io_job_mempool = spdk_mempool_create(mempool_name, (sizeof(struct io_job) * AIO_MAX_QDEPTH * 2),
+	sb->io_job_mempool = spdk_mempool_create(mempool_name, (sizeof(struct io_job) * AIO_MAX_QDEPTH * 32),
 							sizeof(struct io_job), 128, SPDK_ENV_SOCKET_ID_ANY);
 	if (sb->io_job_mempool == NULL)
 	{
