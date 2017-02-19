@@ -192,6 +192,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 		if (ring_wait_start) {
 			busy_waiting_ticks += (spdk_get_ticks() - ring_wait_start);
 			ring_wait_start = 0;
+			//usleep(100);
 		}
 		
 		ring_rx_start = spdk_get_ticks();

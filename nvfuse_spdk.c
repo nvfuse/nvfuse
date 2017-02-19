@@ -25,6 +25,7 @@
 #include <rte_config.h>
 #include <rte_eal.h>
 #include <rte_lcore.h>
+#include <rte_cycles.h>
 
 #include "spdk/nvme.h"
 #include "spdk/env.h"
@@ -361,8 +362,11 @@ static int spdk_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq, 
 
 static int spdk_complete(struct nvfuse_io_manager *io_manager)
 {
-    s32 max_completions = 0;    
- 
+    s32 max_completions = 0;
+
+    #if NVFUSE_USE_USLEEP_US > 0
+    rte_delay_us_block(io_manager->queue_cur_count * NVFUSE_USE_USLEEP_US);
+    #endif
     /* Polling */
     while(cjob_size(io_manager) == 0)    
         spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_AIO], max_completions);
@@ -459,6 +463,10 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
 		exit(1);
     }
 
+    #if NVFUSE_USE_USLEEP_US > 0
+    rte_delay_us_block(count * NVFUSE_USE_USLEEP_US);
+    #endif
+
     while (!job.is_completed) {
     	spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_SYNC], 0);
     }
@@ -494,6 +502,10 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
 		fprintf(stderr, "starting write I/O failed\n");
 		exit(1);
     }
+
+    #if NVFUSE_USE_USLEEP_US > 0
+    rte_delay_us_block(count * NVFUSE_USE_USLEEP_US);
+    #endif
 
     while (!job.is_completed) {
 		spdk_nvme_qpair_process_completions(io_manager->spdk_queue[SPDK_QUEUE_SYNC], 0);

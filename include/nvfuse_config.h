@@ -53,7 +53,7 @@
 #define HASH_NUM (52631)
 
 /* Default Buffer Cache Size */
-#define NVFUSE_INITIAL_BUFFER_SIZE_DATA (16) //128MB
+#define NVFUSE_INITIAL_BUFFER_SIZE_DATA (16) //16MB
 #define NVFUSE_INITIAL_BUFFER_SIZE_CONTROL (16) //16MB
 
 /* Maximum Buffer Size per Data Plane*/
@@ -98,12 +98,7 @@ enum bp_mempool_type {
 	BP_MEMPOOL_NUM		= 5
 };
 
-#define NVFUSE_SYNC_TIME	30 /* seconds */
 #define NVFUSE_SYNC_DIRTY_COUNT (2048) /* blocks */
-//#define NVFUSE_SYNC_DIRTY_COUNT (256) /* blocks */
-
-/* Use Async Write */
-#define NVFUSE_USE_ASYNC_WRITER
 
 /* Use AIO Library for Dirty Sync */
 #if NVFUSE_OS == NVFUSE_OS_LINUX
@@ -133,6 +128,9 @@ enum bp_mempool_type {
 /* actual dir blocks are allocated lazyily */
 #define NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
 
+/* Insert SLEEP to minimize CPU utilization */
+#define NVFUSE_USE_USLEEP_US 0 /* 0>: us sleep,  0: disabled */
+
 #define USE_RBNODE
 
 #define MAX_NUM_STAT 8
@@ -155,14 +153,6 @@ enum bp_mempool_type {
 	#define NVFUSE_DEBUG printf
 	//#define NVFUSE_DEBUG
 #endif 
-
-/* NAND INFORMATIOIN*/
-#define SPARE_SIZE 64
-#define ERASE_SIZE (256*1024)
-
-#define NAND_PROG_DELAY 200
-#define NAND_READ_DELAY 80
-#define NAND_ERASE_DELAY (2*1000)
 
 #define NVFUSE_SEGMENT_SIZE_BITS 22
 #define NVFUSE_SEGMENT_GROUP_NUM 1

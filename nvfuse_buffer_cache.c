@@ -700,7 +700,7 @@ struct nvfuse_buffer_head *nvfuse_rbnode_search(struct rb_root *root, u64 bno)
   	struct rb_node *node = root->rb_node;
 
   	while (node) {
-  		struct nvfuse_buffer_head *bh= container_of(node, struct nvfuse_buffer_head, bh_dirty_rbnode);
+  		struct nvfuse_buffer_head *bh = container_of(node, struct nvfuse_buffer_head, bh_dirty_rbnode);
 		s64 result;
 
 		result = (s64)bno - (s64)bh->bh_bc->bc_bno;
@@ -1230,6 +1230,19 @@ s32 nvfuse_release_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *i
 		assert(!ictx->ictx_data_dirty_count && !ictx->ictx_meta_dirty_count);		
 		nvfuse_move_ictx_type(sb, ictx, BUFFER_TYPE_CLEAN);	
 	}
+
+	return 0;
+}
+
+s32 nvfuse_free_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx) 
+{
+	if (ictx == NULL)
+		return 0;
+
+	ictx->ictx_ref--;
+	assert(ictx->ictx_ref >= 0);
+	assert(!ictx->ictx_data_dirty_count && !ictx->ictx_meta_dirty_count);		
+	nvfuse_move_ictx_type(sb, ictx, BUFFER_TYPE_UNUSED);	
 
 	return 0;
 }
