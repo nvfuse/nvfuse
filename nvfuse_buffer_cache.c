@@ -178,7 +178,6 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 
 		list_add(&bc->bc_list, &bm->bm_list[bc->bc_list_type]);
 		bm->bm_list_count[bc->bc_list_type]++;
-		bc->bc_hit++;
 		bm->bm_cache_hit++;
 		//printf(" hit count = %d, inode = %d, hit rate = %f \n", bc->bc_hit, bc->bc_ino, 
 		//(double)bm->bm_cache_hit/bm->bm_cache_ref);
@@ -201,9 +200,8 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 			/* initialize key and type values*/
 			bc->bc_bno = key;
 			bc->bc_list_type = status;
-			INIT_LIST_HEAD(&bc->bc_bh_head);			
+			INIT_LIST_HEAD(&bc->bc_bh_head);
 			bc->bc_bh_count = 0;
-			bc->bc_hit = 0;
 		}
 	}
 	
@@ -214,10 +212,9 @@ static s32 seq_num = 0;
 
 struct nvfuse_buffer_head *nvfuse_alloc_buffer_head(struct nvfuse_superblock *sb)
 {
-	struct spdk_mempool *bh_mempool = sb->bh_mempool;
 	struct nvfuse_buffer_head *bh;
 
-	bh = spdk_mempool_get(bh_mempool);
+	bh = spdk_mempool_get(sb->bh_mempool);
 	if (!bh) {
 		printf(" Error: spdk_mempool_get() \n");
 		return NULL;
@@ -227,9 +224,6 @@ struct nvfuse_buffer_head *nvfuse_alloc_buffer_head(struct nvfuse_superblock *sb
 	INIT_LIST_HEAD(&bh->bh_dirty_list);
 
 	rb_init_node(&bh->bh_dirty_rbnode);
-
-	bh->bh_bc = NULL;
-	bh->bh_seq = seq_num++;
 	
 	return bh;
 }
@@ -247,9 +241,8 @@ void nvfuse_free_buffer_head(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 sync_read, s32 is_meta)
 {
 	struct nvfuse_buffer_head *bh;
-	struct nvfuse_buffer_cache *bc;	
-	
-	u64 key = 0;
+	struct nvfuse_buffer_cache *bc;
+	u64 key;
 		
 	bh = nvfuse_find_bh_in_ictx(sb, ictx, ino, lblock);
 	if (bh)
@@ -791,8 +784,9 @@ s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *b
 {
 	struct nvfuse_buffer_cache *bc;
 
-	if (bh == NULL)
+	if (bh == NULL) {
 		return 0;
+	}
 
 	bc = bh->bh_bc;
 

@@ -524,7 +524,7 @@ s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str);
 void nvfuse_test(struct nvfuse_handle *nvh);
 s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str);
 bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno,bkey_t *key,u32 type);
-u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type);
+void nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type);
 s32 nvfuse_mount(struct nvfuse_handle *nvh);
 
 s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_size);

@@ -90,12 +90,6 @@ master_node_t *bp_init_master(struct nvfuse_superblock *sb)
 	master->push = stack_push;
 	master->pop = stack_pop;
 	master->dealloc= bp_dealloc_bitmap;	
-	master->m_root = 0;
-	
-	master->m_node_size = CLUSTER_SIZE;
-	master->m_fanout = (CLUSTER_SIZE - BP_NODE_HEAD_SIZE) / (BP_PAIR_SIZE);
-	if (master->m_fanout % 2 == 0)
-		master->m_fanout -= 1;
 		
 	return master;
 }
@@ -158,9 +152,9 @@ s32 bp_set_bitmap(master_node_t *master, u32 offset)
 	}	
 	sub_master = master_ctx.master;
 
-	set_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER);
-	sub_master->m_bitmap_free--;
-	assert(sub_master->m_bitmap_free >= 0);
+	set_bit(sub_master->m_ondisk->bitmap, offset % BP_NODES_PER_MASTER);
+	sub_master->m_ondisk->m_bitmap_free--;
+	assert(sub_master->m_ondisk->m_bitmap_free >= 0);
 
 	bp_release_master_ctx(master, &master_ctx, DIRTY);
 	
@@ -181,10 +175,10 @@ s32 bp_clear_bitmap(master_node_t *master, u32 offset)
 	}
 	sub_master = master_ctx.master;
 
-	assert(test_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER));
-	clear_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER);
-	sub_master->m_bitmap_free++;
-	assert(sub_master->m_bitmap_free <= BP_NODES_PER_MASTER);
+	assert(test_bit(sub_master->m_ondisk->bitmap, offset % BP_NODES_PER_MASTER));
+	clear_bit(sub_master->m_ondisk->bitmap, offset % BP_NODES_PER_MASTER);
+	sub_master->m_ondisk->m_bitmap_free++;
+	assert(sub_master->m_ondisk->m_bitmap_free <= BP_NODES_PER_MASTER);
 
 	bp_release_master_ctx(master, &master_ctx, DIRTY);
 
@@ -205,7 +199,7 @@ s32 bp_test_bitmap(master_node_t *master, u32 offset)
 	}
 	sub_master = master_ctx.master;
 
-	res = test_bit(sub_master->bitmap, offset % BP_NODES_PER_MASTER);
+	res = test_bit(sub_master->m_ondisk->bitmap, offset % BP_NODES_PER_MASTER);
 
 	bp_release_master_ctx(master, &master_ctx, DIRTY);		
 
@@ -226,8 +220,8 @@ s32 bp_inc_free_bitmap(master_node_t *master, u32 offset)
 	}
 	sub_master = master_ctx.master;
 		
-	sub_master->m_bitmap_free++;
-	assert(sub_master->m_bitmap_free <= BP_NODES_PER_MASTER);
+	sub_master->m_ondisk->m_bitmap_free++;
+	assert(sub_master->m_ondisk->m_bitmap_free <= BP_NODES_PER_MASTER);
 	
 	bp_release_master_ctx(master, &master_ctx, CLEAN);		
 
@@ -267,8 +261,8 @@ s32 bp_scan_bitmap(master_node_t *master)
 	max_offset = NVFUSE_SIZE_TO_BLK(inode->i_size);
 	max_master = CEIL(max_offset, BP_NODES_PER_MASTER);
 
-	last_touched_master = master->m_last_allocated_sub_master;
-	last_touched_offset = master->m_last_allocated_sub_offset; 
+	last_touched_master = master->m_ondisk->m_last_allocated_sub_master;
+	last_touched_offset = master->m_ondisk->m_last_allocated_sub_offset; 
 	
 	last_touched_offset = (last_touched_offset == 0) ? 1 : last_touched_offset;
 	
@@ -286,11 +280,11 @@ s32 bp_scan_bitmap(master_node_t *master)
 		}
 		sub_master = master_ctx.master;
 								
-		if (sub_master->m_bitmap_free)
+		if (sub_master->m_ondisk->m_bitmap_free)
 		{			
 			s32 bitmap_length;
 			bitmap_length = (last_touched_master + 1 == max_master) ? (max_offset % BP_NODES_PER_MASTER) : BP_NODES_PER_MASTER;
-			free_blk = _bp_scan_bitmap(sub_master->bitmap, last_touched_offset, bitmap_length);
+			free_blk = _bp_scan_bitmap(sub_master->m_ondisk->bitmap, last_touched_offset, bitmap_length);
 		}
 		else
 		{
@@ -301,8 +295,8 @@ s32 bp_scan_bitmap(master_node_t *master)
 
 		if (free_blk % BP_NODES_PER_MASTER != 0) // if not master node
 		{
-			master->m_last_allocated_sub_master = last_touched_master;
-			master->m_last_allocated_sub_offset = free_blk;
+			master->m_ondisk->m_last_allocated_sub_master = last_touched_master;
+			master->m_ondisk->m_last_allocated_sub_offset = free_blk;
 
 			return last_touched_master * BP_NODES_PER_MASTER + free_blk;
 		}
@@ -355,8 +349,6 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 
 	master->m_ino = inode->i_ino;
 	master->m_sb = sb;
-	master->m_alloc_block = 1; /* allocation of root node*/
-	master->m_bitmap_free = 1;
 
 	ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL, 1);
 	if (ret)
@@ -365,7 +357,14 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 		return NVFUSE_ERROR;
 	}
 	bh = nvfuse_get_new_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(inode->i_size), NVFUSE_TYPE_META);
-	nvfuse_release_bh(sb, bh, INSERT_HEAD, DIRTY);
+	memset(bh->bh_buf, 0x00, CLUSTER_SIZE);
+	
+	master->m_ondisk = (master_ondisk_node_t *)bh->bh_buf;
+	master->m_ondisk->m_alloc_block = 1; /* allocation of root node*/
+	master->m_ondisk->m_bitmap_free = 1;
+	master->m_bh = bh;
+
+	//nvfuse_release_bh(sb, bh, INSERT_HEAD, DIRTY);
 	assert(inode->i_size < MAX_FILE_SIZE);
 	inode->i_size += CLUSTER_SIZE;
 	
@@ -397,14 +396,14 @@ void 	bp_init_root(master_node_t *master)
 	new_bno = bp_alloc_bitmap(master, ictx);
 	bh = nvfuse_get_bh(master->m_sb, ictx, master->m_ino, new_bno, READ, NVFUSE_TYPE_META);
 
-	root = (index_node_t *)B_dALLOC(master, master->m_root, ALLOC_READ);
+	root = (index_node_t *)B_dALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
 	root->i_root = 1;
 	root->i_offset = 1;
 	root->i_flag = DATA_FLAG;
 	root->i_status = INDEX_NODE_USED;
 	root->i_bh = bh;
 	root->i_buf = bh->bh_buf;
-	master->m_root = root->i_offset;
+	master->m_ondisk->m_root = root->i_offset;
 
 	B_WRITE(master, root, root->i_offset);	
 	B_RELEASE_BH(master, root->i_bh);
@@ -480,7 +479,7 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	dp_right = B_dALLOC(master, 0, ALLOC_CREATE);
 	B_READ(master, dp_right, dp_right->i_offset, 0, 0);
 	
-	alloc_num = master->m_fanout * 2;
+	alloc_num = FANOUT * 2;
 	pair = bp_alloc_pair(master, alloc_num);
 	if (pair == NULL) {
 		printf(" alloc pair error ");
@@ -498,8 +497,8 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	dp_right->i_num+= offset;
 	dp_right->i_num++;
 
-	bp_init_pair(dp_left->i_pair, master->m_fanout);
-	bp_init_pair(dp_right->i_pair, master->m_fanout);
+	bp_init_pair(dp_left->i_pair, FANOUT);
+	bp_init_pair(dp_right->i_pair, FANOUT);
 
 	//distribution left
 	dst = dp_left->i_pair;	
@@ -512,7 +511,7 @@ index_node_t* bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	parent_ip->i_flag = 0;
 	parent_ip->i_num = 1;	
 		
-	bp_init_pair(parent_ip->i_pair, master->m_fanout);
+	bp_init_pair(parent_ip->i_pair, FANOUT);
 
 	B_ITEM_COPY(B_ITEM_GET(parent_ip, 0), &dp_left->i_offset);
 	B_KEY_COPY(B_KEY_GET(parent_ip, 0), B_KEY_GET(dp_left,dp_left->i_num -1));
@@ -563,7 +562,7 @@ int bp_split_data(master_node_t *master, index_node_t *p_ip,key_pair_t *child, i
 {
 	int i, child_count = 0;
 	
-	bp_init_pair(p_ip->i_pair, master->m_fanout);
+	bp_init_pair(p_ip->i_pair, FANOUT);
 	
 	p_ip->i_num = 0;
 	p_ip->i_root = 0;
@@ -601,7 +600,7 @@ index_node_t* bp_split_index_node(master_node_t *master,
 {
 	index_node_t *sibling_ip;	
 
-	if (count-1 < master->m_fanout) {
+	if (count-1 < FANOUT) {
 		bp_distribute_node(p_ip, child);
 		return NULL;
 	}
@@ -669,8 +668,8 @@ int bp_split_data_node(master_node_t *master,
 	dp_right->i_num++;
 
 	//init 
-	bp_init_pair(dp_left->i_pair, master->m_fanout);
-	bp_init_pair(dp_right->i_pair, master->m_fanout);
+	bp_init_pair(dp_left->i_pair, FANOUT);
+	bp_init_pair(dp_right->i_pair, FANOUT);
 
 	//distribute 
 	B_PAIR_COPY_N(dp_left->i_pair, pair_array, 0, 0,dp->i_num);
@@ -740,15 +739,15 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 	ip = B_iALLOC(master, ip_offset, ALLOC_READ);
 	B_READ(master, ip, ip->i_offset, 1, 0);
 
-	alloc_num = master->m_fanout+1;
-	pair_arr = bp_alloc_pair(master, master->m_fanout+1);
+	alloc_num = FANOUT + 1;
+	pair_arr = bp_alloc_pair(master, FANOUT + 1);
 	if (pair_arr == NULL) {
 		printf(" alloc pair error ");
 		return 0;
 	}
 
 	while(1) {
-		bp_init_pair(pair_arr, master->m_fanout+1);		
+		bp_init_pair(pair_arr, FANOUT + 1);
 		if (dp) {
 			bp_split_data_node(master, ip , dp, key, value, pair_arr);
 			dp = NULL;			
@@ -829,7 +828,7 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 		new_child->i_root = 0;		
 		root->i_root = 1;		
 
-		master->m_root = root->i_offset;
+		master->m_ondisk->m_root = root->i_offset;
 
 		bp_write_master(master);
 
@@ -921,7 +920,7 @@ int bp_key_is_null(bkey_t *buf)
 int bp_merge_key(master_node_t *master, index_node_t *dp, bkey_t *key,bitem_t *value)
 {
 	int i = 0, j = 0;
-	int max = master->m_fanout;
+	int max = FANOUT;
 	key_pair_t *pair = dp->i_pair;
 	
 	max = dp->i_num+1;
@@ -962,7 +961,7 @@ int bp_insert_key_tree(master_node_t *master,
 	key_pair_t *pair;
 	
 	/* root node allocation */
-	root = B_dALLOC(master, master->m_root, ALLOC_READ);
+	root = B_dALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
 	/* read root node from disk */
 	B_READ(master, root, root->i_offset, HEAD_SYNC, NOLOCK);
 	/* keep current node pointer temporalily to quickly retrieve */
@@ -994,7 +993,7 @@ int bp_insert_key_tree(master_node_t *master,
 	}
 
 	//check overflow in case of root node
-	if (dp->i_root && dp->i_num == master->m_fanout) 
+	if (dp->i_root && dp->i_num == FANOUT) 
 	{
 		root = bp_add_root_node(master, dp, key, value);
 		root->i_root = 1;
@@ -1002,7 +1001,7 @@ int bp_insert_key_tree(master_node_t *master,
 		B_RELEASE_BH(master, root->i_bh);
 		B_RELEASE(master, root);
 	} 
-	else if (dp->i_num == master->m_fanout) 
+	else if (dp->i_num == FANOUT) 
 	{
 		bp_split_tree(master, dp, key, value);
 	} 
@@ -1048,8 +1047,8 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 	else
 		target2 = target1 + 1;
 	
-	alloc_num = master->m_fanout * 2;
-	pair = bp_alloc_pair(master, master->m_fanout * 2);
+	alloc_num = FANOUT * 2;
+	pair = bp_alloc_pair(master, FANOUT * 2);
 	if (pair == NULL) {
 		printf(" bp alloc error \n");
 		exit(1);
@@ -1079,10 +1078,7 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 	
 	bubble_sort(master, pair, count, compare_str);
 
-	if (data_node)
-		max_count = master->m_fanout;
-	else
-		max_count = master->m_fanout + 1;
+	max_count = data_node ? FANOUT : (FANOUT + 1);
 
 	if (count < max_count) //merge child1 and child2 
 	{
@@ -1107,7 +1103,7 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 
 		node->i_num = count;
 		count = 0;		
-		for (i = 0; i < master->m_fanout; i++)
+		for (i = 0; i < FANOUT; i++)
 		{
 			if (i < node->i_num) {				
 				B_PAIR_COPY(node->i_pair, pair, i, count);
@@ -1178,10 +1174,10 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 		//distribute 
 		count = 0;
 		B_PAIR_COPY_N(child->i_pair, pair, 0, 0, child->i_num);		
-		B_PAIR_INIT_N(child->i_pair, child->i_num, (master->m_fanout - child->i_num));
+		B_PAIR_INIT_N(child->i_pair, child->i_num, (FANOUT - child->i_num));
 
 		B_PAIR_COPY_N(child2->i_pair, pair, 0, child->i_num, child2->i_num);		
-		B_PAIR_INIT_N(child2->i_pair, child2->i_num, (master->m_fanout - child2->i_num));
+		B_PAIR_INIT_N(child2->i_pair, child2->i_num, (FANOUT - child2->i_num));
 		
 		//change key
 		for (i = 0;i < ip->i_num + 1;i++) {	
@@ -1222,7 +1218,7 @@ int bp_redist_data_child(master_node_t *master,index_node_t *ip,index_node_t *ch
 	B_RELEASE(master, child2);
 	B_RELEASE(master, child);	
 
-	if (ip->i_num+1 >= (master->m_fanout/2+1))//INDEX_MIN_WAY
+	if (ip->i_num + 1 >= (FANOUT / 2 + 1))//INDEX_MIN_WAY
 		return 0; 
 	else 		
 		return 1; //under flow
@@ -1274,10 +1270,10 @@ int bp_merge_key_tree(master_node_t *master,bkey_t *key, index_node_t *dp, int d
 	{
 		B_DEALLOC(master, ip);
 			
-		master->m_root = *B_ITEM_GET(ip,0);
+		master->m_ondisk->m_root = *B_ITEM_GET(ip,0);
 		bp_write_master(master);
 
-		root = B_iALLOC(master, master->m_root, ALLOC_READ);
+		root = B_iALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
 		B_READ(master, root, root->i_offset, 1, ALLOC_READ);
 		root->i_root = 1;
 		B_WRITE(master, root, root->i_offset);
@@ -1372,7 +1368,7 @@ int rsearch_data_node(master_node_t *master, bkey_t *s_key, bkey_t *e_key)
 	bitem_t item = 0;
 	int index;
 	
-	ip = B_iALLOC(master, master->m_root, ALLOC_READ);
+	ip = B_iALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
 	B_READ(master, ip, ip->i_offset, 1, 1);
 
 	while (!B_ISLEAF(ip)) 
@@ -1422,7 +1418,7 @@ int search_data_node(master_node_t *master, bkey_t *key, index_node_t **d)
 {
 	index_node_t *ip;
 
-	ip = B_iALLOC(master, master->m_root, ALLOC_READ);
+	ip = B_iALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
 	B_READ(master, ip, ip->i_offset, 1, READ_LOCK);
 	
 	while (!B_ISLEAF(ip))
@@ -1484,7 +1480,7 @@ int bp_remove_key(master_node_t *master, bkey_t *key) {
 #ifdef NVFUSE_USE_DELAYED_REDISTRIBUTION_BPTREE
 	if (dp->i_num >= 1)	
 #else
-	if (dp->i_num >= (master->m_fanout / 2 + 1))
+	if (dp->i_num >= (FANOUT / 2 + 1))
 #endif
 	{//INDEX_MIN_WAY
 		B_WRITE(master, master->m_cur, master->m_cur->i_offset);
@@ -1546,24 +1542,17 @@ void bp_copy_raw_to_node(index_node_t *node, char *raw)
 	}
 }
 
-struct nvfuse_buffer_head *bp_read_block(master_node_t *master, int offset, int rwlock)
-{	
-	struct nvfuse_superblock *sb = master->m_sb;	
-	struct nvfuse_buffer_head *bh = NULL;
-	u32 bno;	
-	s32 res;
+inline struct nvfuse_buffer_head *bp_read_block(master_node_t *master, int offset, int rwlock)
+{		
 	lbno_t p_offset;
 	
-	p_offset = offset/BP_CLUSTER_PER_NODE;
-	bh = nvfuse_get_bh(sb, master->m_ictx, master->m_ino, p_offset, READ, NVFUSE_TYPE_META);
-	
-	return bh;
+	p_offset = offset / BP_CLUSTER_PER_NODE;
+	return nvfuse_get_bh(master->m_sb, master->m_ictx, master->m_ino, p_offset, READ, NVFUSE_TYPE_META);	
 }
 
-int bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, char *buf, int offset)
+inline void bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, char *buf, int offset)
 {
-	nvfuse_release_bh(sb, bh, 0, DIRTY);
-	return 0;
+	nvfuse_release_bh(sb, bh, 0, DIRTY);	
 }
 
 int bp_read_node(master_node_t *master, index_node_t *node, int offset, int sync, int rwlock)
@@ -1588,46 +1577,32 @@ int bp_read_node(master_node_t *master, index_node_t *node, int offset, int sync
 }
 
 int bp_read_master(master_node_t *master)
-{
-	int offset = 0;
+{	
 	struct nvfuse_buffer_head *bh;
 	
 	master->m_ictx = nvfuse_read_inode(master->m_sb, NULL, master->m_ino);
 
-	bh = bp_read_block(master, offset, READ_LOCK);
+	bh = bp_read_block(master, 0, READ_LOCK);
 	master->m_buf = bh->bh_buf;
 	master->m_bh = bh;
-		
-	rte_memcpy(master, bh->bh_buf, CLUSTER_SIZE);
-			
-	B_RELEASE_BH(master, bh);
-
+	master->m_ondisk = (master_ondisk_node_t *)bh->bh_buf;	
+	
 	return 0;
 }
 
-void bp_write_master(master_node_t *master)
-{
-	struct nvfuse_buffer_head *bh;	
-	int offset = 0;
-
-	bh = bp_read_block(master, offset, WRITE_LOCK);
-	master->m_buf = bh->bh_buf;
-	master->m_bh = bh;
-	
-	rte_memcpy(bh->bh_buf, master, CLUSTER_SIZE);
-	
-	nvfuse_mark_dirty_bh(master->m_sb, bh);
-	B_RELEASE_BH(master, bh);
+inline void bp_write_master(master_node_t *master)
+{	
+	nvfuse_mark_dirty_bh(master->m_sb, master->m_bh);
+	B_RELEASE_BH(master, master->m_bh);
 }
 
-int bp_write_node(master_node_t *master, index_node_t *node, int offset)
+inline int bp_write_node(master_node_t *master, index_node_t *node, int offset)
 {
 	assert(node->i_bh);
 
-	bp_copy_node_to_raw(node, node->i_buf);	
+	bp_copy_node_to_raw(node, node->i_buf);
 	nvfuse_mark_dirty_bh(master->m_sb, node->i_bh);
-
-	return 1;
+	return 0;
 }
 
 /* necessary a bitmap table to quickly find a free node */
@@ -1639,11 +1614,11 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 	index_node_t *node;
 	u32 new_bno = 0;
 		
-	if (master->m_dealloc_block)
+	if (master->m_ondisk->m_dealloc_block)
 	{		
 		new_bno = bp_scan_bitmap(master);
 		if (new_bno) {
-			master->m_dealloc_block--;			
+			master->m_ondisk->m_dealloc_block--;			
 			master->m_bitmap_ptr = new_bno;
 			//printf(" new bno = %d \n", new_bno);
 			goto FREE_BLK_FOUND;
@@ -1685,7 +1660,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 			/* inc size due to allocation of submaster ctx */
 			assert(inode->i_size < MAX_FILE_SIZE);
 			inode->i_size += CLUSTER_SIZE;
-			master->m_alloc_block++;			
+			master->m_ondisk->m_alloc_block++;			
 
 			new_bno = NVFUSE_SIZE_TO_BLK(inode->i_size);
 		}
@@ -1722,7 +1697,7 @@ FREE_BLK_FOUND:;
 		bp_set_bitmap(master, new_bno);
 	}
 		
-	master->m_alloc_block++;	
+	master->m_ondisk->m_alloc_block++;	
 	bp_write_master(master);	
 	
 	assert(new_bno);
@@ -1735,8 +1710,8 @@ int bp_dealloc_bitmap(master_node_t *master, index_node_t *p)
 {
 	p->i_status = INDEX_NODE_FREE;
 	master->m_bitmap_ptr = p->i_offset;
-	master->m_alloc_block--;
-	master->m_dealloc_block++;
+	master->m_ondisk->m_alloc_block--;
+	master->m_ondisk->m_dealloc_block++;
 	
 	/* clear bitmap */
 	bp_clear_bitmap(master, p->i_offset);
@@ -1769,7 +1744,7 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 	if (is_new)
 	{
 		node->i_offset = bp_alloc_bitmap(master, master->m_ictx);
-		master->m_fsize += master->m_node_size;
+		master->m_fsize += CLUSTER_SIZE;
 	}
 
 	node->i_pair = (key_pair_t *)bp_malloc(master->m_sb, BP_MEMPOOL_PAIR, 1);
@@ -1783,9 +1758,10 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 	return node;
 }
 
-int bp_release_bh(struct nvfuse_buffer_head *bh) {
-	if (bh == NULL)
+inline int bp_release_bh(struct nvfuse_buffer_head *bh) {
+	if (bh == NULL) {		
 		return 0;
+	}
 		
 	nvfuse_release_bh(bh->bh_bc->bc_sb, bh, INSERT_HEAD, bh->bh_bc->bc_dirty);
 
@@ -1913,12 +1889,11 @@ bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno, bkey_t *key, u32 type)
 }
 #endif
 
-inline u64 *nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type)
+inline void nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type)
 {
 	type <<= (NVFUSE_BP_HIGH_BITS - NVFUSE_BP_TYPE_BITS);
 
-	*key = ((u64)(type | ino) << NVFUSE_BP_HIGH_BITS) + (u64)lbno;
-	return key;
+	*key = ((u64)(type | ino) << NVFUSE_BP_HIGH_BITS) + (u64)lbno;	
 }
 
 #if 0

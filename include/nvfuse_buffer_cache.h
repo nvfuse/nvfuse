@@ -55,8 +55,7 @@ struct nvfuse_buffer_head {
 
 	struct nvfuse_buffer_cache *bh_bc; /* pointer to actual buffer head */
 	s32 bh_status; /* status (e.g., clean, dirty, meta) */
-	s32 bh_seq;
-	s8 *bh_buf;	
+	s8 *bh_buf;
 };
 
 /* buffer cache allocated to each physical block */
@@ -66,16 +65,20 @@ struct nvfuse_buffer_cache {
 	struct list_head bc_bh_head; /* buffer list to retrieve */
 	s32 bc_bh_count; 
 
-	s32 bc_list_type;				/* buffer status (e.g., clean, dirty, unused) */
-	s64 bc_bno;					/* buffer number (type | inode | block number)*/
-	lbno_t bc_lbno;				/* logical block number */
-	inode_t bc_ino;				/* inode number */
+	union {
+		u64 bc_bno;					/* buffer number (type | inode | block number)*/
+		struct{
+			u64 bc_lbno:32;				/* logical block number */
+			u64 bc_ino:32;				/* inode number */
+		};
+	};
+
 	pbno_t bc_pno;				/* physical block no*/
 
 	u32 bc_dirty:1;				/* dirty status */
 	u32 bc_load	:1;				/* data loaded from storage */
-	s32 bc_ref	:30;					/* reference count*/
-	u32 bc_hit;
+	u32 bc_ref	:27;					/* reference count*/	
+	u32 bc_list_type:3;				/* buffer status (e.g., clean, dirty, unused) */
 	
 	s8 *bc_buf;					/* actual buffered data */
 

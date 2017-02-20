@@ -873,7 +873,7 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 
 	assert(inode->i_bpino);
 
-	master= bp_init_master(sb);
+	master = bp_init_master(sb);
 	master->m_ino = inode->i_bpino;
 	master->m_sb = sb;	
 	bp_read_master(master);
@@ -942,7 +942,7 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	else
 		*offset &= collision;
 RES:;
-
+	B_RELEASE_BH(master, master->m_bh);
 	bp_deinit_master(master);
 	return res;
 }

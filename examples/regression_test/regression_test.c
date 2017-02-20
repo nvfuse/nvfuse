@@ -862,9 +862,9 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			sum_stat->write_io_count += cur_stat->write_io_count;
 		}
 
-		printf(" Device Total I/O bandwdith = %.3f MB/s\n", (double)sum_stat->total_io_count * CLUSTER_SIZE / MB /group_exec_time);
-		printf(" Device Read I/O bandwdith = %.3f MB/s\n", (double)sum_stat->read_io_count * CLUSTER_SIZE / MB /group_exec_time);
-		printf(" Device Write I/O bandwdith = %.3f MB/s\n", (double)sum_stat->write_io_count * CLUSTER_SIZE / MB /group_exec_time);
+		printf(" Device Total I/O bandwidth = %.3f MB/s\n", (double)sum_stat->total_io_count * CLUSTER_SIZE / MB /group_exec_time);
+		printf(" Device Read I/O bandwidth = %.3f MB/s\n", (double)sum_stat->read_io_count * CLUSTER_SIZE / MB /group_exec_time);
+		printf(" Device Write I/O bandwidth = %.3f MB/s\n", (double)sum_stat->write_io_count * CLUSTER_SIZE / MB /group_exec_time);
 		
 		printf(" Device Total I/O Amount = %.3f MB\n", (double)sum_stat->total_io_count * CLUSTER_SIZE / MB);
 		printf(" Device Read I/O Amount = %.3f MB\n", (double)sum_stat->read_io_count * CLUSTER_SIZE / MB);

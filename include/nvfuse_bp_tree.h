@@ -127,9 +127,11 @@ typedef struct index_node{
 |	MASTER		|	NODE	|	... 	|	NODE	|	MASTER		|	NODE	|	... 	|
 |---------------|-----------|-----------|-----------|---------------|-----------|-----------|
 */
+#define _FANOUT ((CLUSTER_SIZE - BP_NODE_HEAD_SIZE) / (BP_PAIR_SIZE))
+#define FANOUT  ((_FANOUT % 2 == 0) ? (_FANOUT-1) : _FANOUT)
 
 #define BP_KEY_START BP_NODE_HEAD_SIZE
-#define BP_ITEM_START(m) (BP_KEY_START + m->m_fanout * BP_KEY_SIZE)
+#define BP_ITEM_START(m) (BP_KEY_START + FANOUT * BP_KEY_SIZE)
 
 /***************************************************************/
 //				DATA NODE DEFINITIONS (LEAF NODE)
@@ -137,24 +139,28 @@ typedef struct index_node{
 //#define	DATA_KEY_LEN	INDEX_KEY_LEN
 #define DATA_FLAG		1	 
 
-
 /***************************************************************/
 //				MASTER NODE DEFINITIONS
 /***************************************************************/
-#define MAX_STACK 128
-typedef struct master_node{	
+typedef struct _master_ondisk_node {
 	offset_t m_root;			//4 root start cluster
 	offset_t m_bitmap_free;		//8 bitmap start cluster
 	offset_t m_bitmap_num;		//12 bitmap num clusters
 	unsigned int m_max_nodes;	//16
 	int m_alloc_block;			//20
 	int m_dealloc_block;		//24
-	int m_node_size;			//28
+	int m_node_size;			//28  /* identical to CLUSTER_SIZE*/
 	int m_fanout;				//32
 	int m_last_allocated_sub_master; // 36
 	int m_last_allocated_sub_offset; // 40
 
 	char bitmap[BP_BITMAP_SIZE]; //4096
+} master_ondisk_node_t;
+
+#define MAX_STACK 128
+typedef struct master_node {
+	/* ondisk pointer */	
+	master_ondisk_node_t *m_ondisk;
 
 	//struct in-memory
 	struct nvfuse_inode_ctx *m_ictx;
@@ -162,8 +168,7 @@ typedef struct master_node{
 	
 	struct nvfuse_superblock *m_sb;
 	struct nvfuse_buffer_head *m_bh;
-	int m_bitmap_ptr;
-	FILE *fp;
+	int m_bitmap_ptr;	
 	index_node_t *m_cur;	
 	offset_t m_stack[MAX_STACK];
 	int	m_sp;
@@ -174,7 +179,6 @@ typedef struct master_node{
 	char *m_buf;
 	unsigned int m_key_count;
 	
-
 	index_node_t *(*alloc) (struct master_node *master, int flag, int offset, int is_new);
 	int			(*dealloc) (struct master_node *master, index_node_t *p);
 	int			(*insert)(struct master_node *master,bkey_t *key, bitem_t *value, bitem_t *cur_value, int update);
@@ -367,7 +371,7 @@ master_node_t *bp_init_master(struct nvfuse_superblock *sb);
 int key_compare(void *k1, void *k2,void *start, int num,int mid);
 key_pair_t *bp_alloc_pair(master_node_t *master, int num);
 int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t *value);
-int bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, char *buf, int offset);
+void bp_write_block(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, char *buf, int offset);
 
 int bp_merge_key(master_node_t *master, index_node_t *dp, bkey_t *key,bitem_t *value);
 void bp_release_pair(master_node_t *master, key_pair_t *pair, int num);
