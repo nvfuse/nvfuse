@@ -19,6 +19,7 @@ experiment_type=$1
 COUNT=10000000
 OP_TYPE="total"
 
+
 function meta_experiment(){
    
     for i in {1..6}
