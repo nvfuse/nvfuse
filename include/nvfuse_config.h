@@ -60,7 +60,7 @@
 #define NVFUSE_INITIAL_BUFFER_SIZE_CONTROL (16) //16MB
 
 /* Maximum Buffer Size per Data Plane*/
-#define NVFUSE_MAX_BUFFER_SIZE_DATA (2048) // 4096MB
+#define NVFUSE_MAX_BUFFER_SIZE_DATA (1536) // 1.5GB
 
 /* Default Inode Context Size */
 #define NVFUSE_ICTXC_SIZE (32*1024)
