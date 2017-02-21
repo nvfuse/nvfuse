@@ -475,14 +475,16 @@ void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 	assert(ss->ss_free_inodes <= ss->ss_max_inodes);
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);	
 
-#ifndef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT	
-	//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
-	if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
+	if (!sb->sb_nvh->nvh_params.preallocation)
 	{
-		//printf(" %s Deallocate seg = %d \n", __FUNCTION__, seg_id);
-		nvfuse_remove_seg(sb, seg_id);		
+		//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
+		if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
+		{
+			//printf(" %s Deallocate seg = %d \n", __FUNCTION__, seg_id);
+			nvfuse_remove_seg(sb, seg_id);		
+		}
 	}
-#endif
+
 }
 
 void nvfuse_dec_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
@@ -530,14 +532,15 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 	assert(sb->sb_no_of_used_blocks >= 0);
 
 	/* removal of unused segment to primary process (e.g., control plane)*/
-#ifndef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
-	//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
-	if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
+	if (!sb->sb_nvh->nvh_params.preallocation)
 	{
-		//printf(" %s Deallocate seg = %d \n", __FUNCTION__, seg_id);
-		nvfuse_remove_seg(sb, seg_id);		
+		//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
+		if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
+		{
+			//printf(" %s Deallocate seg = %d \n", __FUNCTION__, seg_id);
+			nvfuse_remove_seg(sb, seg_id);		
+		}
 	}
-#endif
 
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 }
@@ -794,23 +797,24 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 			break;	
 	}
 
-#ifndef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT	
-	while (unused_count--)
+	if (!sb->sb_nvh->nvh_params.preallocation)
 	{
-		if (sb->sb_bm->bm_list_count[BUFFER_TYPE_UNUSED] >= NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG)
+		while (unused_count--)
 		{
-			res = nvfuse_remove_buffer_cache(sb, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
-			if (res == 0)
+			if (sb->sb_bm->bm_list_count[BUFFER_TYPE_UNUSED] >= NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG)
 			{
-				nvfuse_send_dealloc_buffer_req(sb->sb_nvh, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+				res = nvfuse_remove_buffer_cache(sb, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+				if (res == 0)
+				{
+					nvfuse_send_dealloc_buffer_req(sb->sb_nvh, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+				}
+			}
+			else
+			{
+				break;
 			}
 		}
-		else
-		{
-			break;
-		}
 	}
-#endif
 
 	/* truncate blocks */
 	nvfuse_truncate_blocks(sb, ictx, size);	
@@ -1614,8 +1618,14 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 
 	if (spdk_process_is_primary())
 		res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_CONTROL);
-	else
-		res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_DATA);
+	else {
+		if (nvh->nvh_params.preallocation)
+			res =  nvfuse_init_buffer_cache(sb, NVFUSE_MAX_BUFFER_SIZE_DATA);
+		else
+			res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_DATA);
+	}
+
+
 	if (res < 0)
 	{
 		printf(" Error: initialization of buffer cache \n");
@@ -1822,27 +1832,27 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 			seg_count++;
 		} while (container_id);
 
-#ifdef NVFUSE_USE_CONTAINER_PREALLOCATION_AT_MOUNT
-		/* fixed allocation (128G = 128M * 1024) */
-		while (seg_count < 1024) {
-			container_id = nvfuse_alloc_container_from_primary_process(nvh, CONTAINER_NEW_ALLOC);
-			if (container_id)
-			{
-				/* insert allocated container to process */
-				nvfuse_add_seg(sb, container_id);
-				#if 0
-				/* try to allocate buffers from primary process */
-				nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
-				nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
-				if (nr_buffers > 0)
+		if (nvh->nvh_params.preallocation) {
+			/* fixed allocation (128G = 128M * 1024) */
+			while (seg_count < NVFUSE_CONTAINER_PERALLOCATION_SIZE) {
+				container_id = nvfuse_alloc_container_from_primary_process(nvh, CONTAINER_NEW_ALLOC);
+				if (container_id)
 				{
-					nvfuse_add_buffer_cache(sb, nr_buffers);
+					/* insert allocated container to process */
+					nvfuse_add_seg(sb, container_id);
+					#if 0
+					/* try to allocate buffers from primary process */
+					nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
+					nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
+					if (nr_buffers > 0)
+					{
+						nvfuse_add_buffer_cache(sb, nr_buffers);
+					}
+					#endif
 				}
-				#endif
+				seg_count++;
 			}
-			seg_count++;
 		}
-#endif
 	}
 	else 
 	{

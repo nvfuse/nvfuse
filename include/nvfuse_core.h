@@ -421,6 +421,7 @@ struct nvfuse_params {
 	s32 qdepth;
 	s32 need_format;
 	s32 need_mount;
+	s32 preallocation;
 };
 
 /* IPC Ring Queue Name */

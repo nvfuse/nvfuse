@@ -56,7 +56,8 @@ void nvfuse_core_usage(char *cmd)
 	printf("\t-q: driver qdepth \n");	
 	printf("\t-b: buffer size (in MB) for primary process\n");	
 	printf("\t-c: CPU core mask (e.g., 0x1 (default), 0x2, 0x4\n");
-	printf("\t-a: Application name (e.g., rocksdb, fiebenc, redis\n");
+	printf("\t-a: application name (e.g., rocksdb, fiebenc, redis\n");
+	printf("\t-p: pre-allocation of buffers and containers\n");
 }
 
 void nvfuse_core_usage_example(char *cmd)
@@ -67,7 +68,7 @@ void nvfuse_core_usage_example(char *cmd)
 
 s8 *nvfuse_get_core_options()
 {
-	return "a:c:fmq:s:b:";
+	return "a:c:fmq:s:b:p";
 }
 
 s32 nvfuse_is_core_option(s8 option)
@@ -182,6 +183,7 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	s32 qdepth = AIO_MAX_QDEPTH;
 	s32 dev_size = 0; /* in MB units */
 	s32 buffer_size = 0; /* in MB units */
+	s32 preallocation = 0;
 	s8 op;
 	s8 *cmd;
 
@@ -265,6 +267,9 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 				fprintf( stderr, "Invalid buffer size = %d MB)\n", buffer_size);
 			}
 			break;
+		case 'p':
+			preallocation = 1;
+			break;
 		default:
 			fprintf(stderr, " Invalid op code %c in getopt()\n", op);
 			goto PRINT_USAGE;
@@ -287,6 +292,7 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	params->qdepth			= qdepth;
 	params->need_format		= need_format; /* no allowed for secondary processes */
 	params->need_mount		= need_mount;
+	params->preallocation	= preallocation;
 #if 1
 	printf(" appname = %s\n", appname);
 	printf(" cpu core mask = %x\n", cpu_core_mask);
@@ -294,6 +300,7 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	printf(" buffer size = %d MB\n", buffer_size);
 	printf(" need format = %d \n", need_format);
 	printf(" need mount = %d \n", need_mount);
+	printf(" preallocation = %d \n", preallocation);
 #endif
 
 	return 0;

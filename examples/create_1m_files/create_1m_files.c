@@ -160,6 +160,42 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	printf(" bp tree cpu = %f sec\n", (double)nvh->nvh_sb.bp_set_index_tsc/(double)spdk_get_ticks_hz());
 	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc/(double)spdk_get_ticks_hz());
 
+	return 0;
+}
+
+int rt_stat_files(struct nvfuse_handle *nvh, u32 arg)
+{
+	struct timeval tv;
+	struct statvfs stat;
+	s8 buf[FNAME_SIZE];
+	s32 max_inodes;
+	s32 i;
+	s32 fd;
+	s32 res;
+
+	if (nvfuse_statvfs(nvh, NULL, &stat) < 0)
+	{
+		printf(" statfs error \n");
+		return -1;
+	}
+
+	switch (test_type)
+	{
+		case MAX_TEST:
+			max_inodes = stat.f_ffree; /* # of free inodes */
+			break;
+		case QUICK_TEST:
+			max_inodes = 100;
+			break;
+		case MILL_TEST:
+			/* # of free inodes */
+			max_inodes = stat.f_ffree < 1000000 ? stat.f_ffree: 1000000;			
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;
+	}
+
 	/* reset progress percent */
 	rt_progress_reset();
 	gettimeofday(&tv, NULL);
@@ -184,6 +220,44 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	}
 	printf(" Finish: looking up null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
 
+
+	return 0;
+}
+
+
+int rt_rm_files(struct nvfuse_handle *nvh, u32 arg)
+{
+	struct timeval tv;
+	struct statvfs stat;
+	s8 buf[FNAME_SIZE];
+	s32 max_inodes;
+	s32 i;
+	s32 fd;
+	s32 res;
+
+	if (nvfuse_statvfs(nvh, NULL, &stat) < 0)
+	{
+		printf(" statfs error \n");
+		return -1;
+	}
+
+	switch (test_type)
+	{
+		case MAX_TEST:
+			max_inodes = stat.f_ffree; /* # of free inodes */
+			break;
+		case QUICK_TEST:
+			max_inodes = 100;
+			break;
+		case MILL_TEST:
+			/* # of free inodes */
+			max_inodes = stat.f_ffree < 1000000 ? stat.f_ffree: 1000000;			
+			break;
+		default:
+			printf(" Invalid test type = %d\n", test_type);
+			return -1;
+	}
+	
 	/* reset progress percent */
 	rt_progress_reset();
 	gettimeofday(&tv, NULL);
@@ -210,447 +284,6 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	return 0;
 }
 
-int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
-{
-	struct timeval tv;
-	struct statvfs stat;
-	s8 buf[FNAME_SIZE];
-	s32 max_inodes;
-	s32 i;
-	s32 res;
-
-	if (nvfuse_statvfs(nvh, NULL, &stat) < 0)
-	{
-		printf(" statfs error \n");
-		return -1;
-	}
-
-	switch (test_type)
-	{
-		case MAX_TEST:
-			max_inodes = stat.f_ffree; /* # of free inodes */
-			break;
-		case QUICK_TEST:
-			max_inodes = 100;
-			break;
-		case MILL_TEST:
-			/* # of free inodes */
-			max_inodes = stat.f_ffree < 1000000 ? stat.f_ffree: 1000000;			
-			break;
-		default:
-			printf(" Invalid test type = %d\n", test_type);
-			return -1;			
-	}
-
-	/* reset progress percent */
-	rt_progress_reset();
-	gettimeofday(&tv, NULL);
-
-	/* create null directories */
-	printf(" Start: creating null directories (0x%x).\n", max_inodes);
-	for (i = 0; i < max_inodes; i++)
-	{
-		sprintf(buf, "dir%d\n", i);
-		res = nvfuse_mkdir_path(nvh, buf, 0644);
-		if (res < 0)
-		{
-			printf(" Error: create dir = %s \n", buf);
-			return res;
-		}
-		/* update progress percent */
-		rt_progress_report(i, max_inodes);
-	}
-	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
-
-	printf(" Finish: creating null directories (0x%x) %.3f OPS (%.f sec). \n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
-	printf(" bp tree cpu = %f sec\n", (double)nvh->nvh_sb.bp_set_index_tsc/(double)spdk_get_ticks_hz());
-	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc/(double)spdk_get_ticks_hz());
-
-	/* reset progress percent */
-	rt_progress_reset();
-	gettimeofday(&tv, NULL);
-	/* lookup null directories */
-	printf(" Start: looking up null directories (0x%x).\n", max_inodes);
-	for (i = 0; i < max_inodes; i++)
-	{
-		struct stat st_buf;
-		int res;
-
-		sprintf(buf, "dir%d\n", i);
-
-		res = nvfuse_getattr(nvh, buf, &st_buf);
-		if (res) 
-		{
-			printf(" No such directory %s\n", buf);
-			return -1;
-		}
-		/* update progress percent */
-		rt_progress_report(i, max_inodes);
-	}
-	printf(" Finish: looking up null directories (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
-
-	/* reset progress percent */
-	rt_progress_reset();
-	gettimeofday(&tv, NULL);
-	/* delete null directories */
-	printf(" Start: deleting null directories (0x%x).\n", max_inodes);
-	for (i = 0; i < max_inodes; i++)
-	{
-		sprintf(buf, "dir%d\n", i);
-
-		res = nvfuse_rmdir_path(nvh, buf);
-		if (res)
-		{
-			printf(" rmfile = %s error \n", buf);
-			return -1;
-		}
-		/* update progress percent */
-		rt_progress_report(i, max_inodes);
-	}
-	
-	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
-
-	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes, max_inodes / time_since_now(&tv), time_since_now(&tv));
-	
-	return 0;
-}
-
-int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
-{
-	struct statvfs statvfs_buf;
-	struct stat stat_buf;
-	char str[128];
-	struct timeval tv;
-	s64 file_size;
-	s64 file_allocated_size;
-	s32 res;
-	s32 fid;
-
-	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
-	{
-		printf(" statfs error \n");
-		return -1;
-	}
-
-	sprintf(str, "file_allocate_test");
-
-	switch (test_type)
-	{
-		case MAX_TEST:
-			file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
-			break;
-		case QUICK_TEST:
-			file_size = 100 * MB;
-			break;
-		case MILL_TEST:
-			file_size = (s64)1 * TB;
-			file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
-				(s64)(statvfs_buf.f_bfree / 2) * CLUSTER_SIZE : 
-				(s64)file_size;
-			break;
-		default:
-			printf(" Invalid test type = %d\n", test_type);
-			return -1;
-	}
-
-	fid = nvfuse_openfile_path(nvh, str, O_RDWR | O_CREAT, 0);
-	if (fid < 0)
-	{
-		printf(" Error: file open or create \n");
-		return -1;
-	}
-	nvfuse_closefile(nvh, fid);
-
-	gettimeofday(&tv, NULL);
-	printf("\n Start: Fallocate and Deallocate (file %s size %luMB). \n", str, (long)file_size/MB);
-	/* pre-allocation of data blocks*/
-	nvfuse_fallocate(nvh, str, 0, file_size);
-
-	res = nvfuse_getattr(nvh, str, &stat_buf);
-	if (res) 
-	{
-		printf(" No such file %s\n", str);
-		return -1;
-	}
-
-	/* NOTE: Allocated size may differ from requested size. */
-	file_allocated_size = stat_buf.st_size;
-
-	printf(" requested size %dMB.\n", (long)file_size/MB);
-	printf(" allocated size %dMB.\n", (long)file_allocated_size/MB); 
-
-	printf(" nvfuse fallocate throughput %.3fMB/s (%0.3fs).\n", (double)file_allocated_size/MB/time_since_now(&tv), time_since_now(&tv));
-
-	gettimeofday(&tv, NULL);
-	printf(" Start: rmfile %s size %luMB \n", str, (long)file_allocated_size/MB);
-	res = nvfuse_rmfile_path(nvh, str);
-	if (res < 0)
-	{
-		printf(" Error: rmfile = %s\n", str);
-		return -1;
-	}
-	printf(" nvfuse rmfile throughput %.3fMB/s\n", (double)file_allocated_size/MB/time_since_now(&tv));
-
-	printf("\n Finish: Fallocate and Deallocate.\n");
-
-	return NVFUSE_SUCCESS;
-}
-
-int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 direct, s32 qdepth)
-{	
-	struct timeval tv;
-	char str[FNAME_SIZE];
-	s32 res;
-
-	sprintf(str, "file_allocate_test");
-
-	gettimeofday(&tv, NULL);
-
-	/* write phase */
-	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, WRITE, direct, is_rand);
-		if (res < 0)
-		{
-			printf(" Error: aio write test \n");
-			goto AIO_ERROR;
-		}
-		printf(" nvfuse aio write through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
-
-		res = nvfuse_rmfile_path(nvh, str);
-		if (res < 0)
-		{
-			printf(" Error: rmfile = %s\n", str);
-			return -1;
-		}
-	}
-
-	gettimeofday(&tv, NULL);
-	/* read phase */
-	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, READ, direct, is_rand);
-		if (res < 0)
-		{
-			printf(" Error: aio read test \n");
-			goto AIO_ERROR;
-		}
-		printf(" nvfuse aio read through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
-
-		res = nvfuse_rmfile_path(nvh, str);
-		if (res < 0)
-		{
-			printf(" Error: rmfile = %s\n", str);
-			return -1;
-		}
-	}
-
-	return 0;
-
-AIO_ERROR:	
-	res = nvfuse_rmfile_path(nvh, str);
-	if (res < 0)
-	{
-	    printf(" Error: rmfile = %s\n", str);
-	    return -1;
-	}
-	return -1;
-}
-
-int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
-{
-	struct statvfs statvfs_buf;
-	s32 direct;
-	s32 qdepth;
-	s32 res;	
-	s64 file_size;
-	s32 block_size;
-	
-	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
-	{
-		printf(" statfs error \n");
-		return -1;
-	}
-
-	switch (test_type)
-	{
-		case MAX_TEST:
-			file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
-			break;
-		case QUICK_TEST:
-			file_size = 100 * MB;
-			break;
-		case MILL_TEST:
-			file_size = (s64)128 * GB;
-			file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
-				(s64)(statvfs_buf.f_bfree / 2) * CLUSTER_SIZE : 
-				(s64)file_size;
-			break;
-		default:
-			printf(" Invalid test type = %d\n", test_type);
-			return -1;
-	}
-
-	direct = 1;
-	qdepth = 128;
-	block_size = 4096;
-	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
-
-	return NVFUSE_SUCCESS;
-}
-
-int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
-{
-	struct statvfs statvfs_buf;
-	s32 direct;
-	s32 qdepth;
-	s32 res;
-	s64 file_size;
-	s32 block_size;
-
-	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
-	{
-		printf(" statfs error \n");
-		return -1;
-	}
-
-	switch (test_type)
-	{
-		case MAX_TEST:
-			file_size = (s64) statvfs_buf.f_bfree * CLUSTER_SIZE;
-			break;
-		case QUICK_TEST:
-			file_size = 100 * MB;
-			break;
-		case MILL_TEST:
-			file_size = (s64)128 * GB;
-			file_size = (file_size > (s64)statvfs_buf.f_bfree * CLUSTER_SIZE) ?	
-				(s64)(statvfs_buf.f_bfree / 2) * CLUSTER_SIZE : 
-				(s64)file_size;
-			break;
-		default:
-			printf(" Invalid test type = %d\n", test_type);
-			return -1;
-	}
-
-	direct = 1;
-	qdepth = 128;
-	block_size = 128 * 1024;
-	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
-
-	return NVFUSE_SUCCESS;
-}
-
-int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
-{
-	struct timeval tv;
-	struct statvfs statvfs_buf;
-	char str[FNAME_SIZE];
-	s32 res;
-	s32 nr;
-	int i;
-
-	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0)
-	{
-		printf(" statfs error \n");
-		return -1;
-	}
-
-#if (RT_TEST_TYPE == MAX_TEST)
-	
-#elif (RT_TEST_TYPE == QUICK_TEST)
-	
-#elif (RT_TEST_TYPE == MILL_TEST)
-	
-#endif
-	switch (test_type)
-	{
-		case MAX_TEST:
-			nr = statvfs_buf.f_bfree / 2;
-			break;
-		case QUICK_TEST:
-			nr = 100;
-			break;
-		case MILL_TEST:
-			nr = statvfs_buf.f_bfree / 2;
-			if (nr > 1000000)
-			{
-				nr = 1000000;
-			}
-			break;
-		default:
-			printf(" Invalid test type = %d\n", test_type);
-			return -1;			
-	}
-
-	printf(" # of files = %d \n", nr);
-
-	/* reset progress percent */
-	rt_progress_reset();
-	gettimeofday(&tv, NULL);
-
-	printf(" Start: creating 4KB files (0x%x).\n", nr);
-	/* create files*/
-	for (i = 0; i < nr; i++)
-	{
-		sprintf(str, "file%d", i);
-		res = nvfuse_mkfile(nvh, str, "4096");			
-		if (res < 0)
-		{
-			printf(" mkfile error = %s\n", str);
-			return -1;
-		}
-
-		/* update progress percent */
-		rt_progress_report(i, nr);
-	}		
-	printf(" Finish: creating 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv), time_since_now(&tv));
-
-	/* reset progress percent */
-	rt_progress_reset();
-	gettimeofday(&tv, NULL);
-
-	printf(" Start: looking up 4KB files (0x%x).\n", nr);
-	/* lookup files */
-	for (i = 0; i < nr; i++)
-	{
-		struct stat st_buf;
-		int res;
-
-		sprintf(str, "file%d", i);
-		res = nvfuse_getattr(nvh, str, &st_buf);
-		if (res)
-		{
-			printf(" No such file %s\n", str);
-			return -1;
-		}
-		/* update progress percent */
-		rt_progress_report(i, nr);
-	}
-	printf(" Finish: looking up 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv), time_since_now(&tv));
-
-	/* reset progress percent */
-	rt_progress_reset();
-	gettimeofday(&tv, NULL);
-
-	/* delete files */
-	printf(" Start: deleting 4KB files (0x%x).\n", nr);
-	for (i = 0; i < nr; i++)
-	{
-		sprintf(str, "file%d", i);
-		res = nvfuse_rmfile_path(nvh, str);
-		if (res < 0)
-		{
-			printf(" rmfile error = %s \n", str);
-			return -1;
-		}
-		/* update progress percent */
-		rt_progress_report(i, nr);
-	}
-	printf(" Finish: deleting 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv), time_since_now(&tv));
-
-	return NVFUSE_SUCCESS;
-
-}
-
 #define RANDOM		1
 #define SEQUENTIAL	0
 
@@ -665,15 +298,8 @@ struct regression_test_ctx
 rt_ctx[] = 
 {
 	{ rt_create_files, "Creating Max Number of Files.", 0, 0, 0},
-#if 0
-	{ rt_create_dirs, "Creating Max Number of Directories.", 0, 0, 0},
-	{ rt_create_max_sized_file, "Creating Maximum Sized Single File.", 0, 0, 0},
-	{ rt_create_max_sized_file_aio_4KB, "Creating Maximum Sized Single File with 4KB Sequential AIO Read and Write.", SEQUENTIAL, 0, 0},
-	{ rt_create_max_sized_file_aio_4KB, "Creating Maximum Sized Single File with 4KB Random AIO Read and Write.", RANDOM, 0, 0},
-	{ rt_create_max_sized_file_aio_128KB, "Creating Maximum Sized Single File with 128KB Sequential AIO Read and Write.", SEQUENTIAL, 0, 0 },
-	{ rt_create_max_sized_file_aio_128KB, "Creating Maximum Sized Single File with 128KB Random AIO Read and Write.", RANDOM, 0, 0 },
-	{ rt_create_4KB_files, "Creating 4KB files with fsync.", 0, 0, 0}
-#endif
+	{ rt_stat_files, "Looking up Max Number of Files.", 0, 0, 0},
+	{ rt_rm_files, "Deleting Max Number of Files.", 0, 0, 0},
 };
 
 void rt_usage(char *cmd)
@@ -828,7 +454,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			group_exec_time += cur_stat->stat_rt.total_time;
 			printf(" Per core %d execution = %.6f\n", cur, cur_stat->stat_rt.total_time);			
 		}
-		printf(" Avg execution = %.6f sec \n", tc, rt_ctx[tc].test_name, tc_total / num_cores);
+		printf(" TC %d Execution %s = %.6f sec \n", tc, rt_ctx[tc].test_name, tc_total / num_cores);
 		printf("\n");
 	}
 	
