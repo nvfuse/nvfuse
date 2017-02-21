@@ -16,7 +16,7 @@ file_systems[2]='xfs'
 experiment_type=$1
 
 ## meta experiment
-COUNT=10000000
+COUNT=10
 OP_TYPE="total"
 
 
@@ -36,47 +36,48 @@ function fio_experiment(){
 
     # 4k random write
     for i in {1..6}
-    do
-    ./kernel_fs fio --name=sync --directory=. --ioengine=sync --size=32g --bs=4k --fsync=1 --rw=randwrite --thread=1 --numjobs=${i} --group_reporting --output=$RESULT_DIR_FIO/${file_systems[$1]}_4kb_syncio_fsync_write_th_${i}.txt
+    do 
+        fio --name=sync --directory=$MOUNT_DIR --ioengine=sync --size=32g --bs=4k --fsync=1 --rw=randwrite --thread=1 --numjobs=${i} --group_reporting --output=$RESULT_DIR_FIO/${file_systems[$1]}_4kb_syncio_fsync_write_th_${i}.txt
     done
 
     # 4k random read
     for i in {1..6}
     do
-        fio --name=sync --directory=. --ioengine=sync --size=32g --bs=4k -rw=randread --thread=1 --numjobs=${i} --group_reporting --output=$RESULT_DIR_FIO/${file_system[$1]}_kb_syncio_fsync_read_th_${i}.txt
+        fio --name=sync --directory=$MOUNT_DIR --ioengine=sync --size=32g --bs=4k --rw=randread --thread=1 --numjobs=${i} --group_reporting --output=$RESULT_DIR_FIO/${file_system[$1]}_kb_syncio_fsync_read_th_${i}.txt
     done
 }
 
 function init(){
-    if [ ! -d $MOUNT_DIR ]
-    then
-        mkdir $MOUNT_DIR
-    fi 
 
-    if [ ! -d $RESULT_DIR ]
-    then
-        mkdir $RESULT_DIR
-    fi 
+if [ ! -d $MOUNT_DIR ]
+then
+    mkdir $MOUNT_DIR
+fi 
 
-    if [ ! -d $RESULT_DIR_FIO ]
-    then
-        mkdir $RESULT_DIR_FIO 
-    fi 
+if [ ! -d $RESULT_DIR ]
+then
+    mkdir $RESULT_DIR
+fi 
 
-    if [ ! -d $RESULT_DIR_META ]
-    then
-        mkdir $RESULT_DIR_META
-    fi 
+if [ ! -d $RESULT_DIR_FIO ]
+then
+    mkdir $RESULT_DIR_FIO 
+fi 
 
-    source $NVFUSE_DIR/scripts/setup.sh reset
+if [ ! -d $RESULT_DIR_META ]
+then
+    mkdir $RESULT_DIR_META
+fi 
 
-    echo $((4*1024*1024)) > /proc/sys/vm/dirty_bytes
-    echo $((4*1024*1024)) > /proc/sys/vm/dirty_background_bytes 
+source $NVFUSE_DIR/scripts/setup.sh reset
 
-    if cat /proc/mounts | grep -F $MOUNT_DIR > /dev/null
-    then 
-        umount $MOUNT_DIR
-    fi
+echo $((4*1024*1024)) > /proc/sys/vm/dirty_bytes
+echo $((4*1024*1024)) > /proc/sys/vm/dirty_background_bytes 
+
+if cat /proc/mounts | grep -F $MOUNT_DIR > /dev/null
+then 
+    umount $MOUNT_DIR
+fi
 }
 
 function destroy(){
@@ -90,6 +91,12 @@ if [ $# -ne 1 ]
 then
     echo " - metadata perf usage #./script meta"
     echo " - fio perf usage      #./script fio"
+    exit
+fi
+
+if [ ! -f $PGM ]
+then 
+    echo "kernel_fs does not exist (need to make)"
     exit
 fi
 
