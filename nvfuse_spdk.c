@@ -626,7 +626,21 @@ RET:
 static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
 {
     int rc;
-   
+    struct spdk_env_opts opts;
+
+    /*
+     * SPDK relies on an abstraction around the local environment
+     * named env that handles memory allocation and PCI device operations.
+     * This library must be initialized first.
+     *
+     */
+    spdk_env_opts_init(&opts);
+    opts.name = "hello_world";
+    opts.core_mask = io_manager->cpu_core_mask_str;
+    opts.dpdk_mem_size = 8192;
+    opts.shm_id = 1;
+    spdk_env_init(&opts);
+
     printf("Initializing NVMe Controllers\n");
     /*
      * Start the SPDK NVMe enumeration process.  probe_cb will be called

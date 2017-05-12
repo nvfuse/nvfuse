@@ -20,7 +20,6 @@ include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 include $(NVFUSE_ROOT_DIR)/nvfuse.mk
 
 TARGET_NVFUSE = perf 
-TARGET_KERNEL = perf_kernel
 
 SRCS   = perf.o
 SRCS_KERNEL = perf_kernel.o
@@ -49,13 +48,10 @@ CC=gcc
 $(TARGET_NVFUSE)	:	$(OBJS_NVFUSE)
 	$(CC) -g -o $(TARGET_NVFUSE) $(OBJS_NVFUSE) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
 
-$(TARGET_KERNEL)	:	$(OBJS_KERNEL)
-	$(CC) -g -o $(TARGET_KERNEL) $(OBJS_KERNEL) $(LDFLAGS)
-
-all:  $(TARGET_NVFUSE) $(TARGET_KERNEL)
+all:  $(TARGET_NVFUSE)
 
 clean:
-	rm -f *.o *.a *~ $(TARGET_NVFUSE) $(TARGET_KERNEL)
+	rm -f *.o *.a *~ $(TARGET_NVFUSE)
 
 distclean:
 	rm -f Makefile.bak *.o *.a *~ .depend $(TARGET_NVFUSE)

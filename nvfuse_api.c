@@ -152,13 +152,10 @@ s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ip
 {
 	s32 ret;
 
-	ret = spdk_eal_init(cpu_core_mask);
-	if (ret < 0)
-		return -1;
-
 	/* Initialize IO Manager */		
 	io_manager->type = IO_MANAGER_SPDK;
 	io_manager->cpu_core_mask = cpu_core_mask;
+	sprintf(io_manager->cpu_core_mask_str, "%d", cpu_core_mask);
 
 	nvfuse_init_spdk(io_manager, "SPDK", "SPDK", qdepth);
 

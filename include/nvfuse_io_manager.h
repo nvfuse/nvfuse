@@ -125,6 +125,7 @@ struct nvfuse_io_manager {
     long start_blk; /* start block (512B)*/
     long total_blkcount; /* number of sectors (512B) */
     int cpu_core_mask; /* cpu core mask for SPDK */
+    char cpu_core_mask_str[128];
     
 #if NVFUSE_OS == NVFUSE_OS_LINUX
     io_context_t io_ctx;
