@@ -24,7 +24,8 @@ nvfuse_misc.o nvfuse_mkfs.o nvfuse_malloc.o nvfuse_indirect.o \
 nvfuse_spdk.o nvfuse_unix_io.o nvfuse_file_io.o nvfuse_ramdisk_io.o \
 nvfuse_api.o nvfuse_aio.o \
 rbtree.o \
-nvfuse_ipc_ring.o nvfuse_control_plane.o
+nvfuse_ipc_ring.o nvfuse_control_plane.o \
+nvfuse_dep.o
 
 LDFLAGS += -lm -lpthread -laio -lrt
 CFLAGS = $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE

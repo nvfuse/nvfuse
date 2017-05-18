@@ -25,6 +25,7 @@
 #include <assert.h>
 
 #include "nvfuse_core.h"
+#include "nvfuse_dep.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_ipc_ring.h"
@@ -85,7 +86,7 @@ struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, 
 	s32 type = 0;
 
 	/* if buffers are insufficient, it sens buffer allocation mesg to control plane */
-	if (bm->bm_list_count[BUFFER_TYPE_UNUSED] == 0)
+	if (bm->bm_list_count[BUFFER_TYPE_UNUSED] == 0 && nvfuse_process_model_is_dataplane())
 	{
 		s32 nr_buffers;
 
@@ -130,8 +131,6 @@ struct nvfuse_buffer_cache *nvfuse_replcae_buffer(struct nvfuse_superblock *sb, 
 		assert(remove_ptr != &bm->bm_list[type]);
 	} while (1);
 	
-	//if (bc->bc_hit)
-	//	printf(" bc hit = %d ino = %d\n", bc->bc_hit, bc->bc_ino);
 	/* remove list */
 	list_del(&bc->bc_list);
 	/* remove hlist */
@@ -207,8 +206,6 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 	
 	return bc;
 }
-
-static s32 seq_num = 0;
 
 struct nvfuse_buffer_head *nvfuse_alloc_buffer_head(struct nvfuse_superblock *sb)
 {
@@ -430,10 +427,11 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 	
 	assert (nr > 0);
 	
-	if (bm->bm_cache_size / 256 >= NVFUSE_MAX_BUFFER_SIZE_DATA)
+	if (nvfuse_process_model_is_dataplane() &&
+		bm->bm_cache_size / 256 >= NVFUSE_MAX_BUFFER_SIZE_DATA)
 	{
 		printf(" Current buffer size = %.3f \n", (double)bm->bm_cache_size / 256);
-		return 0;
+		return -1;
 	}
 
 	//printf(" Add buffer cache (%d 4K pages) to process\n", nr);
@@ -466,24 +464,29 @@ int nvfuse_add_buffer_cache(struct nvfuse_superblock *sb, int nr)
 		bm->bm_cache_size++;
 	}	
 
-	//printf(" Buffer Size = %.3f MB\n", (double)bm->bm_cache_size / 256);
+#if 0
+	printf(" Buffer Size = %.3f MB\n", (double)bm->bm_cache_size / 256);
+	printf(" buffer Unused = %.3f MB\n", (double)bm->bm_list_count[BUFFER_TYPE_UNUSED] / 256);
+#endif
+
 	return 0;
 }
 
 /* buffe_size in MB units */
-int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
+int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size) 
+{
 	struct nvfuse_buffer_manager *bm;
-	s32 i;
-	s32 recommended_size;
 	s32 buffer_size_in_4k;
 	s8 mempool_name[16];
 	s32 mempool_size;
+	s32 i;
 
 	sprintf(mempool_name, "nvfuse_bh_%d", rte_lcore_id());
-	if (!spdk_process_is_primary())
+
+	if (!spdk_process_is_primary() || nvfuse_process_model_is_standalone())
 		mempool_size = NVFUSE_BH_MEMPOOL_TOTAL_SIZE;
 	else
-		mempool_size = 2048;
+		mempool_size = 2048; /* 8MB = 4K * 2048 */
 
 	printf(" mempool for bh head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_head)));
 	sb->bh_mempool = spdk_mempool_create(mempool_name, mempool_size,
@@ -495,10 +498,12 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 	}
 	
 	sprintf(mempool_name, "nvfuse_bc");
-	if (spdk_process_is_primary())
+
+	/* mempool is created by a primary process and shared to all processes. */
+	if (spdk_process_is_primary() || nvfuse_process_model_is_standalone())
 	{
 		mempool_size = NVFUSE_BC_MEMPOOL_TOTAL_SIZE;		
-		printf(" mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
+		printf(" create mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
 		sb->bc_mempool = (struct spdk_mempool *)spdk_mempool_create(mempool_name, mempool_size,
 								sizeof(struct nvfuse_buffer_cache), NVFUSE_BC_MEMPOOL_CACHE_SIZE, -1);
 		if (sb->bc_mempool == NULL)
@@ -509,7 +514,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 	}
 	else
 	{		
-		printf(" mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
+		printf(" use shared mempool for bc head size = %d \n", (int)(mempool_size * sizeof(struct nvfuse_buffer_cache)));
 		sb->bc_mempool = (struct spdk_mempool *)rte_mempool_lookup(mempool_name);
 		if (sb->bc_mempool == NULL)
 		{
@@ -536,31 +541,39 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size){
 		bm->bm_hash_count[i] = 0;
 	}
 
-#if 0
-	/* 0.1% buffer of device size is recommended for better performance. */
-	recommended_size = sb->io_manager->total_blkcount / SECTORS_PER_CLUSTER / 1000;
-	if (buffer_size == 0)
+	if (nvfuse_process_model_is_standalone())
 	{
-		bm->bm_cache_size = recommended_size;
+		s32 recommended_size;
+
+		/* 0.1% buffer of device size is recommended for better performance. */
+		recommended_size = sb->io_manager->total_blkcount / SECTORS_PER_CLUSTER / 1000;
+
+		if (buffer_size)
+		{
+			buffer_size_in_4k = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
+		}
+		else
+		{
+			buffer_size_in_4k = recommended_size;
+		}
+
+		if (buffer_size_in_4k < recommended_size)
+		{
+			printf(" Performance will degrade due to small buffer size (%.3fMB)\n", 
+					(double)buffer_size_in_4k * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);		
+		} 
+		else 
+		{
+			printf(" Buffer cache size = %.3f MB\n", 
+				(double)buffer_size_in_4k * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);
+		}
+
 	}
 	else
 	{
-		bm->bm_cache_size = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
+		buffer_size_in_4k = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
 	}
-	if (bm->bm_cache_size < recommended_size)
-	{
-		printf(" Performance will degrade due to small buffer size (%.3fMB)\n", 
-				(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);		
-	} 
-	else 
-	{
-		printf(" Buffer cache size = %.3f MB\n", 
-			(double)bm->bm_cache_size * CLUSTER_SIZE / NVFUSE_MEGA_BYTES);
-	}
-#else
-	buffer_size_in_4k = buffer_size * (NVFUSE_MEGA_BYTES / CLUSTER_SIZE);
-	printf(" Set Default Buffer Cache = %dMB\n", buffer_size);
-#endif
+	printf(" Set Default Buffer Cache = %dMB\n", buffer_size_in_4k/256);
 	assert(buffer_size_in_4k);	
 	
 	if (!spdk_process_is_primary())
@@ -615,17 +628,15 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 	}
 
 	assert(removed_count == sb->sb_bm->bm_cache_size);
-	if (!spdk_process_is_primary())
+	if (!spdk_process_is_primary() && nvfuse_process_model_is_dataplane())
 	{
 		nvfuse_send_dealloc_buffer_req(sb->sb_nvh, removed_count);
 	}
 	
-	//printf(" free bh mempool \n");
 	spdk_mempool_free(sb->bh_mempool);
 
 	if (spdk_process_is_primary())
 	{		
-		//printf(" free bc mempool \n");
 		spdk_mempool_free(sb->bc_mempool);
 	}
 	printf(" > buffer cache hit rate = %f \n", (double)sb->sb_bm->bm_cache_hit/sb->sb_bm->bm_cache_ref);

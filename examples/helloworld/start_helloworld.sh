@@ -1,6 +1,9 @@
 #!/bin/sh
 
+. ../root_check.sh
+
 # -c: core mask
 # -a: app name
+# -f: format
 
-sudo ./helloworld -c 2 -a helloworld
+sudo ./helloworld -f -c 2 -a helloworld

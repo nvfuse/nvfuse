@@ -40,6 +40,7 @@
 #include <rte_log.h>
 #include <rte_mempool.h>
 
+#include "nvfuse_dep.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_core.h"
 #include "nvfuse_io_manager.h"
@@ -259,7 +260,6 @@ u32 nvfuse_get_next_seg_id(struct nvfuse_superblock *sb, s32 is_inode)
 			first_node = sb->sb_seg_search_ptr_for_data;
 		}
 
-		//if (first_node->next == )
 		if (list_is_last(first_node, &sb->sb_seg_list))		
 		{
 			printf(" list_is_last ..!! %s\n", is_inode?"inode":"data");
@@ -399,7 +399,11 @@ u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx
 		if (new_ino)
 			break;
 		
-		seg_id = nvfuse_get_next_seg_id(sb, 1 /*inode type*/);
+		if (nvfuse_process_model_is_dataplane())
+			seg_id = nvfuse_get_next_seg_id(sb, 1 /*inode type*/);
+		else
+			seg_id = (seg_id + 1) % sb->sb_segment_num;
+
 		hint_ino = 0;
 		count++;
 		//printf(" seg_id = %d \n", seg_id);
@@ -475,7 +479,8 @@ void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino)
 	assert(ss->ss_free_inodes <= ss->ss_max_inodes);
 	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);	
 
-	if (!sb->sb_nvh->nvh_params.preallocation)
+	/* release segment to the control plane */
+	if (!sb->sb_nvh->nvh_params.preallocation && nvfuse_process_model_is_dataplane())
 	{
 		//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
 		if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
@@ -532,7 +537,7 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 	assert(sb->sb_no_of_used_blocks >= 0);
 
 	/* removal of unused segment to primary process (e.g., control plane)*/
-	if (!sb->sb_nvh->nvh_params.preallocation)
+	if (!sb->sb_nvh->nvh_params.preallocation && nvfuse_process_model_is_dataplane())
 	{
 		//printf(" %s ss free blocks = %d(/%d) inode = %d(/%d)\n", __FUNCTION__, ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg), ss->ss_max_blocks, ss->ss_free_inodes, ss->ss_max_inodes);
 		if (ss->ss_free_blocks + (ss->ss_dtable_start % sb->sb_no_of_blocks_per_seg) == ss->ss_max_blocks && ss->ss_free_inodes == ss->ss_max_inodes)
@@ -591,7 +596,7 @@ u32 nvfuse_get_free_blocks(struct nvfuse_superblock *sb, u32 seg_id)
 
 	assert(ss->ss_free_blocks >= 0);
 	assert(sb->sb_free_blocks >= 0);
-	nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
+	nvfuse_release_bh(sb, ss_bh, 0, CLEAN);
 
 	return free_blocks;
 }
@@ -608,11 +613,11 @@ s32 nvfuse_check_free_block(struct nvfuse_superblock *sb, u32 num_blocks)
 {
 	s32 ret;
 
-	if (!spdk_process_is_primary())
-		ret = (sb->asb.asb_free_blocks >= (s64)num_blocks) ? 1 : 0;
-	else
+	if (spdk_process_is_primary())
 		ret = (sb->sb_free_blocks >= (s64)num_blocks) ? 1 : 0;
-	
+	else
+		ret = (sb->asb.asb_free_blocks >= (s64)num_blocks) ? 1 : 0;
+
 	return ret;
 }
 
@@ -630,22 +635,13 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 	s32 i, j;
 	s32 container_id;
 
-	if (!nvfuse_check_free_inode(sb))
+	if (nvfuse_process_model_is_dataplane() && !nvfuse_check_free_inode(sb))
 	{
 		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
 		if (container_id > 0) 
 		{			
 			/* insert allocated container to process */
 			nvfuse_add_seg(sb, container_id);
-			#if 0
-			/* try to allocate buffers from primary process */
-			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
-			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
-			if (nr_buffers > 0)
-			{
-				nvfuse_add_buffer_cache(sb, nr_buffers);
-			}
-			#endif
 			assert (nvfuse_check_free_inode(sb) == 1);
 		}
 		else
@@ -707,12 +703,12 @@ RES:;
 	nvfuse_release_bh(sb, bh, 0, DIRTY);
 
 	/* keep hit information to rapidly find a free inode */
-	if (!spdk_process_is_primary()) 
+	if (!spdk_process_is_primary() || nvfuse_process_model_is_standalone()) 
 	{
 		sb->sb_last_allocated_ino = alloc_ino + 1;
 	} 
 
-	if (spdk_process_is_primary())
+	if (spdk_process_is_primary() && nvfuse_process_model_is_dataplane())
 	{
 		printf(" allocated ino = %d\n", alloc_ino);
 	}
@@ -775,6 +771,11 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 	if(!num_block || num_block <= trun_num_block)
 		return;
 
+	/* 
+	 * Too slow when large inode is deleted. 
+	 * FIXME: buffers will be managed by RBtree or other structures.
+	 */
+
 	for(offset = num_block-1; offset >= trun_num_block; offset--)
 	{
 		nvfuse_make_pbno_key(inode->i_ino, offset, &key, NVFUSE_BP_TYPE_DATA);
@@ -797,7 +798,7 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 			break;	
 	}
 
-	if (!sb->sb_nvh->nvh_params.preallocation)
+	if (!sb->sb_nvh->nvh_params.preallocation && nvfuse_process_model_is_dataplane())
 	{
 		while (unused_count--)
 		{
@@ -818,51 +819,6 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 
 	/* truncate blocks */
 	nvfuse_truncate_blocks(sb, ictx, size);	
-}
-
-
-///*
-//* For the benefit of those who are trying to port Linux to another
-//* architecture, here are some C-language equivalents.  You should
-//* recode these in the native assmebly language, if at all possible.
-//*
-//* C language equivalents written by Theodore Ts'o, 9/26/92.
-//* Modified by Pete A. Zaitcev 7/14/95 to be portable to big endian
-//* systems, as well as non-32 bit systems.
-//*/
-//
-s32 ext2fs_set_bit(u32 nr,void * addr)
-{
-	s32		mask, retval;
-	u8	*ADDR = (u8 *) addr;
-
-	ADDR += nr >> 3;
-	mask = 1 << (nr & 0x07);
-	retval = mask & *ADDR;
-	*ADDR |= mask;
-	return retval;
-}
-
-s32 ext2fs_clear_bit(u32 nr, void * addr)
-{
-	s32		mask, retval;
-	u8	*ADDR = (u8 *) addr;
-
-	ADDR += nr >> 3;
-	mask = 1 << (nr & 0x07);
-	retval = mask & *ADDR;
-	*ADDR &= ~mask;
-	return retval;
-}
-
-s32 ext2fs_test_bit(u32 nr, const void * addr)
-{
-	s32			mask;
-	const u8	*ADDR = (const u8 *) addr;
-
-	ADDR += nr >> 3;
-	mask = 1 << (nr & 0x07);
-	return (mask & *ADDR);
 }
 
 s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, u32 offset)
@@ -1307,12 +1263,16 @@ s32 nvfuse_add_seg(struct nvfuse_superblock *sb, u32 seg_id)
 		root_container = 1;
 	}
 
-	if (!spdk_process_is_primary())
+	if (nvfuse_process_model_is_dataplane())
 	{
-		nvfuse_update_sb_with_ss_info(sb, seg_id, root_container, 1 /* inc*/);
+		if (!spdk_process_is_primary())
+		{
+			nvfuse_update_sb_with_ss_info(sb, seg_id, root_container, 1 /* inc*/);
+		}
+
+		nvfuse_update_owner_in_ss(sb, seg_id);
 	}
 
-	nvfuse_update_owner_in_ss(sb, seg_id);
 	//printf(" core %d adds segment %d (total %d)\n", rte_lcore_id(), seg_id, sb->sb_seg_list_count);	
 }
 
@@ -1544,7 +1504,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	s8 mempool_name[32];
 	s32 mempool_size;
 	
-	fprintf(stdout, "start %s\n", __FUNCTION__);	
+	fprintf(stdout, " start %s\n", __FUNCTION__);	
 	
 	sb = nvfuse_read_super(nvh);
 			
@@ -1616,20 +1576,31 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		exit(0);
 	}
 
-	if (spdk_process_is_primary())
-		res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_CONTROL);
-	else {
-		if (nvh->nvh_params.preallocation)
-			res =  nvfuse_init_buffer_cache(sb, NVFUSE_MAX_BUFFER_SIZE_DATA);
-		else
-			res = nvfuse_init_buffer_cache(sb, NVFUSE_INITIAL_BUFFER_SIZE_DATA);
-	}
-
-
-	if (res < 0)
 	{
-		printf(" Error: initialization of buffer cache \n");
-		return -1;
+		s32 buf_size; /* in MB unit */
+
+		if (nvfuse_process_model_is_standalone())
+		{
+			buf_size = nvh->nvh_params.buffer_size;
+		}
+		else
+		{
+			if (spdk_process_is_primary())
+				buf_size = NVFUSE_INITIAL_BUFFER_SIZE_CONTROL;
+			else {
+				if (nvh->nvh_params.preallocation)
+					buf_size = NVFUSE_MAX_BUFFER_SIZE_DATA;
+				else
+					buf_size = NVFUSE_INITIAL_BUFFER_SIZE_DATA;
+			}
+		}
+
+		res =  nvfuse_init_buffer_cache(sb, buf_size);
+		if (res < 0)
+		{
+			printf(" Error: initialization of buffer cache \n");
+			return -1;
+		}
 	}
 
 	res = nvfuse_init_ictx_cache(sb);
@@ -1652,7 +1623,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	memset(sb->sb_file_table, 0x00, sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
 
 	//gettimeofday(&start_tv, NULL);
-	if (spdk_process_is_primary())
+	if (spdk_process_is_primary() || nvfuse_process_model_is_standalone())
 	{
 		res = nvfuse_scan_superblock(sb);
 		if (res < 0) {
@@ -1729,11 +1700,12 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 	
 	sprintf(mempool_name, "nvfuse_seg");
-	if (spdk_process_is_primary())
+	if (spdk_process_is_primary() || nvfuse_process_model_is_standalone())
 	{
 		mempool_size = sb->sb_segment_num;
-		printf(" no_of_segments = %d\n", sb->sb_segment_num);
 		assert(mempool_size);
+
+		printf(" no_of_segments = %d\n", sb->sb_segment_num);
 		printf(" mempool for seg node size = %d \n", (int)(mempool_size * sizeof(struct seg_node)));
 		sb->seg_mempool = (struct spdk_mempool *)spdk_mempool_create(mempool_name, mempool_size,
 								sizeof(struct seg_node), 0x10, SPDK_ENV_SOCKET_ID_ANY);
@@ -1806,28 +1778,37 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	sb->sb_seg_search_ptr_for_inode = &sb->sb_seg_list;
 	sb->sb_seg_search_ptr_for_data = &sb->sb_seg_list;
 
+	/* Effective for only multiple dataplane model */
+	if (spdk_process_is_primary())	
+	{
+		/* the primary process makes use of all segments */
+		if (nvfuse_process_model_is_standalone())
+		{
+			s32 seg_id;
+
+			for (seg_id = 0; seg_id < sb->sb_segment_num; seg_id++)
+				nvfuse_add_seg(sb, seg_id);
+		}
+		else
+		{
+			/*add root container */
+			nvfuse_add_seg(sb, sb->asb.asb_root_seg_id);
+		}
+	}
 	/* fetch allocated container list, which was already reserved 
 	   in the previous execution from primary process */
-	if (!spdk_process_is_primary())	
+	else 
 	{
-		int container_id;
+		s32 container_id;
 		s32 nr_buffers;
 		s32 seg_count = 0;
+
 		do {
 			container_id = nvfuse_alloc_container_from_primary_process(nvh, CONTAINER_ALLOCATED_ALLOC);
 			if (container_id)
 			{
 				/* insert allocated container to process */
 				nvfuse_add_seg(sb, container_id);
-				#if 0
-				/* try to allocate buffers from primary process */
-				nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
-				nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
-				if (nr_buffers > 0)
-				{
-					nvfuse_add_buffer_cache(sb, nr_buffers);
-				}
-				#endif
 			}
 			seg_count++;
 		} while (container_id);
@@ -1840,26 +1821,10 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 				{
 					/* insert allocated container to process */
 					nvfuse_add_seg(sb, container_id);
-					#if 0
-					/* try to allocate buffers from primary process */
-					nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
-					nr_buffers = nvfuse_send_alloc_buffer_req(nvh, nr_buffers);
-					if (nr_buffers > 0)
-					{
-						nvfuse_add_buffer_cache(sb, nr_buffers);
-					}
-					#endif
 				}
 				seg_count++;
 			}
 		}
-	}
-	else 
-	{
-		/*add root container */
-		nvfuse_add_seg(sb, sb->asb.asb_root_seg_id);
-		//nvfuse_add_buffer_cache(sb, 
-		//(int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA));
 	}
 
 	/* create b+tree index for root directory at first mount after formattming */
@@ -1926,6 +1891,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	if(!nvh->nvh_mounted)
 		return -1;
 
+	fprintf(stdout, " start %s\n", __FUNCTION__);	
+
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL)
 	{
@@ -1938,7 +1905,7 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 
 	nvfuse_check_flush_dirty(sb, DIRTY_FLUSH_FORCE);
 
-	if (spdk_process_is_primary()) {
+	if (spdk_process_is_primary() || nvfuse_process_model_is_standalone()) {
 		nvfuse_copy_mem_sb_to_disk_sb((struct nvfuse_superblock *)buf, sb);
 		nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, sb->io_manager);
 	}
@@ -1964,20 +1931,33 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 	nvfuse_deinit_buffer_cache(sb);	
 	nvfuse_deinit_ictx_cache(sb);
 
-	if (!spdk_process_is_primary()) {
-		/* app unregistration with keeping allocated containers permanently */
-		nvfuse_send_app_unregister_req(nvh, APP_UNREGISTER_WITHOUT_DESTROYING_CONTAINERS);
-		nvfuse_put_channel_id(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
-		
-		printf(" Release channel = %d \n", nvh->nvh_ipc_ctx.my_channel_id);
-	}
-
+	if (nvfuse_process_model_is_dataplane())
 	{
-		struct perf_stat_ipc *stat = &sb->perf_stat_ipc.stat_ipc;
-		printf(" Container Alloc Latency = %f us\n", (double)stat->total_tsc[CONTAINER_ALLOC_REQ]*1000000/stat->total_count[CONTAINER_ALLOC_REQ]/spdk_get_ticks_hz());
-		printf(" Container Free Latency = %f us\n", (double)stat->total_tsc[CONTAINER_RELEASE_REQ]*1000000/stat->total_count[CONTAINER_RELEASE_REQ]/spdk_get_ticks_hz());
-		printf(" BUFFER Alloc Latency = %f us\n", (double)stat->total_tsc[BUFFER_ALLOC_REQ]*1000000/stat->total_count[BUFFER_ALLOC_REQ]/spdk_get_ticks_hz());
-		printf(" BUFFER Free Latency = %f us\n", (double)stat->total_tsc[BUFFER_FREE_REQ]*1000000/stat->total_count[BUFFER_FREE_REQ]/spdk_get_ticks_hz());
+		if (!spdk_process_is_primary()) {
+			/* app unregistration with keeping allocated containers permanently */
+			nvfuse_send_app_unregister_req(nvh, APP_UNREGISTER_WITHOUT_DESTROYING_CONTAINERS);
+			nvfuse_put_channel_id(&nvh->nvh_ipc_ctx, nvh->nvh_ipc_ctx.my_channel_id);
+			
+			printf(" Release channel = %d \n", nvh->nvh_ipc_ctx.my_channel_id);
+		}
+
+		{
+			struct perf_stat_ipc *stat = &sb->perf_stat_ipc.stat_ipc;
+			double us_ticks = (double)spdk_get_ticks_hz() / 1000000;
+
+			printf(" Container Alloc Latency = %f us\n", (double)stat->total_tsc[CONTAINER_ALLOC_REQ] / 
+														stat->total_count[CONTAINER_ALLOC_REQ] /
+														us_ticks);
+			printf(" Container Free Latency = %f us\n", (double)stat->total_tsc[CONTAINER_RELEASE_REQ] / 
+														stat->total_count[CONTAINER_RELEASE_REQ] /
+														us_ticks);
+			printf(" BUFFER Alloc Latency = %f us\n", (double)stat->total_tsc[BUFFER_ALLOC_REQ] /
+														stat->total_count[BUFFER_ALLOC_REQ] /
+														us_ticks);
+			printf(" BUFFER Free Latency = %f us\n", (double)stat->total_tsc[BUFFER_FREE_REQ] /
+														stat->total_count[BUFFER_FREE_REQ]/
+														us_ticks);
+		}
 	}
 
 	spdk_free(sb->sb_ss);
@@ -1987,6 +1967,7 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 
 	nvfuse_free_aligned_buffer(buf);
 
+	printf(" NVFUSE has been successfully unmounted. \n");
 	return 0;
 }
 
@@ -2474,15 +2455,15 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct 
 	strcpy(b,path);
 	i = strlen(b);
 
-	if(b[i-1] == '/'){
+	if (b[i-1] == '/') {
 		res = NVFUSE_ERROR;
 		goto RES;
 	}
 
 	while(b[--i] != '/' && i >1);
+
 	if(b[i] == '/')
 		b[i] = '\0';
-
 
 	if(path[0] == '/')
 		local_dir_ino = nvfuse_get_root_ino(nvh);
@@ -2941,29 +2922,6 @@ s32 error_msg(s8 *str)
 	return NVFUSE_ERROR;
 }
 
-s32 fat_dirname(const s8 *path, s8 *dest)
-{
-	s8 *slash;
-	strcpy(dest, path);
-	slash = strrchr(dest, 0x2F); // 0x2F = "/"
-	if (slash == &(dest[0])) { dest[1] = 0; return 0; } // root dir
-	*slash  = 0;
-	return 0;
-}
-
-s32 fat_filename(const s8 *path, s8 *dest)
-{
-	s8 *slash;
-	slash = strrchr(path, 0x2F); // 0x2F = "/"
-	if(slash == NULL){
-		strcpy(dest, path);
-		return 0;
-	}
-	slash++;
-	strcpy(dest, slash);
-	return 0;
-}
-
 void nvfuse_dir_hash(s8 *filename, u32 *hash1, u32 *hash2)
 {
 #ifdef USE_INTEL_CRC32C
@@ -2992,7 +2950,7 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 	s32 res;
 	u64 start_tsc;
 
-	if (spdk_process_is_primary())
+	if (spdk_process_is_primary() && nvfuse_process_model_is_dataplane())
 	{
 		force = DIRTY_FLUSH_FORCE;
 	}

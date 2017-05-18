@@ -35,6 +35,7 @@
 #endif
 
 #include "nvfuse_core.h"
+#include "nvfuse_dep.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_gettimeofday.h"
@@ -326,6 +327,7 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 	
 	/* copy instance of io_manager */
 	memcpy(&nvh->nvh_iom, io_manager, sizeof(struct nvfuse_io_manager));
+
 	/* Initialization of Perf Stat for Dev */
 	memset(&nvh->nvh_iom.perf_stat_dev, 0x00, sizeof(union perf_stat));
 	
@@ -2885,7 +2887,9 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 			max_block = CEIL(length, CLUSTER_SIZE);
 			remain_block = max_block;
 			
-			/*printf(" free no of blocks = %ld\n", (long)sb->sb_free_blocks);*/
+			///*
+			printf(" free no of blocks = %ld\n", (long)sb->sb_free_blocks);
+			//*/
 
 			while (remain_block)
 			{

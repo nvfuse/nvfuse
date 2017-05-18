@@ -469,8 +469,6 @@ struct nvfuse_handle {
 };
 
 s32 error_msg(s8 *str);
-s32 fat_dirname(const s8 *path, s8 *dest);
-s32 fat_filename(const s8 *path, s8 *dest);
 void nvfuse_dir_hash(s8 *filename, u32 *hash, u32 *hash2);
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager);
 
@@ -488,9 +486,6 @@ s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_ino
 void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx);
 
 void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size);
-s32 ext2fs_set_bit(u32 nr,void * addr);
-s32 ext2fs_clear_bit(u32 nr, void * addr);
-s32 ext2fs_test_bit(u32 nr, const void * addr);
 s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb,struct nvfuse_inode *inode,s8 *filename,u32 offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename,bitem_t *offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename,bitem_t *offset);

@@ -233,27 +233,18 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	
 	//printf(" current free blocks = %ld \n", sb->asb.asb_free_blocks);
 
-	if (!nvfuse_check_free_block(sb, num_blocks))
+	if (nvfuse_process_model_is_dataplane() && !nvfuse_check_free_block(sb, num_blocks))
 	{
 		s32 container_id;
 		s32 nr_buffers;
 
 		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
 		if (container_id > 0) {
-			
 			/* insert allocated container to process */
 			nvfuse_add_seg(sb, container_id);
-#if 0
-			/* try to allocate buffers from primary process */			
-			nr_buffers = (int)((double)sb->sb_no_of_blocks_per_seg * NVFUSE_BUFFER_RATIO_TO_DATA);
-			nr_buffers = nvfuse_send_alloc_buffer_req(sb->sb_nvh, nr_buffers);
-			if (nr_buffers > 0)
-			{
-				nvfuse_add_buffer_cache(sb, nr_buffers);
-			}
-#endif
 			assert (nvfuse_check_free_block(sb, num_blocks) == 1);
 		} else {
+			printf(" No free containers in the file system\n");
 			assert(0);
 		}
 	}
@@ -283,19 +274,24 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 			}
 		}
 
+		//printf(" sid %d free blocks %d \n", seg_id, nvfuse_get_free_blocks(sb, seg_id));
 		//printf("1. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
 		#if 1
-		if (once)
+		if (once && nvfuse_process_model_is_dataplane())
 		{
 			nvfuse_move_curr_seg_id(sb, seg_id, 0 /* data type */);
 			once--;
 		}
 		#endif
 		//printf("2. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
-		seg_id = nvfuse_get_next_seg_id(sb, 0 /* data type */);
+		if (nvfuse_process_model_is_dataplane())
+			seg_id = nvfuse_get_next_seg_id(sb, 0 /* data type */);
+		else 
+			seg_id = (seg_id + 1) % sb->sb_segment_num;
 		//printf("3. alloc block: cur seg = %d, next_seg = %d \n", seg_id, next_id);
 	} while (seg_id != next_id);
 
+	/* FIXME: how to handle this exception case! */
 	if (!cnt)
 	{
 		printf(" Warning: it runs out of free blocks.\n");

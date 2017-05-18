@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ../root_check.sh
+
 OUTPUT_PATH=result
 if [ ! -d $OUTPUT_PATH ] ; then
 	mkdir -p $OUTPUT_PATH

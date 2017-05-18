@@ -50,3 +50,4 @@ Test Script
 	+ Optimization of bitmap operations with gcc __builtin_function
 	+ deffered directory shrink
 	+ redudant directory lookup 
+	+ standalone / multiple data plane model

@@ -27,6 +27,7 @@
 #include <rte_mempool.h>
 #endif
 #include "nvfuse_core.h"
+#include "nvfuse_dep.h"
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_indirect.h"

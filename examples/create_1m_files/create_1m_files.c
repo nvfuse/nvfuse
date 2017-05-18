@@ -500,7 +500,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	}
 
 	/* IPC Stat */
-	{
+	if (nvfuse_process_model_is_dataplane()) {
 		union perf_stat _sum_stat;
 		struct perf_stat_ipc *sum_stat = &_sum_stat;
 		struct perf_stat_ipc *cur_stat;

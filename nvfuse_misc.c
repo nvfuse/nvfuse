@@ -78,7 +78,7 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 			if(ret == -1)
 				return -1;
 		}
-		nvfuse_writefile(nvh, fd,file_source, i, 0); /* write remainder */
+		nvfuse_writefile(nvh, fd, file_source, i, 0); /* write remainder */
 
 		nvfuse_fsync(nvh, fd);
 		nvfuse_closefile(nvh, fd);

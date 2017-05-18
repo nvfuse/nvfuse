@@ -1,0 +1,8 @@
+*.o
+*.txt
+*.log
+tags
+*.swp
+*.a
+cscope.out
+cscope.files

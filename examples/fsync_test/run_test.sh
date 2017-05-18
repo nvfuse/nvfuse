@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ../root_check.sh
+
 file_size=16 #GB
 block_size=4 #KB
 fsync_period=1 

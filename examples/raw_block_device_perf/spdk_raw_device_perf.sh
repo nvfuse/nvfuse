@@ -1,4 +1,7 @@
 #!/bin/sh
+
+. ../root_check.sh
+
 SPDK_PERF_PATH=/root/spdk/examples/nvme/perf/perf
 SPDK_RESET_PATH=/root/spdk/scripts/setup.sh
 OUTPUT_PATH=output

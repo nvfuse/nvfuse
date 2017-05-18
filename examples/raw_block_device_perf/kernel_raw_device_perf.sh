@@ -1,4 +1,7 @@
 #!/bin/sh
+
+. ../root_check.sh
+
 FIO_PERF_PATH=fio
 SPDK_RESET_PATH=/root/spdk/scripts/setup.sh
 OUTPUT_PATH=output

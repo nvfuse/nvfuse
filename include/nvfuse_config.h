@@ -29,6 +29,19 @@
 #	define NVFUSE_OS NVFUSE_OS_WINDOWS
 #endif 
 
+#define NVFUSE_PROCESS_MODEL NVFUSE_PROCESS_STANDALONE
+#define NVFUSE_PROCESS_STANDALONE	0
+#define NVFUSE_PROCESS_DATAPLANE	1
+
+static inline int nvfuse_process_model_is_standalone()
+{
+	return NVFUSE_PROCESS_MODEL == NVFUSE_PROCESS_STANDALONE;
+}
+
+static inline int nvfuse_process_model_is_dataplane()
+{
+	return NVFUSE_PROCESS_MODEL == NVFUSE_PROCESS_DATAPLANE;
+}
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #   define __NOUSE_FUSE__

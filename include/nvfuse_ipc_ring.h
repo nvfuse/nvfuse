@@ -327,6 +327,7 @@ int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring, 
 						struct rte_mempool *stat_message_pool,
 						union perf_stat *stat);
+void perf_stat_ring_free(struct rte_ring *stat_rx_ring, struct rte_mempool *stat_message_pool);
 
 int nvfuse_stat_ring_get(struct rte_ring *stat_rx_ring, 
 						struct rte_mempool *stat_message_pool,

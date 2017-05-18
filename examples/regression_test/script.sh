@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ../root_check.sh
+
 # MAX Test
 #sudo ./regression_test -T 1 -c 2 -a regression
 

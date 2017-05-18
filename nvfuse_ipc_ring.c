@@ -410,6 +410,13 @@ int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 }
 
 /* perf stat ring queue */
+void perf_stat_ring_free(struct rte_ring *stat_rx_ring, struct rte_mempool *stat_message_pool)
+{
+	rte_ring_free(stat_rx_ring);
+	rte_mempool_free(stat_message_pool);
+}
+
+/* perf stat ring queue */
 int perf_stat_ring_lookup(struct rte_ring **stat_rx_ring, struct rte_mempool **stat_message_pool, enum stat_type type)
 {	
 	assert(type < NUM_STAT_TYPE);
@@ -580,16 +587,20 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 	if (spdk_process_is_primary())	
 	{
 		for (i = 0;i < NUM_STAT_TYPE; i++)
+		{
 			ret = perf_stat_ring_create(&ipc_ctx->stat_ring[i], &ipc_ctx->stat_pool[i], i);
-		if (ret < 0)
-			rte_exit(EXIT_FAILURE, "Problem getting message pool\n");
+			if (ret < 0)
+				rte_exit(EXIT_FAILURE, "Problem getting message pool\n");
+		}
 	}
 	else
 	{
 		for (i = 0;i < NUM_STAT_TYPE; i++)
+		{
 			ret = perf_stat_ring_lookup(&ipc_ctx->stat_ring[i], &ipc_ctx->stat_pool[i], i);
-		if (ret < 0)
-			rte_exit(EXIT_FAILURE, "Problem getting message pool\n");
+			if (ret < 0)
+				rte_exit(EXIT_FAILURE, "Problem getting message pool\n");
+		}
 	}
 
 	printf(" IPC initialized successfully for %s\n", 
@@ -615,6 +626,11 @@ void nvfuse_ipc_exit(struct nvfuse_ipc_context *ipc_ctx)
         }
 
 		rte_mempool_free(ipc_ctx->message_pool);       
+
+		for (i = 0;i < NUM_STAT_TYPE; i++)
+		{
+			perf_stat_ring_free(ipc_ctx->stat_ring[i], ipc_ctx->stat_pool[i]);
+		}
 	}
 }
 

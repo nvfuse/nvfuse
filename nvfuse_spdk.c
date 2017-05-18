@@ -208,11 +208,11 @@ void spdk_release_qpair(struct nvfuse_io_manager *io_manager)
 		}
     }
 
-    printf(" Send stat dev msg to perf_stat_dev ring queue.\n");
     printf(" Device Total I/O = %.3f MB\n", (double)io_manager->perf_stat_dev.stat_dev.total_io_count * CLUSTER_SIZE / MB);
     printf(" Device Read I/O = %.3f MB\n", (double)io_manager->perf_stat_dev.stat_dev.read_io_count * CLUSTER_SIZE / MB);
     printf(" Device Write I/O = %.3f MB\n", (double)io_manager->perf_stat_dev.stat_dev.write_io_count * CLUSTER_SIZE / MB);
 
+    printf(" Send stat dev msg to perf_stat_dev ring queue.\n");
     nvfuse_stat_ring_put(io_manager->ipc_ctx->stat_ring[DEVICE_STAT], 
                         io_manager->ipc_ctx->stat_pool[DEVICE_STAT],
                         &io_manager->perf_stat_dev);

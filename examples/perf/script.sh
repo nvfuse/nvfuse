@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ../root_check.sh
+
 NVFUSE_RESET_PATH=/root/nvfuse/scripts/setup.sh
 OUTPUT_PATH=output
 RUNTIME=60

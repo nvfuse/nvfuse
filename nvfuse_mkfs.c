@@ -22,6 +22,7 @@
 #include <math.h>
 
 #include "nvfuse_core.h"
+#include "nvfuse_dep.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_bp_tree.h"

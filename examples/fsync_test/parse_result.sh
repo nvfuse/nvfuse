@@ -1,5 +1,7 @@
 #!/bin/sh
 
+source ../root_check.sh
+
 OUTPUT=result
 
 # Mill Test
