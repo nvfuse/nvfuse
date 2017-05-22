@@ -25,9 +25,9 @@
 
 #ifdef __linux__
 #	define NVFUSE_OS NVFUSE_OS_LINUX
-#else 
+#else
 #	define NVFUSE_OS NVFUSE_OS_WINDOWS
-#endif 
+#endif
 
 #define NVFUSE_PROCESS_MODEL NVFUSE_PROCESS_STANDALONE
 #define NVFUSE_PROCESS_STANDALONE	0
@@ -53,7 +53,7 @@ static inline int nvfuse_process_model_is_dataplane()
 //#	define __USE_FUSE__
 //#	define __USE_LL_FUSE__ //low level fuse
 #define __NOUSE_FUSE__
-#endif 
+#endif
 
 #	define CLUSTER_SIZE (4*1024)
 #	define CLUSTER_SIZE_BITS 12
@@ -160,16 +160,16 @@ enum bp_mempool_type {
 /* debug message */
 //#define printf
 #ifdef __linux__
-	#define NVFUSE_DEBUG(s...) fprintf(stderr,s);
-	//#define NVFUSE_DEBUG
+#define NVFUSE_DEBUG(s...) fprintf(stderr,s);
+//#define NVFUSE_DEBUG
 #else
-	#define NVFUSE_DEBUG printf
-	//#define NVFUSE_DEBUG
-#endif 
+#define NVFUSE_DEBUG printf
+//#define NVFUSE_DEBUG
+#endif
 
 #define NVFUSE_SEGMENT_SIZE_BITS 22
 #define NVFUSE_SEGMENT_GROUP_NUM 1
 
 #define NVFUSE_USE_MINISH
 
-#endif 
+#endif

@@ -14,7 +14,7 @@ Andy Watson <watson@netapp.com>.
 Versions:
 1.00 - Original release - 8/17/97
 
-1.01 - Fixed endless loop on EOF, 
+1.01 - Fixed endless loop on EOF,
 Divide by zero when file_size_high=file_size_low - 10/29/97
 (Thanks to Chuck Murnane)
 
@@ -34,7 +34,7 @@ avoiding actual reads.  (Thanks to Kent Peacock)
 overflow when very large file sizes are used.
 
 1.13 - Added terse report option allowing results to be easily included in
-other things.  (Thanks to Walter Wong) 
+other things.  (Thanks to Walter Wong)
 Also tweaked help code to allow partial matches
 
 1.14 - Automatically stop run if work files are depleted
@@ -43,7 +43,7 @@ Also tweaked help code to allow partial matches
 pseudo-random number generator was more pseudo than random.  After
 a review of the literature and extensive benchmarking, I've replaced
 the previous PRNG with the Mersenne Twister.  While an excellent PRNG,
-it retains much of the performance of the previous implementation. 
+it retains much of the performance of the previous implementation.
 URL: http://www.math.keio.ac.jp/~matumoto/emt.html
 Also changed MB definition to 1024KB, tweaked show command
 
@@ -69,12 +69,12 @@ extern struct nvfuse_handle *g_nvh;
 
 #define SEPARATOR "/"
 
-#define open(nvh, fname, mode1, mode2)	nvfuse_openfile_path(nvh, fname, mode1, 0) 
+#define open(nvh, fname, mode1, mode2)	nvfuse_openfile_path(nvh, fname, mode1, 0)
 #define write(nvh, fd, buffer, count)	nvfuse_writefile(nvh, fd, buffer, count, 0);
-#define read(nvh, fd, buffer, count)		nvfuse_readfile(nvh, fd, buffer, count, 0) 
-#define close(nvh, fd)			nvfuse_closefile(nvh, fd) 
-#define remove(nvh, fname)	nvfuse_rmfile_path(nvh, fname) 
-#define rmdir(nvh, x)			nvfuse_rmdir_path(nvh, x) 
+#define read(nvh, fd, buffer, count)		nvfuse_readfile(nvh, fd, buffer, count, 0)
+#define close(nvh, fd)			nvfuse_closefile(nvh, fd)
+#define remove(nvh, fname)	nvfuse_rmfile_path(nvh, fname)
+#define rmdir(nvh, x)			nvfuse_rmdir_path(nvh, x)
 
 //----- Include files -------------------------------------------------------
 #include <assert.h>             // Needed for assert() macro
@@ -83,7 +83,7 @@ extern struct nvfuse_handle *g_nvh;
 #define  FALSE          0       // Boolean false
 #define  TRUE           1       // Boolean true
 
-int read_config_file(char *filename,char *buffer,int ignore);
+int read_config_file(char *filename, char *buffer, int ignore);
 
 #define MAX_LINE 255
 #define MAX_FILENAME 80
@@ -122,35 +122,41 @@ extern int cli_show();
 extern int cli_help();
 extern int cli_quit();
 
-cmd command_list[]={ /* table of CLI commands */	
-	{"set size",cli_set_size,"Sets low and high bounds of files"},	
-	{"set bound",cli_set_bound,"Sets utilization bound"},
-	{"set number",cli_set_number,"Sets number of simultaneous files"},
-	{"set seed",cli_set_seed,"Sets seed for random number generator"},
-	{"set transactions",cli_set_transactions,"Sets number of transactions"},
-	{"set location",cli_set_location,"Sets location of working files"},
-	{"set subdirectories",cli_set_subdirs,"Sets number of subdirectories"},
-	{"set read",cli_set_read,"Sets read block size"},
-	{"set write",cli_set_write,"Sets write block size"},
-	{"set buffering",cli_set_buffering,"Sets usage of buffered I/O"},
-	{"set bias smallbig",cli_set_bias_smallbig,
-	"Set the chance of choosing small over big"},
-	{"set bias read",cli_set_bias_read,
-	"Sets the chance of choosing read over append"},
-	{"set bias create",cli_set_bias_create,
-	"Sets the chance of choosing create over delete"},
-	{"set report",cli_set_report,"Choose verbose or terse report format"},
-	{"run",cli_run,"Runs one iteration of benchmark"},
-	{"load",cli_load,"Read configuration file"},
-	{"show",cli_show,"Displays current configuration"},
-	{"help",cli_help,"Prints out available commands"},
-	{"quit",cli_quit,"Exit program"},
+cmd command_list[] = { /* table of CLI commands */
+	{"set size", cli_set_size, "Sets low and high bounds of files"},
+	{"set bound", cli_set_bound, "Sets utilization bound"},
+	{"set number", cli_set_number, "Sets number of simultaneous files"},
+	{"set seed", cli_set_seed, "Sets seed for random number generator"},
+	{"set transactions", cli_set_transactions, "Sets number of transactions"},
+	{"set location", cli_set_location, "Sets location of working files"},
+	{"set subdirectories", cli_set_subdirs, "Sets number of subdirectories"},
+	{"set read", cli_set_read, "Sets read block size"},
+	{"set write", cli_set_write, "Sets write block size"},
+	{"set buffering", cli_set_buffering, "Sets usage of buffered I/O"},
+	{
+		"set bias smallbig", cli_set_bias_smallbig,
+		"Set the chance of choosing small over big"
+	},
+	{
+		"set bias read", cli_set_bias_read,
+		"Sets the chance of choosing read over append"
+	},
+	{
+		"set bias create", cli_set_bias_create,
+		"Sets the chance of choosing create over delete"
+	},
+	{"set report", cli_set_report, "Choose verbose or terse report format"},
+	{"run", cli_run, "Runs one iteration of benchmark"},
+	{"load", cli_load, "Read configuration file"},
+	{"show", cli_show, "Displays current configuration"},
+	{"help", cli_help, "Prints out available commands"},
+	{"quit", cli_quit, "Exit program"},
 	NULL
 };
 
 extern void verbose_report();
 extern void terse_report();
-void (*reports[])()={verbose_report,terse_report};
+void (*reports[])() = {verbose_report, terse_report};
 
 /* Counters */
 int files_created;  /* number of files created */
@@ -160,27 +166,27 @@ int files_appended; /* number of files appended */
 float bytes_written; /* number of bytes written to files */
 float bytes_read;    /* number of bytes read from files */
 
-int totalfilesize=0;
+int totalfilesize = 0;
 
 
 /* Configurable Parameters */
-int file_size_low=4*1024;
-int file_size_high=4*1024;       /* file size: fixed or random within range */
+int file_size_low = 4 * 1024;
+int file_size_high = 4 * 1024;   /* file size: fixed or random within range */
 
-int util=90;
-int bound=5;
-int simultaneous=1000000;           /* simultaneous files */
-int transactions=1000000;           /* number of transactions */
-int seed=42;                    /* random number generator seed */
-int subdirectories=100000;		/* Number of subdirectories */
-int read_block_size=4096;        /* I/O block sizes */
-int write_block_size=4096;
-int bias_smallbig=5;
-int bias_read=5;                /* chance of picking read over append */
-int bias_create=5;              /* chance of picking create over delete */
-double bias_hot=1;
-int buffered_io=0;              /* use C library buffered I/O */
-int report=0;                   /* 0=verbose, 1=terse report format */
+int util = 90;
+int bound = 5;
+int simultaneous = 1000000;         /* simultaneous files */
+int transactions = 1000000;         /* number of transactions */
+int seed = 42;                  /* random number generator seed */
+int subdirectories = 100000;		/* Number of subdirectories */
+int read_block_size = 4096;      /* I/O block sizes */
+int write_block_size = 4096;
+int bias_smallbig = 5;
+int bias_read = 5;              /* chance of picking read over append */
+int bias_create = 5;            /* chance of picking create over delete */
+double bias_hot = 1;
+int buffered_io = 0;            /* use C library buffered I/O */
+int report = 0;                 /* 0=verbose, 1=terse report format */
 
 
 /* Working Storage */
@@ -190,12 +196,12 @@ int file_source_ptr = 0;
 int file_source_num = FILE_SOURCE_NUM;
 
 int total_block;
-int cur_ptr =0 ;
-int max_ptr; 
+int cur_ptr = 0 ;
+int max_ptr;
 
 
 typedef struct {
-	char name[MAX_FILENAME+1]; /* name of individual file */
+	char name[MAX_FILENAME + 1]; /* name of individual file */
 	int size;                  /* current size of file, 0 = unused file slot */
 } file_entry;
 
@@ -204,8 +210,8 @@ int file_allocated;     /* pointer to last allocated slot in file_table */
 
 typedef struct file_system_struct {
 	file_entry system;
-	struct file_system_struct *next,*prev;
-} file_system; 
+	struct file_system_struct *next, *prev;
+} file_system;
 
 file_system *file_systems; /* table of file systems/directories to use */
 int file_system_weight;    /* sum of weights for all file systems */
@@ -224,15 +230,14 @@ int  i;
 {
 	static char buffer[MAX_LINE]; /* storage for current conversion */
 
-	if (i/MEGABYTE)
-		sprintf(buffer,"%.2f megabytes",(float)i/MEGABYTE);
+	if (i / MEGABYTE)
+		sprintf(buffer, "%.2f megabytes", (float)i / MEGABYTE);
+	else if (i / KILOBYTE)
+		sprintf(buffer, "%.2f kilobytes", (float)i / KILOBYTE);
 	else
-		if (i/KILOBYTE)
-			sprintf(buffer,"%.2f kilobytes",(float)i/KILOBYTE);
-		else
-			sprintf(buffer,"%d bytes",i);
+		sprintf(buffer, "%d bytes", i);
 
-	return(buffer);
+	return (buffer);
 }
 
 /* converts float values to byte/kilobyte/megabyte strings */
@@ -241,18 +246,17 @@ float i;
 {
 	static char buffer[MAX_LINE]; /* storage for current conversion */
 
-	if (i/(float)MEGABYTE>1)
-		sprintf(buffer,"%.2f megabytes",i/(float)MEGABYTE);
+	if (i / (float)MEGABYTE > 1)
+		sprintf(buffer, "%.2f megabytes", i / (float)MEGABYTE);
+	else if (i / (float)KILOBYTE)
+		sprintf(buffer, "%.2f kilobytes", i / (float)KILOBYTE);
 	else
-		if (i/(float)KILOBYTE)
-			sprintf(buffer,"%.2f kilobytes",i/(float)KILOBYTE);
-		else
-			sprintf(buffer,"%f bytes",i);
+		sprintf(buffer, "%f bytes", i);
 
-	return(buffer);
+	return (buffer);
 }
 
-#if 0 
+#if 0
 
 /* UI callback for 'set smallsize' command - sets range of small file sizes */
 int cli_set_smallsize(param)
@@ -261,19 +265,17 @@ char *param; /* remainder of command line */
 	char *token;
 	int size;
 
-	if (param && (size=atoi(param))>0)
-	{
-		smallfile_size_low=size;
-		if ((token=strchr(param,' ')) && (size=atoi(token))>0 &&
-			size>=smallfile_size_low)
-			smallfile_size_high=size;
+	if (param && (size = atoi(param)) > 0) {
+		smallfile_size_low = size;
+		if ((token = strchr(param, ' ')) && (size = atoi(token)) > 0 &&
+		    size >= smallfile_size_low)
+			smallfile_size_high = size;
 		else
-			smallfile_size_high=smallfile_size_low;
-	}
-	else
-		fprintf(stderr,"Error: no file size low or high bounds specified\n");
+			smallfile_size_high = smallfile_size_low;
+	} else
+		fprintf(stderr, "Error: no file size low or high bounds specified\n");
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set bigsize' command - sets range of big file sizes */
@@ -283,19 +285,17 @@ char *param; /* remainder of command line */
 	char *token;
 	int size;
 
-	if (param && (size=atoi(param))>0)
-	{
-		bigfile_size_low=size;
-		if ((token=strchr(param,' ')) && (size=atoi(token))>0 &&
-			size>=bigfile_size_low)
-			bigfile_size_high=size;
+	if (param && (size = atoi(param)) > 0) {
+		bigfile_size_low = size;
+		if ((token = strchr(param, ' ')) && (size = atoi(token)) > 0 &&
+		    size >= bigfile_size_low)
+			bigfile_size_high = size;
 		else
-			bigfile_size_high=bigfile_size_low;
-	}
-	else
-		fprintf(stderr,"Error: no file size low or high bounds specified\n");
+			bigfile_size_high = bigfile_size_low;
+	} else
+		fprintf(stderr, "Error: no file size low or high bounds specified\n");
 
-	return(1);
+	return (1);
 }
 #else
 /* UI callback for 'set size' command - sets range of file sizes */
@@ -305,108 +305,100 @@ char *param; /* remainder of command line */
 	char *token;
 	int size;
 
-	if (param && (size=atoi(param))>0)
-	{
-		file_size_low=size;
-		if ((token=strchr(param,' ')) && (size=atoi(token))>0 &&
-			size>=file_size_low)
-			file_size_high=size;
+	if (param && (size = atoi(param)) > 0) {
+		file_size_low = size;
+		if ((token = strchr(param, ' ')) && (size = atoi(token)) > 0 &&
+		    size >= file_size_low)
+			file_size_high = size;
 		else
-			file_size_high=file_size_low;
-	}
-	else
-		fprintf(stderr,"Error: no file size low or high bounds specified\n");
+			file_size_high = file_size_low;
+	} else
+		fprintf(stderr, "Error: no file size low or high bounds specified\n");
 
-	return(1);
+	return (1);
 }
-#endif 
+#endif
 
-int cli_generic_int(var,param,error)
+int cli_generic_int(var, param, error)
 int *var; /* pointer to variable to set */
 char *param; /* remainder of command line */
 char *error; /* error message */
 {
 	int value;
 
-	if (param && (value=atoi(param))>0)
-		*var=value;
+	if (param && (value = atoi(param)) > 0)
+		* var = value;
 	else
-		fprintf(stderr,"Error: %s\n",error);
+		fprintf(stderr, "Error: %s\n", error);
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set bound' command - sets bound of utilization */
 int cli_set_bound(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&bound,param,"invalid bound of utilization"));
+	return (cli_generic_int(&bound, param, "invalid bound of utilization"));
 }
 
 /* UI callback for 'set number' command - sets number of files to create */
 int cli_set_number(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&simultaneous,param,"invalid number of files"));
+	return (cli_generic_int(&simultaneous, param, "invalid number of files"));
 }
 
 /* UI callback for 'set seed' command - initial value for random number gen */
 int cli_set_seed(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&seed,param,"invalid seed for random numbers"));
+	return (cli_generic_int(&seed, param, "invalid seed for random numbers"));
 }
 
 /* UI callback for 'set transactions' - configure number of transactions */
 int cli_set_transactions(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&transactions,param,"no transactions specified"));
+	return (cli_generic_int(&transactions, param, "no transactions specified"));
 }
 
 int parse_weight(params)
 char *params;
 {
-	int weight=1;
+	int weight = 1;
 	char *split;
 
-	if (split=strrchr(params,' '))
-	{
-		*split='\0';
-		if ((weight=atoi(split+1))<=0)
-		{
-			fprintf(stderr,"Error: ignoring invalid weight '%s'\n",split+1); 
-			weight=1;
+	if (split = strrchr(params, ' ')) {
+		*split = '\0';
+		if ((weight = atoi(split + 1)) <= 0) {
+			fprintf(stderr, "Error: ignoring invalid weight '%s'\n", split + 1);
+			weight = 1;
 		}
 	}
 
-	return(weight);
+	return (weight);
 }
 
-void add_location(params,weight)
+void add_location(params, weight)
 char *params;
 int weight;
 {
 	file_system *new_file_system;
 
-	if (new_file_system=(file_system *)calloc(1,sizeof(file_system)))
-	{
-		strcpy(new_file_system->system.name,params);
-		new_file_system->system.size=weight;
+	if (new_file_system = (file_system *)calloc(1, sizeof(file_system))) {
+		strcpy(new_file_system->system.name, params);
+		new_file_system->system.size = weight;
 
-		if (file_systems)
-		{
-			new_file_system->prev=file_systems->prev;
-			file_systems->prev->next=new_file_system;
-			file_systems->prev=new_file_system;
-		}
-		else
-		{
-			new_file_system->prev=new_file_system; 
-			file_systems=new_file_system;
+		if (file_systems) {
+			new_file_system->prev = file_systems->prev;
+			file_systems->prev->next = new_file_system;
+			file_systems->prev = new_file_system;
+		} else {
+			new_file_system->prev = new_file_system;
+			file_systems = new_file_system;
 		}
 
-		file_system_weight+=weight;
+		file_system_weight += weight;
 		file_system_count++;
 	}
 }
@@ -416,29 +408,25 @@ char *loc_name;
 {
 	file_system *traverse;
 
-	for (traverse=file_systems; traverse; traverse=traverse->next)
-		if (!strcmp(traverse->system.name,loc_name))
-		{
-			file_system_weight-=traverse->system.size;
+	for (traverse = file_systems; traverse; traverse = traverse->next)
+		if (!strcmp(traverse->system.name, loc_name)) {
+			file_system_weight -= traverse->system.size;
 			file_system_count--;
 
-			if (file_systems->prev==file_systems)
-			{
+			if (file_systems->prev == file_systems) {
 				free(file_systems);
-				file_systems=NULL;
-			}
-			else
-			{
-				if (file_systems->prev==traverse)
-					file_systems->prev=traverse->prev;
+				file_systems = NULL;
+			} else {
+				if (file_systems->prev == traverse)
+					file_systems->prev = traverse->prev;
 
-				if (traverse==file_systems)
-					file_systems=file_systems->next;
+				if (traverse == file_systems)
+					file_systems = file_systems->next;
 				else
-					traverse->prev->next=traverse->next;
+					traverse->prev->next = traverse->next;
 
 				if (traverse->next)
-					traverse->next->prev=traverse->prev;
+					traverse->next->prev = traverse->prev;
 
 				free(traverse);
 			}
@@ -446,72 +434,68 @@ char *loc_name;
 			break;
 		}
 
-		if (!traverse)
-			fprintf(stderr,"Error: cannot find location '%s'\n",loc_name);
+	if (!traverse)
+		fprintf(stderr, "Error: cannot find location '%s'\n", loc_name);
 }
 
 void delete_locations()
 {
 	file_system *next;
 
-	while (file_systems)
-	{
-		next=file_systems->next;
+	while (file_systems) {
+		next = file_systems->next;
 		free(file_systems);
-		file_systems=next;
+		file_systems = next;
 	}
 
-	file_system_weight=0;
-	file_system_count=0;
+	file_system_weight = 0;
+	file_system_count = 0;
 }
 
 /* UI callback for 'set location' - configure current working directory */
 int cli_set_location(param)
 char *param; /* remainder of command line */
 {
-	if (param)
-	{
-		switch (*param)
-		{
+	if (param) {
+		switch (*param) {
 		case '+': /* add location to list */
-			add_location(param+1,parse_weight(param+1));
+			add_location(param + 1, parse_weight(param + 1));
 			break;
 
 		case '-': /* remove location from list */
-			delete_location(param+1);
+			delete_location(param + 1);
 			break;
 
 		default:
 			delete_locations();
-			add_location(param,parse_weight(param));
+			add_location(param, parse_weight(param));
 		}
-	}
-	else
-		fprintf(stderr,"Error: no directory name specified\n");
+	} else
+		fprintf(stderr, "Error: no directory name specified\n");
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set subdirectories' - configure number of subdirectories */
 int cli_set_subdirs(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&subdirectories,param,
-		"invalid number of subdirectories"));
+	return (cli_generic_int(&subdirectories, param,
+				"invalid number of subdirectories"));
 }
 
 /* UI callback for 'set read' - configure read block size (integer) */
 int cli_set_read(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&read_block_size,param,"invalid read block size"));
+	return (cli_generic_int(&read_block_size, param, "invalid read block size"));
 }
 
 /* UI callback for 'set write' - configure write block size (integer) */
 int cli_set_write(param)
 char *param; /* remainder of command line */
 {
-	return(cli_generic_int(&write_block_size,param,"invalid write block size"));
+	return (cli_generic_int(&write_block_size, param, "invalid write block size"));
 }
 
 /* UI callback for 'set buffering' - sets buffering mode on or off
@@ -519,12 +503,12 @@ char *param; /* remainder of command line */
 int cli_set_buffering(param)
 char *param; /* remainder of command line */
 {
-	if (param && (!strcmp(param,"true") || !strcmp(param,"false")))
-		buffered_io=(!strcmp(param,"true"))?1:0;
+	if (param && (!strcmp(param, "true") || !strcmp(param, "false")))
+		buffered_io = (!strcmp(param, "true")) ? 1 : 0;
 	else
-		fprintf(stderr,"Error: no buffering mode (true/false) specified\n");
+		fprintf(stderr, "Error: no buffering mode (true/false) specified\n");
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set bias smallbig' - sets probability of small file vs. big file */
@@ -533,13 +517,13 @@ char *param; /* remainder of command line */
 {
 	int value;
 
-	if (param && (value=atoi(param))>=-1 && value<=10)
-		bias_smallbig=value;
+	if (param && (value = atoi(param)) >= -1 && value <= 10)
+		bias_smallbig = value;
 	else
 		fprintf(stderr,
-		"Error: no bias specified (0-10 for greater chance,-1 to disable)\n");
+			"Error: no bias specified (0-10 for greater chance,-1 to disable)\n");
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set bias read' - sets probability of read vs. append */
@@ -548,13 +532,13 @@ char *param; /* remainder of command line */
 {
 	int value;
 
-	if (param && (value=atoi(param))>=-1 && value<=10)
-		bias_read=value;
+	if (param && (value = atoi(param)) >= -1 && value <= 10)
+		bias_read = value;
 	else
 		fprintf(stderr,
-		"Error: no bias specified (0-10 for greater chance,-1 to disable)\n");
+			"Error: no bias specified (0-10 for greater chance,-1 to disable)\n");
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set bias create' - sets probability of create vs. delete */
@@ -563,36 +547,34 @@ char *param; /* remainder of command line */
 {
 	int value;
 
-	if (param && (value=atoi(param))>=-1 && value<=10)
-		bias_create=value;
+	if (param && (value = atoi(param)) >= -1 && value <= 10)
+		bias_create = value;
 	else
 		fprintf(stderr,
-		"Error: no bias specified (0-10 for greater chance,-1 to disable)\n");
+			"Error: no bias specified (0-10 for greater chance,-1 to disable)\n");
 
-	return(1);
+	return (1);
 }
 
 /* UI callback for 'set report' - chooses verbose or terse report formats */
 int cli_set_report(param)
 char *param; /* remainder of command line */
 {
-	int match=0;
+	int match = 0;
 
-	if (param)
-	{ 
-		if (!strcmp(param,"verbose"))
-			report=0;
+	if (param) {
+		if (!strcmp(param, "verbose"))
+			report = 0;
+		else if (!strcmp(param, "terse"))
+			report = 1;
 		else
-			if (!strcmp(param,"terse"))
-				report=1;
-			else
-				match=-1;
+			match = -1;
 	}
 
-	if (!param || match==-1)
-		fprintf(stderr,"Error: either 'verbose' or 'terse' required\n");
+	if (!param || match == -1)
+		fprintf(stderr, "Error: either 'verbose' or 'terse' required\n");
 
-	return(1);
+	return (1);
 }
 
 /* populate file source buffer with 'size' bytes of readable randomness */
@@ -602,97 +584,97 @@ int size; /* number of bytes of junk to create */
 	char *new_source;
 	int i;
 
-	if ((new_source=(char *)malloc(size))==NULL) /* allocate buffer */
-		fprintf(stderr,"Error: failed to allocate source file of size %d\n",size);
+	if ((new_source = (char *)malloc(size)) == NULL) /* allocate buffer */
+		fprintf(stderr, "Error: failed to allocate source file of size %d\n", size);
 	else
-		for (i=0; i<size; i++) /* file buffer with junk */		
-			new_source[i]=32+RND(95);
-			//new_source[i]=RND(256);
-			
+		for (i = 0; i < size; i++) /* file buffer with junk */
+			new_source[i] = 32 + RND(95);
+	//new_source[i]=RND(256);
 
-	return(new_source);
+
+	return (new_source);
 }
 
 /* returns differences in times -
 1 second is the minimum to avoid divide by zero errors */
-time_t diff_time(t1,t0)
+time_t diff_time(t1, t0)
 time_t t1;
 time_t t0;
 {
-	return((t1-=t0)?t1:1);
+	return ((t1 -= t0) ? t1 : 1);
 }
 
 /* prints out results from running transactions */
-void verbose_report(fp,end_time,start_time,t_end_time,t_start_time,deleted)
+void verbose_report(fp, end_time, start_time, t_end_time, t_start_time, deleted)
 FILE *fp;
-time_t end_time,start_time,t_end_time,t_start_time; /* timers from run */
+time_t end_time, start_time, t_end_time, t_start_time; /* timers from run */
 int deleted; /* files deleted back-to-back */
 {
-	time_t elapsed,t_elapsed;
+	time_t elapsed, t_elapsed;
 	int interval;
 	FILE *post_fp;
-	elapsed=diff_time(end_time,start_time);
-	t_elapsed=diff_time(t_end_time,t_start_time);
+	elapsed = diff_time(end_time, start_time);
+	t_elapsed = diff_time(t_end_time, t_start_time);
 
-	fprintf(fp,"Time:\n");
-	fprintf(fp,"\t%d seconds total\n", (int)elapsed);
-	fprintf(fp,"\t%d seconds of transactions (%d per second)\n",(int)t_elapsed,
-		(int)transactions/(int)t_elapsed);
+	fprintf(fp, "Time:\n");
+	fprintf(fp, "\t%d seconds total\n", (int)elapsed);
+	fprintf(fp, "\t%d seconds of transactions (%d per second)\n", (int)t_elapsed,
+		(int)transactions / (int)t_elapsed);
 
-	fprintf(fp,"\nFiles:\n");
-	fprintf(fp,"\t%d created (%d per second)\n",files_created,
-		(int)files_created/(int)elapsed);
+	fprintf(fp, "\nFiles:\n");
+	fprintf(fp, "\t%d created (%d per second)\n", files_created,
+		(int)files_created / (int)elapsed);
 
-	interval=diff_time(t_start_time,start_time);
-	fprintf(fp,"\t\tCreation alone: %d files (%d per second)\n",simultaneous,
-		(int)simultaneous/(int)interval);
-	fprintf(fp,"\t\tMixed with transactions: %d files (%d per second)\n",
-		(int)files_created-simultaneous, (int)(files_created-simultaneous)/(int)t_elapsed);
-	fprintf(fp,"\t%d read (%d per second)\n",files_read,files_read/(int)t_elapsed);
-	fprintf(fp,"\t%d appended (%d per second)\n",files_appended,
-		files_appended/(int)t_elapsed);
-	fprintf(fp,"\t%d deleted (%d per second)\n",files_deleted,
-		files_deleted/(int)elapsed);
+	interval = diff_time(t_start_time, start_time);
+	fprintf(fp, "\t\tCreation alone: %d files (%d per second)\n", simultaneous,
+		(int)simultaneous / (int)interval);
+	fprintf(fp, "\t\tMixed with transactions: %d files (%d per second)\n",
+		(int)files_created - simultaneous, (int)(files_created - simultaneous) / (int)t_elapsed);
+	fprintf(fp, "\t%d read (%d per second)\n", files_read, files_read / (int)t_elapsed);
+	fprintf(fp, "\t%d appended (%d per second)\n", files_appended,
+		files_appended / (int)t_elapsed);
+	fprintf(fp, "\t%d deleted (%d per second)\n", files_deleted,
+		files_deleted / (int)elapsed);
 
 #if (DELETE_REMAIN == 1)
-	interval=diff_time(end_time,t_end_time);
-	fprintf(fp,"\t\tDeletion alone: %d files (%d per second)\n",deleted,
-		deleted/interval);
-	fprintf(fp,"\t\tMixed with transactions: %d files (%d per second)\n",
-		files_deleted-deleted,(files_deleted-deleted)/t_elapsed);
+	interval = diff_time(end_time, t_end_time);
+	fprintf(fp, "\t\tDeletion alone: %d files (%d per second)\n", deleted,
+		deleted / interval);
+	fprintf(fp, "\t\tMixed with transactions: %d files (%d per second)\n",
+		files_deleted - deleted, (files_deleted - deleted) / t_elapsed);
 #endif
 
-	fprintf(fp,"\nData:\n");
-	fprintf(fp,"\t%s read ",scalef(bytes_read));
-	fprintf(fp,"(%s per second)\n",scalef(bytes_read/(float)elapsed));
-	fprintf(fp,"\t%s written ",scalef(bytes_written));
-	fprintf(fp,"(%s per second)\n",scalef(bytes_written/(float)elapsed));
+	fprintf(fp, "\nData:\n");
+	fprintf(fp, "\t%s read ", scalef(bytes_read));
+	fprintf(fp, "(%s per second)\n", scalef(bytes_read / (float)elapsed));
+	fprintf(fp, "\t%s written ", scalef(bytes_written));
+	fprintf(fp, "(%s per second)\n", scalef(bytes_written / (float)elapsed));
 }
 
-void terse_report(fp,end_time,start_time,t_end_time,t_start_time,deleted)
+void terse_report(fp, end_time, start_time, t_end_time, t_start_time, deleted)
 FILE *fp;
-time_t end_time,start_time,t_end_time,t_start_time; /* timers from run */
+time_t end_time, start_time, t_end_time, t_start_time; /* timers from run */
 int deleted; /* files deleted back-to-back */
 {
-	time_t elapsed,t_elapsed;
+	time_t elapsed, t_elapsed;
 	int interval;
 
-	elapsed=diff_time(end_time,start_time);
-	t_elapsed=diff_time(t_end_time,t_start_time);
-	interval=diff_time(t_start_time,start_time);
+	elapsed = diff_time(end_time, start_time);
+	t_elapsed = diff_time(t_end_time, t_start_time);
+	interval = diff_time(t_start_time, start_time);
 
-	fprintf(fp,"%d %d %.2f ", (int)elapsed, (int)t_elapsed, 
-		(float)transactions/t_elapsed);
-	fprintf(fp, "%.2f %.2f %.2f ", (float)files_created/elapsed, 
-		(float)simultaneous/interval,
-		(float)(files_created-simultaneous)/t_elapsed);
-	fprintf(fp, "%.2f %.2f ", (float)files_read/t_elapsed,
-		(float)files_appended/t_elapsed);
-	fprintf(fp, "%.2f %.2f %.2f ", (float)files_created/elapsed,
-		(float)deleted/interval,
-		(float)(files_deleted-deleted)/t_elapsed);
-	fprintf(fp, "%.2f %.2f\n", (float)bytes_read/elapsed,
-		(float)bytes_written/elapsed);
+	fprintf(fp, "%d %d %.2f ", (int)elapsed, (int)t_elapsed,
+		(float)transactions / t_elapsed);
+	fprintf(fp, "%.2f %.2f %.2f ", (float)files_created / elapsed,
+		(float)simultaneous / interval,
+		(float)(files_created - simultaneous) / t_elapsed);
+	fprintf(fp, "%.2f %.2f ", (float)files_read / t_elapsed,
+		(float)files_appended / t_elapsed);
+	fprintf(fp, "%.2f %.2f %.2f ", (float)files_created / elapsed,
+		(float)deleted / interval,
+		(float)(files_deleted - deleted) / t_elapsed);
+	fprintf(fp, "%.2f %.2f\n", (float)bytes_read / elapsed,
+		(float)bytes_written / elapsed);
 }
 
 /* returns file_table entry of unallocated file
@@ -702,50 +684,49 @@ int find_free_file()
 {
 	int i;
 
-	if (file_allocated<simultaneous<<1 && file_table[file_allocated].size==0)
-		return(file_allocated++);
+	if (file_allocated < simultaneous << 1 && file_table[file_allocated].size == 0)
+		return (file_allocated++);
 	else /* search entire table for holes */
-		for (i=0; i<simultaneous<<1; i++)
-			if (file_table[i].size==0)
-			{
-				file_allocated=i;
-				return(file_allocated++);
+		for (i = 0; i < simultaneous << 1; i++)
+			if (file_table[i].size == 0) {
+				file_allocated = i;
+				return (file_allocated++);
 			}
 
-			return(-1); /* return -1 only if no free files found */
+	return (-1); /* return -1 only if no free files found */
 }
 
 
 /* write 'size' bytes to file 'fd' using unbuffered I/O and close file */
-void write_blocks(fd,size)
+void write_blocks(fd, size)
 int fd;
 int size;   /* bytes to write to file */
 {
-	int offset=0; /* offset into file */
-	int i;	
+	int offset = 0; /* offset into file */
+	int i;
 	char *buf;
 
 
 	buf = malloc(write_block_size);
-	if(buf == NULL){
+	if (buf == NULL) {
 		printf(" malloc error \n");
 		return;
 	}
 
 	/* write even blocks */
-	for (i=size; i>=write_block_size;
-		i-=write_block_size,offset+=write_block_size){
-			
-		write(g_nvh,fd,file_source[file_source_ptr]+offset,write_block_size);
+	for (i = size; i >= write_block_size;
+	     i -= write_block_size, offset += write_block_size) {
+
+		write(g_nvh, fd, file_source[file_source_ptr] + offset, write_block_size);
 
 	}
-	
-	write(g_nvh,fd,file_source[file_source_ptr]+offset,i); /* write remainder */
 
-	bytes_written+=size; /* update counter */
+	write(g_nvh, fd, file_source[file_source_ptr] + offset, i); /* write remainder */
+
+	bytes_written += size; /* update counter */
 
 	file_source_ptr++;
-	if(file_source_ptr == file_source_num)
+	if (file_source_ptr == file_source_num)
 		file_source_ptr = 0;
 
 
@@ -755,21 +736,21 @@ int size;   /* bytes to write to file */
 }
 
 /* write 'size' bytes to file 'fp' using buffered I/O and close file */
-void fwrite_blocks(fp,size)
+void fwrite_blocks(fp, size)
 FILE *fp;
 int size;   /* bytes to write to file */
 {
-	int offset=0; /* offset into file */
+	int offset = 0; /* offset into file */
 	int i;
 
 	/* write even blocks */
-	for (i=size; i>=write_block_size;
-		i-=write_block_size,offset+=write_block_size)
-		fwrite(file_source+offset,write_block_size,1,fp);
+	for (i = size; i >= write_block_size;
+	     i -= write_block_size, offset += write_block_size)
+		fwrite(file_source + offset, write_block_size, 1, fp);
 
-	fwrite(file_source+offset,i,1,fp); /* write remainder */
+	fwrite(file_source + offset, i, 1, fp); /* write remainder */
 
-	bytes_written+=size; /* update counter */
+	bytes_written += size; /* update counter */
 
 	fclose(fp);
 }
@@ -777,66 +758,59 @@ int size;   /* bytes to write to file */
 void create_file_name(dest)
 char *dest;
 {
-	char conversion[MAX_LINE+1];
+	char conversion[MAX_LINE + 1];
 
-	*dest='\0';
-	if (file_system_count)
-	{
+	*dest = '\0';
+	if (file_system_count) {
 		strcat(dest,
-			location_index[(file_system_count==1)?0:RND(file_system_weight)]);
-		strcat(dest,SEPARATOR);
+		       location_index[(file_system_count == 1) ? 0 : RND(file_system_weight)]);
+		strcat(dest, SEPARATOR);
 	}
 
-	if (subdirectories>1)
-	{
-		sprintf(conversion,"s%d%s",RND(subdirectories),SEPARATOR);
-		strcat(dest,conversion);
+	if (subdirectories > 1) {
+		sprintf(conversion, "s%d%s", RND(subdirectories), SEPARATOR);
+		strcat(dest, conversion);
 	}
 
-	sprintf(conversion,"%d",++files_created);
-	strcat(dest,conversion);
+	sprintf(conversion, "%d", ++files_created);
+	strcat(dest, conversion);
 }
 
-#if 0 
+#if 0
 
 /* creates new file of specified length and fills it with data */
 void create_file(buffered)
 int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 {
-	FILE *fp=NULL;
-	int fd=-1;
+	FILE *fp = NULL;
+	int fd = -1;
 	int free_file; /* file_table slot for new file */
 
-	if ((free_file=find_free_file())!=-1) /* if file space is available */
-	{ /* decide on name and initial length */
+	if ((free_file = find_free_file()) != -1) { /* if file space is available */
+		/* decide on name and initial length */
 		create_file_name(file_table[free_file].name);
 
-		if (RND(10)<bias_smallbig)
-		{
-			file_table[free_file].size=
-				smallfile_size_low+RND(smallfile_size_high-smallfile_size_low);
-		}
-		else
-		{
-			file_table[free_file].size=
-				bigfile_size_low+RND(bigfile_size_high-bigfile_size_low);
+		if (RND(10) < bias_smallbig) {
+			file_table[free_file].size =
+				smallfile_size_low + RND(smallfile_size_high - smallfile_size_low);
+		} else {
+			file_table[free_file].size =
+				bigfile_size_low + RND(bigfile_size_high - bigfile_size_low);
 		}
 
 		if (buffered)
-			fp=fopen(file_table[free_file].name,"w");
+			fp = fopen(file_table[free_file].name, "w");
 		else {
-			fd=open(file_table[free_file].name,O_RDWR|O_CREAT,0644);
+			fd = open(file_table[free_file].name, O_RDWR | O_CREAT, 0644);
 		}
-		if (fp || fd!=-1)
-		{
+		if (fp || fd != -1) {
 			if (buffered)
-				fwrite_blocks(fp,file_table[free_file].size);
+				fwrite_blocks(fp, file_table[free_file].size);
 			else
-				write_blocks(fd,file_table[free_file].size);
-		}
-		else
-			fprintf(stderr,"Error: cannot open '%s' for writing\n",
-			file_table[free_file].name);
+				write_blocks(fd, file_table[free_file].size);
+		} else
+			fprintf(stderr, "Error: cannot open '%s' for writing\n",
+				file_table[free_file].name);
 
 		totalfilesize += file_table[free_file].size;
 	}
@@ -847,35 +821,33 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 void create_file(buffered)
 int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 {
-	FILE *fp=NULL;
-	int fd=-1;
+	FILE *fp = NULL;
+	int fd = -1;
 	int free_file; /* file_table slot for new file */
 
-	if ((free_file=find_free_file())!=-1) /* if file space is available */
-	{ /* decide on name and initial length */
+	if ((free_file = find_free_file()) != -1) { /* if file space is available */
+		/* decide on name and initial length */
 		create_file_name(file_table[free_file].name);
 
-		file_table[free_file].size=
-			file_size_low+RND(file_size_high-file_size_low);
+		file_table[free_file].size =
+			file_size_low + RND(file_size_high - file_size_low);
 
 		if (buffered)
-			fp=fopen(file_table[free_file].name,"w");
+			fp = fopen(file_table[free_file].name, "w");
 		else
-			fd=open(g_nvh, file_table[free_file].name,O_RDWR|O_CREAT,0644);
+			fd = open(g_nvh, file_table[free_file].name, O_RDWR | O_CREAT, 0644);
 
-		if (fp || fd!=-1)
-		{
+		if (fp || fd != -1) {
 			if (buffered)
-				fwrite_blocks(fp,file_table[free_file].size);
+				fwrite_blocks(fp, file_table[free_file].size);
 			else
-				write_blocks(fd,file_table[free_file].size);
-		}
-		else
-			fprintf(stderr,"Error: cannot open '%s' for writing\n",
-			file_table[free_file].name);
+				write_blocks(fd, file_table[free_file].size);
+		} else
+			fprintf(stderr, "Error: cannot open '%s' for writing\n",
+				file_table[free_file].name);
 	}
 }
-#endif 
+#endif
 
 /* deletes specified file from disk and file_table */
 void delete_file(number)
@@ -883,165 +855,154 @@ int number;
 {
 	totalfilesize -= file_table[number].size;
 
-	if (file_table[number].size)
-	{
+	if (file_table[number].size) {
 		//if ( !(strcmp(file_table[number].name, "s64/68")) )
 		//	printf("debug");
 		if (remove(g_nvh, file_table[number].name))
-			fprintf(stderr,"Error: Cannot delete '%s'\n",file_table[number].name);
-		else
-		{ /* reset entry in file_table and update counter */
-			file_table[number].size=0;
+			fprintf(stderr, "Error: Cannot delete '%s'\n", file_table[number].name);
+		else {
+			/* reset entry in file_table and update counter */
+			file_table[number].size = 0;
 			files_deleted++;
 
-			if(files_deleted == files_created)
+			if (files_deleted == files_created)
 				files_created = files_created;
 		}
 	}
 }
 
 /* reads entire specified file into temporary buffer */
-void read_file(number,buffered)
+void read_file(number, buffered)
 int number;   /* number of file to read (from file_table) */
 int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 {
-	FILE *fp=NULL;
-	int fd=-1;
+	FILE *fp = NULL;
+	int fd = -1;
 	int i;
-	
+
 
 	if (buffered)
-		fp=fopen(file_table[number].name,"r");
+		fp = fopen(file_table[number].name, "r");
 	else
-		fd=open(g_nvh, file_table[number].name,O_RDONLY,0644);
+		fd = open(g_nvh, file_table[number].name, O_RDONLY, 0644);
 
-	if (fp || fd!=-1)
-	{ /* read as many blocks as possible then read the remainder */
-		if (buffered)
-		{
-			for (i=file_table[number].size; i>=read_block_size; i-=read_block_size)
-				fread(read_buffer,read_block_size,1,fp);
+	if (fp || fd != -1) {
+		/* read as many blocks as possible then read the remainder */
+		if (buffered) {
+			for (i = file_table[number].size; i >= read_block_size; i -= read_block_size)
+				fread(read_buffer, read_block_size, 1, fp);
 
-			fread(read_buffer,i,1,fp);
+			fread(read_buffer, i, 1, fp);
 
 			fclose(fp);
-		}
-		else
-		{
-			for (i=file_table[number].size; i>=read_block_size; i-=read_block_size)
-				read(g_nvh, fd,read_buffer,read_block_size);
+		} else {
+			for (i = file_table[number].size; i >= read_block_size; i -= read_block_size)
+				read(g_nvh, fd, read_buffer, read_block_size);
 
-			read(g_nvh, fd,read_buffer,i);
+			read(g_nvh, fd, read_buffer, i);
 
 			close(g_nvh, fd);
 		}
 
 		/* increment counters to record transaction */
-		bytes_read+=file_table[number].size;
+		bytes_read += file_table[number].size;
 		files_read++;
-	}
-	else
-		fprintf(stderr,"Error: cannot open '%s' for reading\n",
-		file_table[number].name);	
+	} else
+		fprintf(stderr, "Error: cannot open '%s' for reading\n",
+			file_table[number].name);
 
 }
-#if 0 
+#if 0
 /* appends random data to a chosen file up to the maximum configured length */
-void append_file(number,buffered)
+void append_file(number, buffered)
 int number;   /* number of file (from file_table) to append date to */
 int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 {
-	FILE *fp=NULL;
-	int fd=-1;
+	FILE *fp = NULL;
+	int fd = -1;
 	int block; /* size of data to append */
 	int file_size_high;
 
 	//if ( !strcmp("s56/344", file_table[number].name) )
 	//	printf("debug");
-	if (RND(10)<bias_smallbig)
+	if (RND(10) < bias_smallbig)
 		file_size_high = smallfile_size_high;
 	else
 		file_size_high = bigfile_size_high;
 
-	if (file_table[number].size<file_size_high)
-	{
+	if (file_table[number].size < file_size_high) {
 		if (buffered)
-			fp=fopen(file_table[number].name,"a");
+			fp = fopen(file_table[number].name, "a");
 		else
-			fd=open(file_table[number].name,O_RDWR|O_APPEND,0644);
+			fd = open(file_table[number].name, O_RDWR | O_APPEND, 0644);
 
-		if ((fp || fd!=-1) && file_table[number].size<file_size_high)
-		{
-			block=RND(file_size_high-file_table[number].size)+1;
+		if ((fp || fd != -1) && file_table[number].size < file_size_high) {
+			block = RND(file_size_high - file_table[number].size) + 1;
 
 			if (buffered)
-				fwrite_blocks(fp,block);
+				fwrite_blocks(fp, block);
 			else
-				write_blocks(fd,block);
+				write_blocks(fd, block);
 
-			file_table[number].size+=block;
+			file_table[number].size += block;
 			files_appended++;
-		}
-		else
-			fprintf(stderr,"Error: cannot open '%s' for append\n",
-			file_table[number].name);
+		} else
+			fprintf(stderr, "Error: cannot open '%s' for append\n",
+				file_table[number].name);
 	}
 }
 #else
 /* appends random data to a chosen file up to the maximum configured length */
-void append_file(number,buffered)
+void append_file(number, buffered)
 int number;   /* number of file (from file_table) to append date to */
 int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 {
-	FILE *fp=NULL;
-	int fd=-1;
+	FILE *fp = NULL;
+	int fd = -1;
 	int block; /* size of data to append */
 
-	if (file_table[number].size<file_size_high)
-	{
+	if (file_table[number].size < file_size_high) {
 		if (buffered)
-			fp=fopen(file_table[number].name,"a");
+			fp = fopen(file_table[number].name, "a");
 		else
-			fd=open(g_nvh, file_table[number].name,O_RDWR|O_APPEND,0644);
+			fd = open(g_nvh, file_table[number].name, O_RDWR | O_APPEND, 0644);
 
-		if ((fp || fd!=-1) && file_table[number].size<file_size_high)
-		{
-			block=RND(file_size_high-file_table[number].size)+1;
+		if ((fp || fd != -1) && file_table[number].size < file_size_high) {
+			block = RND(file_size_high - file_table[number].size) + 1;
 
 			if (buffered)
-				fwrite_blocks(fp,block);
+				fwrite_blocks(fp, block);
 			else
-				write_blocks(fd,block);
+				write_blocks(fd, block);
 
-			file_table[number].size+=block;
+			file_table[number].size += block;
 			files_appended++;
-		}
-		else
-			fprintf(stderr,"Error: cannot open '%s' for append\n",
-			file_table[number].name);
+		} else
+			fprintf(stderr, "Error: cannot open '%s' for append\n",
+				file_table[number].name);
 	}
 }
 
-#endif 
+#endif
 /* finds and returns the offset of a file that is in use from the file_table */
 int find_used_file() /* only called after files are created */
 {
 	int used_file;
-	while (file_table[used_file=RND(simultaneous<<1)].size==0)
+	while (file_table[used_file = RND(simultaneous << 1)].size == 0)
 		;
-	return(used_file);
+	return (used_file);
 }
 
 /* reset global counters - done before each test run */
 void reset_counters()
 {
-	totalfilesize=0;
-	files_created=0;
-	files_deleted=0;
-	files_read=0;
-	files_appended=0;
-	bytes_written=0;
-	bytes_read=0;
+	totalfilesize = 0;
+	files_created = 0;
+	files_deleted = 0;
+	files_read = 0;
+	files_appended = 0;
+	bytes_written = 0;
+	bytes_read = 0;
 }
 
 /* perform the configured number of file transactions
@@ -1055,136 +1016,123 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 	int i;
 	//struct nvfuse_superblock *sb = nvfuse_read_super(0);
 	int res = 0;
-		
+
 	//Sleep(15000);
 
-	percent=transactions/10;
-	for (i=0; i<transactions; i++){
-		
-		if ((i % percent)==0) /* if another tenth of the work is done...*/
-		{
+	percent = transactions / 10;
+	for (i = 0; i < transactions; i++) {
+
+		if ((i % percent) == 0) { /* if another tenth of the work is done...*/
 			putchar('.'); /* print progress indicator */
 			fflush(stdout);
 
 		}
-		
-		if (files_created==files_deleted)
-		{			
+
+		if (files_created == files_deleted) {
 			create_file(buffered);
 			continue;
 		}
 
-		if (bias_read!=-1) /* if read/append not locked out... */
-		{
+		if (bias_read != -1) { /* if read/append not locked out... */
 
-			if (RND(10)<bias_read){ /* read file */
+			if (RND(10) < bias_read) { /* read file */
 				//printf(" R");
-				read_file(find_used_file(),buffered);
-			}else{ /* append file */
+				read_file(find_used_file(), buffered);
+			} else { /* append file */
 				//printf(" A");
-				append_file(find_used_file(),buffered);
+				append_file(find_used_file(), buffered);
 			}
 
 		}
 
-		if (bias_create!=-1) /* if create/delete not locked out... */
-		{
+		if (bias_create != -1) { /* if create/delete not locked out... */
 
-			if (RND(10)<bias_create){ /* create file */
+			if (RND(10) < bias_create) { /* create file */
 				//printf(" C");
 				create_file(buffered);
-			}else{ /* delete file */
+			} else { /* delete file */
 				//printf(" D");
 				delete_file(find_used_file());
 			}
 
 		}
-		if ((i % percent)==0) /* if another tenth of the work is done...*/
-		{
+		if ((i % percent) == 0) { /* if another tenth of the work is done...*/
 			//putchar('.'); /* print progress indicator */
-			printf("=>%d%c",i/percent * 10, '%');
+			printf("=>%d%c", i / percent * 10, '%');
 			//printf("performing %2d percents\n",(i*10)/percent);
 			fflush(stdout);
 		}
-		
+
 	}
 	//Sleep(15000);
 
-	return(transactions-i);
+	return (transactions - i);
 }
 
-char **build_location_index(list,weight)
+char **build_location_index(list, weight)
 file_system *list;
 int weight;
 {
 	char **index;
 	int count;
-	int i=0;
+	int i = 0;
 
-	if ((index=(char **)calloc(1,weight*sizeof(char *)))==NULL)
-		fprintf(stderr,"Error: cannot build weighted index of locations\n");
+	if ((index = (char **)calloc(1, weight * sizeof(char *))) == NULL)
+		fprintf(stderr, "Error: cannot build weighted index of locations\n");
 	else
-		for (; list; list=list->next)
-			for (count=0; count<list->system.size; count++)
-				index[i++]=list->system.name;
+		for (; list; list = list->next)
+			for (count = 0; count < list->system.size; count++)
+				index[i++] = list->system.name;
 
-	return(index);
+	return (index);
 }
 
-void create_subdirectories(dir_list,base_dir,subdirs)
+void create_subdirectories(dir_list, base_dir, subdirs)
 file_system *dir_list;
 char *base_dir;
 int subdirs;
 {
-	char dir_name[MAX_LINE+1]; /* buffer holding subdirectory names */
-	char save_dir[MAX_LINE+1];
+	char dir_name[MAX_LINE + 1]; /* buffer holding subdirectory names */
+	char save_dir[MAX_LINE + 1];
 	int i;
 
-	if (dir_list)
-	{
-		for (; dir_list; dir_list=dir_list->next)
-			create_subdirectories(NULL,dir_list->system.name,subdirs);
-	}
-	else
-	{ 
+	if (dir_list) {
+		for (; dir_list; dir_list = dir_list->next)
+			create_subdirectories(NULL, dir_list->system.name, subdirs);
+	} else {
 		if (base_dir)
-			sprintf(save_dir,"%s%s",base_dir,SEPARATOR);
+			sprintf(save_dir, "%s%s", base_dir, SEPARATOR);
 		else
-			*save_dir='\0';
+			*save_dir = '\0';
 
-		for (i=0; i<subdirs; i++)
-		{
-			sprintf(dir_name,"%ss%d",save_dir,i);
-			MKDIR(g_nvh, dir_name); 
+		for (i = 0; i < subdirs; i++) {
+			sprintf(dir_name, "%ss%d", save_dir, i);
+			MKDIR(g_nvh, dir_name);
 		}
 	}
 }
 
-void delete_subdirectories(dir_list,base_dir,subdirs)
+void delete_subdirectories(dir_list, base_dir, subdirs)
 file_system *dir_list;
 char *base_dir;
 int subdirs;
 {
-	char dir_name[MAX_LINE+1]; /* buffer holding subdirectory names */
-	char save_dir[MAX_LINE+1];
+	char dir_name[MAX_LINE + 1]; /* buffer holding subdirectory names */
+	char save_dir[MAX_LINE + 1];
 	int i;
 
-	if (dir_list)
-	{
-		for (; dir_list; dir_list=dir_list->next)
-			delete_subdirectories(NULL,dir_list->system.name,subdirs);
-	}
-	else
-	{ 
+	if (dir_list) {
+		for (; dir_list; dir_list = dir_list->next)
+			delete_subdirectories(NULL, dir_list->system.name, subdirs);
+	} else {
 		if (base_dir)
-			sprintf(save_dir,"%s%s",base_dir,SEPARATOR);
+			sprintf(save_dir, "%s%s", base_dir, SEPARATOR);
 		else
-			*save_dir='\0';
+			*save_dir = '\0';
 
-		for (i=0; i<subdirs; i++)
-		{
-			sprintf(dir_name,"%ss%d",save_dir,i);
-			rmdir(g_nvh, dir_name); 
+		for (i = 0; i < subdirs; i++) {
+			sprintf(dir_name, "%ss%d", save_dir, i);
+			rmdir(g_nvh, dir_name);
 		}
 	}
 }
@@ -1192,17 +1140,17 @@ int subdirs;
 int cli_run(param) /* none */
 char *param; /* unused */
 {
-	time_t start_time,t_start_time,t_end_time,end_time; /* elapsed timers */	
+	time_t start_time, t_start_time, t_end_time, end_time; /* elapsed timers */
 	int delete_base = 0; /* snapshot of deleted files counter */
-	FILE *fp=NULL; /* file descriptor for directing output */
+	FILE *fp = NULL; /* file descriptor for directing output */
 	int incomplete;
 	int i; /* generic iterator */
 	int percent;
-	
+
 
 	total_block = file_size_high / write_block_size * simultaneous;
 	max_ptr = total_block;
-	
+
 
 	reset_counters(); /* reset counters before each run */
 
@@ -1210,31 +1158,30 @@ char *param; /* unused */
 
 	/* allocate file space and fill with junk */
 	//file_source=initialize_file_source(bigfile_size_high<<1);
-	for(i = 0;i < file_source_num;i++)
-		file_source[i]=initialize_file_source(file_size_high<<1);
+	for (i = 0; i < file_source_num; i++)
+		file_source[i] = initialize_file_source(file_size_high << 1);
 
 	/* allocate read buffer */
-	read_buffer=(char *)malloc(read_block_size);
+	read_buffer = (char *)malloc(read_block_size);
 
 	/* allocate table of files at 2 x simultaneous files */
-	file_allocated=0;
+	file_allocated = 0;
 
 
-	if ((file_table=(file_entry *)calloc(simultaneous<<1,sizeof(file_entry)))==
-		//if ((file_table=(file_entry *)malloc((simultaneous<<1) * sizeof(file_entry)))==
-		NULL)
-		fprintf(stderr,"Error: Failed to allocate table for %d files\n",
-		simultaneous<<1);
+	if ((file_table = (file_entry *)calloc(simultaneous << 1, sizeof(file_entry))) ==
+	    //if ((file_table=(file_entry *)malloc((simultaneous<<1) * sizeof(file_entry)))==
+	    NULL)
+		fprintf(stderr, "Error: Failed to allocate table for %d files\n",
+			simultaneous << 1);
 
-	if (file_system_count>0)
-		location_index=build_location_index(file_systems,file_system_weight);
+	if (file_system_count > 0)
+		location_index = build_location_index(file_systems, file_system_weight);
 
 	/* create subdirectories if necessary */
-	if (subdirectories>1)
-	{
+	if (subdirectories > 1) {
 		printf("Creating subdirectories...");
 		fflush(stdout);
-		create_subdirectories(file_systems,NULL,subdirectories);
+		create_subdirectories(file_systems, NULL, subdirectories);
 		printf("Done\n");
 	}
 
@@ -1245,17 +1192,16 @@ char *param; /* unused */
 	fflush(stdout);
 
 	percent = simultaneous / 10;
-	for (i=0; i<simultaneous; i++){
+	for (i = 0; i < simultaneous; i++) {
 
-		if(!(i%percent)) /* if another tenth of the work is done...*/
-		{
-			printf("=>%d%c",i/percent*10,'%');
+		if (!(i % percent)) { /* if another tenth of the work is done...*/
+			printf("=>%d%c", i / percent * 10, '%');
 			//putchar('.');
 			fflush(stdout);
 			//percent = i;
 		}
 		//printf("C");
-		if(i == simultaneous - 1)
+		if (i == simultaneous - 1)
 			i = i;
 		create_file(buffered_io);
 	}
@@ -1264,7 +1210,7 @@ char *param; /* unused */
 	printf("Performing transactions");
 	fflush(stdout);
 	time(&t_start_time);
-	incomplete=run_transactions(buffered_io);
+	incomplete = run_transactions(buffered_io);
 	time(&t_end_time);
 	if (!incomplete)
 		printf("Done\n");
@@ -1272,8 +1218,8 @@ char *param; /* unused */
 	/* delete remaining files */
 	printf("Deleting files...");
 	fflush(stdout);
-	delete_base=files_deleted;
-	for (i=0; i<simultaneous<<1; i++)
+	delete_base = files_deleted;
+	for (i = 0; i < simultaneous << 1; i++)
 		delete_file(i);
 	printf("Done\n");
 
@@ -1282,54 +1228,52 @@ char *param; /* unused */
 
 
 	/* delete previously created subdirectories */
-	if (subdirectories>1)
-	{
+	if (subdirectories > 1) {
 		printf("Deleting subdirectories...");
 		fflush(stdout);
-		delete_subdirectories(file_systems,NULL,subdirectories);
+		delete_subdirectories(file_systems, NULL, subdirectories);
 		printf("Done\n");
 	}
 
 
-	if (location_index)
-	{
+	if (location_index) {
 		free(location_index);
-		location_index=NULL;
+		location_index = NULL;
 	}
 
 	if (param)
-		if ((fp=fopen(param,"a"))==NULL)
-			fprintf(stderr,"Error: Cannot direct output to file '%s'\n",param);
+		if ((fp = fopen(param, "a")) == NULL)
+			fprintf(stderr, "Error: Cannot direct output to file '%s'\n", param);
 
 	if (!fp)
-		fp=stdout;
+		fp = stdout;
 
 	//#if (DELETE_REMAIN == 1)
 	if (!incomplete)
-		reports[report](fp,end_time,start_time,t_end_time,t_start_time,
-		files_deleted-delete_base);
+		reports[report](fp, end_time, start_time, t_end_time, t_start_time,
+				files_deleted - delete_base);
 	//#endif
 
-	if (param && fp!=stdout)
+	if (param && fp != stdout)
 		fclose(fp);
 
 	/* free resources allocated for this run */
 	free(file_table);
 	free(read_buffer);
-	for(i = 0;i < file_source_num;i++)
+	for (i = 0; i < file_source_num; i++)
 		free(file_source[i]);
 
-	return(1); /* return 1 unless exit requested, then return 0 */
+	return (1); /* return 1 unless exit requested, then return 0 */
 }
 
 
 /* appends random data to a chosen file up to the maximum configured length */
-void overwrite_file(number,buffered)
+void overwrite_file(number, buffered)
 int number;   /* number of file (from file_table) to append date to */
 int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 {
-	FILE *fp=NULL;
-	int fd=-1;
+	FILE *fp = NULL;
+	int fd = -1;
 	int block; /* size of data to append */
 	//int file_size_high;
 
@@ -1338,35 +1282,32 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 	//if (RND(10)<bias_smallbig)
 	//	file_size_high = smallfile_size_high;
 	//else
-		file_size_high = file_size_high;
+	file_size_high = file_size_high;
 
-	if (file_table[number].size<= file_size_high)
-	{
+	if (file_table[number].size <= file_size_high) {
 		if (buffered)
-			fp=fopen(file_table[number].name,"a");
+			fp = fopen(file_table[number].name, "a");
 		else
-			fd=open(g_nvh, file_table[number].name,O_RDWR,0644);
+			fd = open(g_nvh, file_table[number].name, O_RDWR, 0644);
 
 		//printf("file name = %s\n",file_table[number].name);
 
-		if ((fp || fd!=-1) && file_table[number].size<=file_size_high)
-		{
-#if 0 
-			block=RND(file_size_high-file_table[number].size)+1;
+		if ((fp || fd != -1) && file_table[number].size <= file_size_high) {
+#if 0
+			block = RND(file_size_high - file_table[number].size) + 1;
 #else
-			block= file_table[number].size;
-#endif 
+			block = file_table[number].size;
+#endif
 			if (buffered)
-				fwrite_blocks(fp,block);
+				fwrite_blocks(fp, block);
 			else
-				write_blocks(fd,block);
+				write_blocks(fd, block);
 
 			//file_table[number].size+=block;
 			files_appended++;
-		}
-		else
-			fprintf(stderr,"Error: cannot open '%s' for append\n",
-			file_table[number].name);
+		} else
+			fprintf(stderr, "Error: cannot open '%s' for append\n",
+				file_table[number].name);
 	}
 }
 
@@ -1374,117 +1315,113 @@ int buffered; /* 1=buffered I/O (default), 0=unbuffered I/O */
 int cli_load(param)
 char *param;
 {
-	char buffer[MAX_LINE+1]; /* storage for input command line */
+	char buffer[MAX_LINE + 1]; /* storage for input command line */
 
 	if (param)
-		read_config_file(param,buffer,0);
+		read_config_file(param, buffer, 0);
 	else
-		fprintf(stderr,"Error: no configuration file specified\n");
+		fprintf(stderr, "Error: no configuration file specified\n");
 
-	return(1); /* return 1 unless exit requested, then return 0 */
+	return (1); /* return 1 unless exit requested, then return 0 */
 }
 
 /* CLI callback for 'show' - print values of configuration variables */
-int cli_show(param) 
+int cli_show(param)
 char *param; /* optional: name of output file */
 {
-	char current_dir[MAX_LINE+1]; /* buffer containing working directory */
+	char current_dir[MAX_LINE + 1]; /* buffer containing working directory */
 	file_system *traverse;
-	FILE *fp=NULL; /* file descriptor for directing output */
+	FILE *fp = NULL; /* file descriptor for directing output */
 
 	if (param)
-		if ((fp=fopen(param,"a"))==NULL)
-			fprintf(stderr,"Error: Cannot direct output to file '%s'\n",param);
+		if ((fp = fopen(param, "a")) == NULL)
+			fprintf(stderr, "Error: Cannot direct output to file '%s'\n", param);
 
 	if (!fp)
-		fp=stdout;
+		fp = stdout;
 
-	fprintf(fp,"Current configuration is:\n");
-	fprintf(fp,"The base number of files is %d\n",simultaneous);
-	fprintf(fp,"Transactions: %d\n",transactions);
+	fprintf(fp, "Current configuration is:\n");
+	fprintf(fp, "The base number of files is %d\n", simultaneous);
+	fprintf(fp, "Transactions: %d\n", transactions);
 
-	if (file_size_low!=file_size_high)
-	{
-		fprintf(fp,"Files range between %s ",scale(file_size_low));
-		fprintf(fp,"and %s in size\n",scale(file_size_high));
-	}
-	else
-		fprintf(fp,"Files are %s in size\n",scale(file_size_low));
+	if (file_size_low != file_size_high) {
+		fprintf(fp, "Files range between %s ", scale(file_size_low));
+		fprintf(fp, "and %s in size\n", scale(file_size_high));
+	} else
+		fprintf(fp, "Files are %s in size\n", scale(file_size_low));
 
-	fprintf(fp,"Working director%s: %s\n",(file_system_count>1)?"ies":"y",
-		(file_system_count==0)?GETWD(current_dir):"");
+	fprintf(fp, "Working director%s: %s\n", (file_system_count > 1) ? "ies" : "y",
+		(file_system_count == 0) ? GETWD(current_dir) : "");
 
-	for (traverse=file_systems; traverse; traverse=traverse->next)
-		printf("\t%s (weight=%d)\n",traverse->system.name,traverse->system.size);
+	for (traverse = file_systems; traverse; traverse = traverse->next)
+		printf("\t%s (weight=%d)\n", traverse->system.name, traverse->system.size);
 
-	if (subdirectories>0)
-		fprintf(fp,"%d subdirector%s will be used\n",subdirectories,
-		(subdirectories==1)?"y":"ies");
+	if (subdirectories > 0)
+		fprintf(fp, "%d subdirector%s will be used\n", subdirectories,
+			(subdirectories == 1) ? "y" : "ies");
 
-	fprintf(fp,"Block sizes are: read=%s, ",scale(read_block_size));
-	fprintf(fp,"write=%s\n",scale(write_block_size));
-	fprintf(fp,"Biases are: read/append=%d, create/delete=%d\n",bias_read,
+	fprintf(fp, "Block sizes are: read=%s, ", scale(read_block_size));
+	fprintf(fp, "write=%s\n", scale(write_block_size));
+	fprintf(fp, "Biases are: read/append=%d, create/delete=%d\n", bias_read,
 		bias_create);
-	fprintf(fp,"%ssing Unix buffered file I/O\n",buffered_io?"U":"Not u");
-	fprintf(fp,"Random number generator seed is %d\n",seed);
+	fprintf(fp, "%ssing Unix buffered file I/O\n", buffered_io ? "U" : "Not u");
+	fprintf(fp, "Random number generator seed is %d\n", seed);
 
-	fprintf(fp,"Report format is %s.\n",report?"terse":"verbose");
+	fprintf(fp, "Report format is %s.\n", report ? "terse" : "verbose");
 
-	if (param && fp!=stdout)
+	if (param && fp != stdout)
 		fclose(fp);
 
-	return(1); /* return 1 unless exit requested, then return 0 */
+	return (1); /* return 1 unless exit requested, then return 0 */
 }
 
 /* CLI callback for 'quit' - returns 0 causing UI to exit */
 int cli_quit(param) /* none */
 char *param; /* unused */
 {
-	return(0); /* return 1 unless exit requested, then return 0 */
+	return (0); /* return 1 unless exit requested, then return 0 */
 }
 
 /* CLI callback for 'help' - prints help strings from command_list */
-int cli_help(param) 
+int cli_help(param)
 char *param; /* optional: specific command to get help for */
 {
-	int n=0; /* number of matching items */
+	int n = 0; /* number of matching items */
 	int i; /* traversal variable for command table */
 	int len;
 
-	if (param && (len=strlen(param))>0) /* if a command is specified... */
-		for (i=0; command_list[i].name; i++) /* walk command table */
-			if (!strncmp(command_list[i].name,param,len))
-			{
-				printf("%s - %s\n",command_list[i].name,command_list[i].help);
+	if (param && (len = strlen(param)) > 0) /* if a command is specified... */
+		for (i = 0; command_list[i].name; i++) /* walk command table */
+			if (!strncmp(command_list[i].name, param, len)) {
+				printf("%s - %s\n", command_list[i].name, command_list[i].help);
 				n++;
 			}
 
-			if (!param || !n)
-				for (i=0; command_list[i].name; i++) /* traverse command table */
-					printf("%s - %s\n",command_list[i].name,command_list[i].help);
+	if (!param || !n)
+		for (i = 0; command_list[i].name; i++) /* traverse command table */
+			printf("%s - %s\n", command_list[i].name, command_list[i].help);
 
-			return(1); /* return 1 unless exit requested, then return 0 */
+	return (1); /* return 1 unless exit requested, then return 0 */
 }
 
 /* read CLI line from user, translate aliases if any, return fgets status */
-char *cli_read_line(buffer,size)
+char *cli_read_line(buffer, size)
 char *buffer; /* empty input line */
 int size;
 {
 	char *result;
 
-	printf("%s",PROMPT);                 /* print prompt */
+	printf("%s", PROMPT);                /* print prompt */
 	fflush(stdout);                      /* force prompt to print */
-	if (result=fgets(buffer,size,stdin)) /* read line safely */
-	{
-		buffer[strlen(buffer)-1]='\0';    /* delete final CR */
-		if (!strcmp(buffer,"?"))           /* translate aliases */
-			strcpy(buffer,"help");
-		if (!strcmp(buffer,"exit"))
-			strcpy(buffer,"quit");
+	if (result = fgets(buffer, size, stdin)) { /* read line safely */
+		buffer[strlen(buffer) - 1] = '\0'; /* delete final CR */
+		if (!strcmp(buffer, "?"))          /* translate aliases */
+			strcpy(buffer, "help");
+		if (!strcmp(buffer, "exit"))
+			strcpy(buffer, "quit");
 	}
 
-	return(result);                      /* return success of fgets */
+	return (result);                     /* return success of fgets */
 }
 
 
@@ -1492,67 +1429,62 @@ int size;
 int cli_parse_line(buffer)
 char *buffer; /* line of user input */
 {
-	int result=1; /* default return status */
+	int result = 1; /* default return status */
 	int len; /* length of parsed command */
 	int i; /* traversal variable for command table */
 
 
-	if (*buffer=='!') /* check for shell escape */
-		system((strlen(buffer)>1)?buffer+1:getenv("SHELL"));
-	else
-	{
-		for (i=0; command_list[i].name; i++) /* walk command table */
-			if (!strncmp(command_list[i].name,buffer,
-				len=strlen(command_list[i].name)))
-			{ /* if command matches... */
-				result=(command_list[i].func)
-					(((int)strlen(buffer)>len)?buffer+len+1:NULL);
+	if (*buffer == '!') /* check for shell escape */
+		system((strlen(buffer) > 1) ? buffer + 1 : getenv("SHELL"));
+	else {
+		for (i = 0; command_list[i].name; i++) /* walk command table */
+			if (!strncmp(command_list[i].name, buffer,
+				     len = strlen(command_list[i].name))) {
+				/* if command matches... */
+				result = (command_list[i].func)
+					 (((int)strlen(buffer) > len) ? buffer + len + 1 : NULL);
 				break; /* call function and pass remainder of line as parameter */
 			}
 
-			if (!command_list[i].name) /* if no commands were called... */
-				printf("Invalid Command\n"); /* tribute to Canadian diction */
+		if (!command_list[i].name) /* if no commands were called... */
+			printf("Invalid Command\n"); /* tribute to Canadian diction */
 	}
 
-	return(result); /* return 1 unless exit requested, then return 0 */
+	return (result); /* return 1 unless exit requested, then return 0 */
 }
 
 /* read config file if present and process it line by line
 - if 'quit' is in file then function returns 0 */
-int read_config_file(filename,buffer,ignore)
+int read_config_file(filename, buffer, ignore)
 char *filename; /* file name of config file */
 char *buffer;   /* temp storage for each line read from file */
 int ignore;     /* ignore file not found */
 {
-	int result=1; /* default exit value - proceed with UI */
+	int result = 1; /* default exit value - proceed with UI */
 	FILE *fp;
 
-	if (fp=fopen(filename,"r")) /* open config file */
-	{
-		printf("Reading configuration from file '%s'\n",filename);
-		while (fgets(buffer,MAX_LINE,fp) && result) /* read lines until 'quit' */
-		{
-			buffer[strlen(buffer)-1]='\0'; /* delete final CR */
-			result=cli_parse_line(buffer); /* process line as typed in */
+	if (fp = fopen(filename, "r")) { /* open config file */
+		printf("Reading configuration from file '%s'\n", filename);
+		while (fgets(buffer, MAX_LINE, fp) && result) { /* read lines until 'quit' */
+			buffer[strlen(buffer) - 1] = '\0'; /* delete final CR */
+			result = cli_parse_line(buffer); /* process line as typed in */
 		}
 
 		fclose(fp);
-	}
-	else
-		if (!ignore)
-			fprintf(stderr,"Error: cannot read configuration file '%s'\n",
-			filename); 
+	} else if (!ignore)
+		fprintf(stderr, "Error: cannot read configuration file '%s'\n",
+			filename);
 
-	return(result);
+	return (result);
 }
 
 /* main function - reads config files then enters get line/parse line loop */
 void postmark_main()
 {
-	char buffer[MAX_LINE+1]; /* storage for input command line */
+	char buffer[MAX_LINE + 1]; /* storage for input command line */
 
-	printf("PostMark %s\n",PM_VERSION);
-	while (cli_read_line(buffer,MAX_LINE) && cli_parse_line(buffer));
+	printf("PostMark %s\n", PM_VERSION);
+	while (cli_read_line(buffer, MAX_LINE) && cli_parse_line(buffer));
 }
 
 /*
@@ -1708,7 +1640,7 @@ The End
 /* See the GNU Library General Public License for more details.    */
 /* You should have received a copy of the GNU Library General      */
 /* Public License along with this library; if not, write to the    */
-/* Free Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA   */ 
+/* Free Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA   */
 /* 02111-1307  USA                                                 */
 
 /* Copyright (C) 1997, 1999 Makoto Matsumoto and Takuji Nishimura. */
@@ -1723,14 +1655,14 @@ The End
 /* ACM Transactions on Modeling and Computer Simulation,           */
 /* Vol. 8, No. 1, January 1998, pp 3--30.                          */
 
-/* Period parameters */  
+/* Period parameters */
 #define N 624
 #define M 397
 #define MATRIX_A 0x9908b0df   /* constant vector a */
 #define UPPER_MASK 0x80000000 /* most significant w-r bits */
 #define LOWER_MASK 0x7fffffff /* least significant r bits */
 
-/* Tempering parameters */   
+/* Tempering parameters */
 #define TEMPERING_MASK_B 0x9d2c5680
 #define TEMPERING_MASK_C 0xefc60000
 #define TEMPERING_SHIFT_U(y)  (y >> 11)
@@ -1739,16 +1671,16 @@ The End
 #define TEMPERING_SHIFT_L(y)  (y >> 18)
 
 static unsigned int mt[N]; /* the array for the state vector  */
-static int mti=N+1; /* mti==N+1 means mt[N] is not initialized */
+static int mti = N + 1; /* mti==N+1 means mt[N] is not initialized */
 
 /* Initializing the array with a seed */
 void
 sgenrand(seed)
-unsigned int seed;	
+unsigned int seed;
 {
 	int i;
 
-	for (i=0;i<N;i++) {
+	for (i = 0; i < N; i++) {
 		mt[i] = seed & 0xffff0000;
 		seed = 69069 * seed + 1;
 		mt[i] |= (seed & 0xffff0000) >> 16;
@@ -1762,45 +1694,45 @@ unsigned int seed;
 /* This function allows to choose any of 2^19937-1 ones.             */
 /* Essential bits in "seed_array[]" is following 19937 bits:         */
 /*  (seed_array[0]&UPPER_MASK), seed_array[1], ..., seed_array[N-1]. */
-/* (seed_array[0]&LOWER_MASK) is discarded.                          */ 
+/* (seed_array[0]&LOWER_MASK) is discarded.                          */
 /* Theoretically,                                                    */
 /*  (seed_array[0]&UPPER_MASK), seed_array[1], ..., seed_array[N-1]  */
 /* can take any values except all zeros.                             */
 void
 lsgenrand(seed_array)
-unsigned int seed_array[]; 
+unsigned int seed_array[];
 /* the length of seed_array[] must be at least N */
 {
 	int i;
 
-	for (i=0;i<N;i++) 
+	for (i = 0; i < N; i++)
 		mt[i] = seed_array[i];
-	mti=N;
+	mti = N;
 }
 
-unsigned int 
+unsigned int
 genrand()
 {
 	unsigned int y;
-	static unsigned int mag01[2]={0x0, MATRIX_A};
+	static unsigned int mag01[2] = {0x0, MATRIX_A};
 	/* mag01[x] = x * MATRIX_A  for x=0,1 */
 
 	if (mti >= N) { /* generate N words at one time */
 		int kk;
 
-		if (mti == N+1)   /* if sgenrand() has not been called, */
+		if (mti == N + 1) /* if sgenrand() has not been called, */
 			sgenrand(4357); /* a default initial seed is used   */
 
-		for (kk=0;kk<N-M;kk++) {
-			y = (mt[kk]&UPPER_MASK)|(mt[kk+1]&LOWER_MASK);
-			mt[kk] = mt[kk+M] ^ (y >> 1) ^ mag01[y & 0x1];
+		for (kk = 0; kk < N - M; kk++) {
+			y = (mt[kk] & UPPER_MASK) | (mt[kk + 1] & LOWER_MASK);
+			mt[kk] = mt[kk + M] ^ (y >> 1) ^ mag01[y & 0x1];
 		}
-		for (;kk<N-1;kk++) {
-			y = (mt[kk]&UPPER_MASK)|(mt[kk+1]&LOWER_MASK);
-			mt[kk] = mt[kk+(M-N)] ^ (y >> 1) ^ mag01[y & 0x1];
+		for (; kk < N - 1; kk++) {
+			y = (mt[kk] & UPPER_MASK) | (mt[kk + 1] & LOWER_MASK);
+			mt[kk] = mt[kk + (M - N)] ^ (y >> 1) ^ mag01[y & 0x1];
 		}
-		y = (mt[N-1]&UPPER_MASK)|(mt[0]&LOWER_MASK);
-		mt[N-1] = mt[M-1] ^ (y >> 1) ^ mag01[y & 0x1];
+		y = (mt[N - 1] & UPPER_MASK) | (mt[0] & LOWER_MASK);
+		mt[N - 1] = mt[M - 1] ^ (y >> 1) ^ mag01[y & 0x1];
 
 		mti = 0;
 	}
@@ -1811,5 +1743,5 @@ genrand()
 	y ^= TEMPERING_SHIFT_T(y) & TEMPERING_MASK_C;
 	y ^= TEMPERING_SHIFT_L(y);
 
-	return y; 
+	return y;
 }

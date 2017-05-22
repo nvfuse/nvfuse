@@ -34,49 +34,51 @@
 static int unix_open(struct nvfuse_io_manager *io_manager, int flags);
 static int unix_close(struct nvfuse_io_manager *io_manager);
 static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block,
-							   int count, void *buf);
+			 int count, void *buf);
 static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block,
-								int count,void *buf);
+			  int count, void *buf);
 
-static void io_getevents_error(int error){
-    switch(error){
-        case -EFAULT:
-            fprintf(stderr, " aio error: EFAULT\n");
-            assert(0);
-            break;
-        case -EINVAL:
-            fprintf(stderr, " aio error: EINVAL\n");
-            assert(0);
-            break;
-        case -ENOSYS:
-            fprintf(stderr, " aio error: ENOSYS\n");
-            assert(0);
-        case -EAGAIN:
-            fprintf(stderr, " aio error: EAGAIN\n");
-            assert(0);
-            break;
-        default:
-            assert(0);
-    }
+static void io_getevents_error(int error)
+{
+	switch (error) {
+	case -EFAULT:
+		fprintf(stderr, " aio error: EFAULT\n");
+		assert(0);
+		break;
+	case -EINVAL:
+		fprintf(stderr, " aio error: EINVAL\n");
+		assert(0);
+		break;
+	case -ENOSYS:
+		fprintf(stderr, " aio error: ENOSYS\n");
+		assert(0);
+	case -EAGAIN:
+		fprintf(stderr, " aio error: EAGAIN\n");
+		assert(0);
+		break;
+	default:
+		assert(0);
+	}
 }
 
-static void io_cancel_error_decode(int error){
-    switch(error){
-        case -EAGAIN:
-            printf(" EAGAIN: io was not canceled\n");
-            break;
-        case -EFAULT:
-            printf(" EFAULT: invalid data \n");
-            break;
-        case -EINVAL:
-            printf(" EINVAL: ctx is invalid \n");
-            break;
-        case -ENOSYS:
-            printf(" ENOSYS: IO_CANCEL is not implemented \n");
-            break;
-        default:
-            break;
-    }
+static void io_cancel_error_decode(int error)
+{
+	switch (error) {
+	case -EAGAIN:
+		printf(" EAGAIN: io was not canceled\n");
+		break;
+	case -EFAULT:
+		printf(" EFAULT: invalid data \n");
+		break;
+	case -EINVAL:
+		printf(" EINVAL: ctx is invalid \n");
+		break;
+	case -ENOSYS:
+		printf(" ENOSYS: IO_CANCEL is not implemented \n");
+		break;
+	default:
+		break;
+	}
 }
 
 static int libaio_init(struct nvfuse_io_manager *io_manager)
@@ -101,7 +103,7 @@ static int libaio_cleanup(struct nvfuse_io_manager *io_manager)
 
 static int libaio_prep(struct nvfuse_io_manager *io_manager, struct io_job *job)
 {
-	if(job->req_type==READ)
+	if (job->req_type == READ)
 		io_prep_pread(&job->iocb, io_manager->dev, job->buf, job->bytes, job->offset);
 	else
 		io_prep_pwrite(&job->iocb, io_manager->dev, job->buf, job->bytes, job->offset);
@@ -116,26 +118,26 @@ static int libaio_submit(struct nvfuse_io_manager *io_manager, struct iocb **ioq
 	//printf(" called: libaio submit = %d\n", qcnt);
 
 	ret = io_submit(io_manager->io_ctx, (long)qcnt, ioq);
-	if(ret < 0){
-		switch(ret){
-			case -EBADF:
-				printf(" EBADF: file descriptor invalid\n");
-				break;
-			case -EAGAIN:
-				printf(" EAGAIN: io was not canceled\n");
-				break;
-			case -EFAULT:
-				printf(" EFAULT: invalid data \n");
-				break;
-			case -EINVAL:
-				printf(" EINVAL: ctx is invalid \n");
-				break;
-			case -ENOSYS:
-				printf(" ENOSYS: IO_CANCEL is not implemented \n");
-				break;
-			default:
-				printf(" unkown error = %d \n", ret);
-				break;
+	if (ret < 0) {
+		switch (ret) {
+		case -EBADF:
+			printf(" EBADF: file descriptor invalid\n");
+			break;
+		case -EAGAIN:
+			printf(" EAGAIN: io was not canceled\n");
+			break;
+		case -EFAULT:
+			printf(" EFAULT: invalid data \n");
+			break;
+		case -EINVAL:
+			printf(" EINVAL: ctx is invalid \n");
+			break;
+		case -ENOSYS:
+			printf(" ENOSYS: IO_CANCEL is not implemented \n");
+			break;
+		default:
+			printf(" unkown error = %d \n", ret);
+			break;
 		}
 	}
 
@@ -146,22 +148,20 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 {
 	struct timespec time_out = {AIO_MAX_TIMEOUT_SEC, AIO_MAX_TIMEOUT_NSEC}; // {sec, nano}
 	int max_nr = io_manager->queue_cur_count;
-	int min_nr = 1; 
+	int min_nr = 1;
 	int retry_count = AIO_RETRY_COUNT;
 	int cc = 0; // completion count
 	int res;
 	int i;
 
 	//printf(" libaio_complete: max_nr = %d \n", max_nr);
-	while (max_nr)
-	{
+	while (max_nr) {
 		do {
-			res = io_getevents(io_manager->io_ctx, min_nr, max_nr, 
-					io_manager->events + cc, &time_out);
+			res = io_getevents(io_manager->io_ctx, min_nr, max_nr,
+					   io_manager->events + cc, &time_out);
 #if 0
-			if(res == -EINTR) 
-			{
-				fprintf( stderr, "libaio: EINTR happens and retry ...\n");
+			if (res == -EINTR) {
+				fprintf(stderr, "libaio: EINTR happens and retry ...\n");
 			}
 #endif
 		} while (res == -EINTR);
@@ -172,7 +172,7 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 
 		if ((res == 0 && min_nr) || res == -EAGAIN) { // timer expires
 			printf(" AIO timer expires curr qdepth = %d, retval = %d  \n", min_nr, res);
-			if(--retry_count)
+			if (--retry_count)
 				continue;
 
 			break;
@@ -205,13 +205,13 @@ static int libaio_complete(struct nvfuse_io_manager *io_manager)
 static struct io_job *libaio_getnextcjob(struct nvfuse_io_manager *io_manager)
 {
 	struct io_job *cur_job;
-    
-    assert(!cjob_empty(io_manager));
 
-    cur_job = io_manager->cjob[io_manager->cjob_tail];
-    io_manager->cjob[io_manager->cjob_tail] = NULL;
-    
-    io_manager->cjob_tail = (io_manager->cjob_tail + 1) % io_manager->iodepth;
+	assert(!cjob_empty(io_manager));
+
+	cur_job = io_manager->cjob[io_manager->cjob_tail];
+	io_manager->cjob[io_manager->cjob_tail] = NULL;
+
+	io_manager->cjob_tail = (io_manager->cjob_tail + 1) % io_manager->iodepth;
 }
 
 static void libaio_resetnextsjob(struct nvfuse_io_manager *io_manager)
@@ -242,14 +242,14 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	int len;
 	int i;
 
-	len = strlen(path)+1;
+	len = strlen(path) + 1;
 
-	io_manager->dev_path = (char *)malloc(len);	
+	io_manager->dev_path = (char *)malloc(len);
 	memset(io_manager->dev_path, 0x00, len);
 	strcpy(io_manager->dev_path, path);
 
-	len = strlen(name)+1;		
-	io_manager->io_name = (char *)malloc(len);	
+	len = strlen(name) + 1;
+	io_manager->io_name = (char *)malloc(len);
 	memset(io_manager->io_name, 0x00, len);
 	strcpy(io_manager->io_name, name);
 
@@ -263,11 +263,10 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	io_manager->cjob_tail = 0;
 	io_manager->iodepth = AIO_MAX_QDEPTH;
 	io_manager->queue_cur_count = 0;
-	
-   	for (i = 0; i < AIO_MAX_QDEPTH; i++)
-    {        
-        io_manager->cjob[i] = NULL;
-    }
+
+	for (i = 0; i < AIO_MAX_QDEPTH; i++) {
+		io_manager->cjob[i] = NULL;
+	}
 
 	/* Linux AIO Function Pointers */
 	io_manager->aio_init = libaio_init;
@@ -285,9 +284,10 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 static int unix_open(struct nvfuse_io_manager *io_manager, int flags)
 {
 	int	retval = 0, try_num = 0;
-	int	open_flags = O_RDWR;	
+	int	open_flags = O_RDWR;
 
-RETRY:;
+RETRY:
+	;
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	open_flags |= O_LARGEFILE;
@@ -301,10 +301,10 @@ RETRY:;
 		printf(" USE WRITE BACK CACHE\n");
 
 	io_manager->dev = open64(io_manager->dev_path, open_flags);
-#endif 
+#endif
 	if (io_manager->dev < 0) {
 		printf(" open error %s\n", io_manager->dev_path);
-		exit(0);		
+		exit(0);
 	}
 
 	io_manager->aio_init(io_manager);
@@ -326,14 +326,12 @@ static int unix_close(struct nvfuse_io_manager *io_manager)
 {
 	int retval = 0;
 
-	if (io_manager->aio_cleanup(io_manager) < 0)
-	{
+	if (io_manager->aio_cleanup(io_manager) < 0) {
 		retval = 1;
 		goto RES;
 	}
 
-	if (close(io_manager->dev) < 0)
-	{
+	if (close(io_manager->dev) < 0) {
 		retval = errno;
 	}
 
@@ -342,42 +340,46 @@ RES:
 	return retval;
 }
 
-static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf){		
+static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf)
+{
 	int	size, rbytes = 0;
-	s64	location;	
-	
-	size =  count * CLUSTER_SIZE;		
+	s64	location;
+
+	size =  count * CLUSTER_SIZE;
 	location = ((s64) block * (s64)CLUSTER_SIZE);
 
-RETRY:;
+RETRY:
+	;
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX	
+#if NVFUSE_OS == NVFUSE_OS_LINUX
 	rbytes = pread64(io_manager->dev, buf, size, location);
-#endif 	
+#endif
 
-	if(rbytes != size) {
-		printf(" read error, block = %lu, count = %d, size = %d\n",block, count, rbytes);
+	if (rbytes != size) {
+		printf(" read error, block = %lu, count = %d, size = %d\n", block, count, rbytes);
 		//memcpy(NULL, NULL, 880);
-	//	goto RETRY;
+		//	goto RETRY;
 	}
 
 	return rbytes;
 
 }
 
-static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block,int count,void *buf){	
+static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf)
+{
 	int	size, wbytes = 0;
 	s64	location;
-	
-	size = count * CLUSTER_SIZE;	
+
+	size = count * CLUSTER_SIZE;
 	location = ((s64) block * (s64)CLUSTER_SIZE);
 
-RETRY:;
+RETRY:
+	;
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	wbytes = pwrite64(io_manager->dev, buf, size, location);
-#endif 
-	
+#endif
+
 	return wbytes;
 }
 

@@ -2,7 +2,7 @@
  * dirhash.c -- Calculate the hash of a directory entry
  *
  * Copyright (c) 2001  Daniel Phillips
- * 
+ *
  * Copyright (c) 2002 Theodore Ts'o.
  *
  *   This program is free software.
@@ -38,7 +38,7 @@
  * (see Applied Cryptography, 2nd edition, p448).
  *
  * Jeremy Fitzhardinge <jeremy@zip.com.au> 1998
- * 
+ *
  * This code is made available under the terms of the GPL
  */
 #define DELTA 0x9E3779B9
@@ -50,11 +50,11 @@ static void TEA_transform(u32 buf[4], u32 const in[])
 	u32	a = in[0], b = in[1], c = in[2], d = in[3];
 	int	n = 16;
 
-	do {							
-		sum += DELTA;					
-		b0 += ((b1 << 4)+a) ^ (b1+sum) ^ ((b1 >> 5)+b);	
-		b1 += ((b0 << 4)+c) ^ (b0+sum) ^ ((b0 >> 5)+d);	
-	} while(--n);
+	do {
+		sum += DELTA;
+		b0 += ((b1 << 4) + a) ^ (b1 + sum) ^ ((b1 >> 5) + b);
+		b1 += ((b0 << 4) + c) ^ (b0 + sum) ^ ((b0 >> 5) + d);
+	} while (--n);
 
 	buf[0] += b0;
 	buf[1] += b1;
@@ -80,7 +80,7 @@ static void TEA_transform(u32 buf[4], u32 const in[])
 /*
  * Basic cut-down MD4 transform.  Returns only 32 bits of result.
  */
-static void halfMD4Transform (u32 buf[4], u32 const in[])
+static void halfMD4Transform(u32 buf[4], u32 const in[])
 {
 	u32	a = buf[0], b = buf[1], c = buf[2], d = buf[3];
 
@@ -129,8 +129,8 @@ static void halfMD4Transform (u32 buf[4], u32 const in[])
 #undef K3
 
 /* The old legacy hash */
-static ext2_dirhash_t dx_hack_hash (const char *name, int len,
-				    int unsigned_flag)
+static ext2_dirhash_t dx_hack_hash(const char *name, int len,
+				   int unsigned_flag)
 {
 	u32 hash, hash0 = 0x12a3fe2d, hash1 = 0x37abe8f9;
 	const unsigned char *ucp = (const unsigned char *) name;
@@ -139,11 +139,11 @@ static ext2_dirhash_t dx_hack_hash (const char *name, int len,
 
 	while (len--) {
 		if (unsigned_flag)
-			c = (int) *ucp++;
+			c = (int) * ucp++;
 		else
-			c = (int) *scp++;
+			c = (int) * scp++;
 		hash = hash1 + (hash0 ^ (c * 7152373));
-		
+
 		if (hash & 0x80000000) hash -= 0x7fffffff;
 		hash1 = hash0;
 		hash0 = hash;
@@ -163,9 +163,9 @@ static void str2hashbuf(const char *msg, int len, u32 *buf, int num,
 	pad |= pad << 16;
 
 	val = pad;
-	if (len > num*4)
+	if (len > num * 4)
 		len = num * 4;
-	for (i=0; i < len; i++) {
+	for (i = 0; i < len; i++) {
 		if ((i % 4) == 0)
 			val = pad;
 		if (unsigned_flag)
@@ -190,19 +190,19 @@ static void str2hashbuf(const char *msg, int len, u32 *buf, int num,
  * Returns the hash of a filename.  If len is 0 and name is NULL, then
  * this function can be used to test whether or not a hash version is
  * supported.
- * 
+ *
  * The seed is an 4 longword (32 bits) "secret" which can be used to
  * uniquify a hash.  If the seed is all zero's, then some default seed
  * may be used.
- * 
+ *
  * A particular hash version specifies whether or not the seed is
  * represented, and whether or not the returned hash is 32 bits or 64
  * bits.  32 bit hashes will return 0 for the minor hash.
  */
 s32 ext2fs_dirhash(int version, const char *name, int len,
-			 const u32 *seed,
-			 ext2_dirhash_t *ret_hash,
-			 ext2_dirhash_t *ret_minor_hash)
+		   const u32 *seed,
+		   ext2_dirhash_t *ret_hash,
+		   ext2_dirhash_t *ret_minor_hash)
 {
 	u32	hash;
 	u32	minor_hash = 0;
@@ -219,14 +219,14 @@ s32 ext2fs_dirhash(int version, const char *name, int len,
 
 	/* Check to see if the seed is all zero's */
 	if (seed) {
-		for (i=0; i < 4; i++) {
+		for (i = 0; i < 4; i++) {
 			if (seed[i])
 				break;
 		}
 		if (i < 4)
 			memcpy(buf, seed, sizeof(buf));
 	}
-		
+
 	switch (version) {
 	case EXT2_HASH_LEGACY_UNSIGNED:
 		unsigned_flag++;
@@ -281,7 +281,7 @@ int crc32c_intel_available = 0;
 static int crc32c_probed;
 
 static u32 crc32c_intel_le_hw_byte(u32 crc, unsigned char const *data,
-					unsigned long length)
+				   unsigned long length)
 {
 	while (length--) {
 		__asm__ __volatile__(
@@ -299,12 +299,12 @@ static inline void do_cpuid(unsigned int *eax, unsigned int *ebx,
 			    unsigned int *ecx, unsigned int *edx)
 {
 	asm volatile("cpuid"
-		: "=a" (*eax), "=b" (*ebx), "=c" (*ecx), "=d" (*edx)
-		: "0" (*eax), "2" (*ecx)
-		: "memory");
+		     : "=a"(*eax), "=b"(*ebx), "=c"(*ecx), "=d"(*edx)
+		     : "0"(*eax), "2"(*ecx)
+		     : "memory");
 }
 /*
- * Steps through buffer one byte at at time, calculates reflected 
+ * Steps through buffer one byte at at time, calculates reflected
  * crc using table.
  */
 u32 crc32c_intel(unsigned char const *data, unsigned long length)
@@ -329,7 +329,7 @@ u32 crc32c_intel(unsigned char const *data, unsigned long length)
 
 	if (iremainder)
 		crc = crc32c_intel_le_hw_byte(crc, (unsigned char *)ptmp,
-				 iremainder);
+					      iremainder);
 
 	return crc;
 }

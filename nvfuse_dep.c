@@ -32,7 +32,7 @@
 #include <string.h>
 #include "nvfuse_types.h"
 
-s32 ext2fs_set_bit(u32 nr,void * addr)
+s32 ext2fs_set_bit(u32 nr, void *addr)
 {
 	s32		mask, retval;
 	u8	*ADDR = (u8 *) addr;
@@ -44,7 +44,7 @@ s32 ext2fs_set_bit(u32 nr,void * addr)
 	return retval;
 }
 
-s32 ext2fs_clear_bit(u32 nr, void * addr)
+s32 ext2fs_clear_bit(u32 nr, void *addr)
 {
 	s32		mask, retval;
 	u8	*ADDR = (u8 *) addr;
@@ -56,7 +56,7 @@ s32 ext2fs_clear_bit(u32 nr, void * addr)
 	return retval;
 }
 
-s32 ext2fs_test_bit(u32 nr, const void * addr)
+s32 ext2fs_test_bit(u32 nr, const void *addr)
 {
 	s32			mask;
 	const u8	*ADDR = (const u8 *) addr;
@@ -71,7 +71,10 @@ s32 fat_dirname(const s8 *path, s8 *dest)
 	s8 *slash;
 	strcpy(dest, path);
 	slash = strrchr(dest, 0x2F); // 0x2F = "/"
-	if (slash == &(dest[0])) { dest[1] = 0; return 0; } // root dir
+	if (slash == &(dest[0])) {
+		dest[1] = 0;        // root dir
+		return 0;
+	}
 	*slash  = 0;
 	return 0;
 }
@@ -80,7 +83,7 @@ s32 fat_filename(const s8 *path, s8 *dest)
 {
 	s8 *slash;
 	slash = strrchr(path, 0x2F); // 0x2F = "/"
-	if(slash == NULL){
+	if (slash == NULL) {
 		strcpy(dest, path);
 		return 0;
 	}

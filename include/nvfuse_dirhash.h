@@ -2,7 +2,7 @@
  * dirhash.c -- Calculate the hash of a directory entry
  *
  * Copyright (c) 2001  Daniel Phillips
- * 
+ *
  * Copyright (c) 2002 Theodore Ts'o.
  *
  *   This program is free software.
@@ -35,9 +35,9 @@
 
 typedef u32	ext2_dirhash_t;
 s32 ext2fs_dirhash(int version, const char *name, int len,
-			 const u32 *seed,
-			 ext2_dirhash_t *ret_hash,
-			 ext2_dirhash_t *ret_minor_hash);
+		   const u32 *seed,
+		   ext2_dirhash_t *ret_hash,
+		   ext2_dirhash_t *ret_minor_hash);
 
 void crc32c_intel_probe(void);
 u32 crc32c_intel(unsigned char const *data, unsigned long length);

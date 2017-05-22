@@ -59,26 +59,30 @@ void *nvfuse_alloc_aligned_buffer(size_t size)
 	memalloc_allocated_size++;
 	return malloc((size_t)size);
 }
-#endif 
+#endif
 
-void *nvfuse_malloc(size_t size) {
+void *nvfuse_malloc(size_t size)
+{
 	memalloc_allocated_size++;
 	return malloc((size_t)size);
 }
 
 
-void nvfuse_free(void *ptr){
+void nvfuse_free(void *ptr)
+{
 	memalloc_allocated_size--;
 	free(ptr);
 }
 
 #ifndef USE_RTE_MEMALLOC
-void nvfuse_free_aligned_buffer(void *ptr){
+void nvfuse_free_aligned_buffer(void *ptr)
+{
 	memalloc_allocated_size--;
 	free(ptr);
 }
 #else
-void nvfuse_free_aligned_buffer(void *ptr){
+void nvfuse_free_aligned_buffer(void *ptr)
+{
 	memalloc_allocated_size--;
 	rte_free(ptr);
 }

@@ -68,29 +68,28 @@ void xmp_destroy(void *data);
 int nvfuse_init(int format, s8 *devname)
 {
 	int ret = 0;
-	char *argv[] = 	{ 
+	char *argv[] = 	{
 		"fuse_example",
-	#ifdef SPDK_ENABLED
+#ifdef SPDK_ENABLED
 		"-t spdk",
 		"-d 01:00",  /* PCIe Slot Number */
-	#else
+#else
 		"-t block",
 		"-d /dev/nvme0n1",
-	#endif
+#endif
 		"-f", /* format */
 		"-m", /* mount */
-		};
+	};
 	int argc = 2;
 
 	/*FIXME: */
 	/* create nvfuse_handle with user spcified parameters */
 	nvh = nvfuse_create_handle(NULL, NULL, NULL);
-	if (nvh == NULL)
-	{
+	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
-	
+
 	if (nvh == NULL)
 		ret = -1;
 
@@ -101,7 +100,7 @@ int nvfuse_init(int format, s8 *devname)
 int nvfuse_deinit(void)
 {
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-	printf(" Finalizing ... \n"); 
+	printf(" Finalizing ... \n");
 	return 0;
 }
 
@@ -191,7 +190,7 @@ static int xmp_opendir(const char *path, struct fuse_file_info *fi)
 
 static inline struct xmp_dirp *get_dirp(struct fuse_file_info *fi)
 {
-	return (struct xmp_dirp *) (uintptr_t) fi->fh;
+	return (struct xmp_dirp *)(uintptr_t) fi->fh;
 }
 
 static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
@@ -472,7 +471,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 #if 0
 static int xmp_write_buf(const char *path, struct fuse_bufvec *buf,
-		     off_t offset, struct fuse_file_info *fi)
+			 off_t offset, struct fuse_file_info *fi)
 {
 	struct fuse_bufvec dst = FUSE_BUFVEC_INIT(fuse_buf_size(buf));
 
@@ -679,11 +678,11 @@ static struct fuse_operations xmp_oper = {
 int main(int argc, char *argv[])
 {
 	int ret;
-	
+
 	printf(" fuse_example is currently not supported.\n");
 
 	return -1;
-	
+
 	if (argc < 3) {
 		printf("\n");
 		printf("Usage: \n");

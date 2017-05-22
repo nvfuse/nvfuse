@@ -156,9 +156,9 @@ struct nvfuse_app_superblock {
 };
 
 struct nvfuse_superblock_common {
-	u32 sb_signature; //RDONLY	
-	s64 sb_no_of_sectors;//RDONLY	
-	s64 sb_no_of_blocks;//RDONLY	
+	u32 sb_signature; //RDONLY
+	s64 sb_no_of_sectors;//RDONLY
+	s64 sb_no_of_blocks;//RDONLY
 	s64 sb_no_of_used_blocks; /* FS view*/
 
 	u32 sb_no_of_inodes_per_seg;
@@ -168,7 +168,7 @@ struct nvfuse_superblock_common {
 	s32 sb_free_inodes; /* FS view */
 	s64 sb_free_blocks; /* FS view */
 
-	s32 sb_segment_num; /*RDONLY*/	
+	s32 sb_segment_num; /*RDONLY*/
 
 	u32 sb_umount;/* SYNC TIME*/
 	s32 sb_mount_cnt;
@@ -181,11 +181,11 @@ struct nvfuse_superblock_common {
 };
 
 /* Super Block Structure */
-struct nvfuse_superblock{
+struct nvfuse_superblock {
 	struct { /* Must be identical to nvfuse_super_common */
-		u32 sb_signature; //RDONLY	
-		s64	sb_no_of_sectors;//RDONLY	
-		s64	sb_no_of_blocks;//RDONLY	
+		u32 sb_signature; //RDONLY
+		s64	sb_no_of_sectors;//RDONLY
+		s64	sb_no_of_blocks;//RDONLY
 		s64	sb_no_of_used_blocks; /* FS view*/
 
 		u32 sb_no_of_inodes_per_seg;
@@ -195,7 +195,7 @@ struct nvfuse_superblock{
 		s32 sb_free_inodes; /* FS view */
 		s64 sb_free_blocks; /* FS view */
 
-		s32	sb_segment_num; /*RDONLY*/	
+		s32	sb_segment_num; /*RDONLY*/
 
 		u32	sb_umount;/* SYNC TIME*/
 		s32 sb_mount_cnt;
@@ -208,29 +208,29 @@ struct nvfuse_superblock{
 	};
 
 	struct {
-		struct control_plane_context *sb_control_plane_ctx;		
+		struct control_plane_context *sb_control_plane_ctx;
 		s32 sb_control_plane_buffer_size;
 		s32	sb_next_segment; /* SYNC TIME or BACKGROUND CLEANING*/
 		s32	sb_cur_segment; /* SYNC TIME or BACKGROUND CLEANING*/
 		s32	sb_cur_clu; /* SYNC TIME or BACKGROUND CLEANING*/
-	
+
 		s32 sb_last_allocated_ino;
-		s32 sb_last_allocated_sid;		
-		s32 sb_last_allocated_sid_by_ino;		
+		s32 sb_last_allocated_sid;
+		s32 sb_last_allocated_sid_by_ino;
 		struct nvfuse_io_manager *io_manager;
 
 		struct nvfuse_segment_summary *sb_ss; /* SYNC TIME*/
 		struct nvfuse_handle *sb_nvh;
-		
+
 		s32 sb_sb_cur;
 		s32 sb_sb_flush;
-		
+
 		/* block buffer manager */
 		struct nvfuse_buffer_manager *sb_bm;
 
 		/* inode context cache */
 		struct nvfuse_ictx_manager *sb_ictxc;
-						
+
 		struct nvfuse_file_table *sb_file_table; /* INCLUDING FINE GRAINED LOCK */
 		//pthread_mutex_t sb_file_table_lock; /* COARSE LOCK */
 
@@ -252,7 +252,7 @@ struct nvfuse_superblock{
 		//struct list_head *sb_seg_cur_ptr; /* hint */
 
 		s32 sb_is_primary_process;
-		
+
 		/* Read and Write statistics*/
 		u64 sb_write_blocks;
 		u64 sb_read_blocks;
@@ -267,7 +267,7 @@ struct nvfuse_superblock{
 		struct timeval sb_time_start;
 		struct timeval sb_time_end;
 		struct timeval sb_time_total;
-		
+
 		u64 bp_set_index_tsc;
 		u64 bp_set_index_count;
 
@@ -285,16 +285,16 @@ struct nvfuse_superblock{
 		/* seg node mempool*/
 		struct spdk_mempool *seg_mempool; /* allocated for primary core */
 		/* io job mempool */
-		struct spdk_mempool *io_job_mempool;		
+		struct spdk_mempool *io_job_mempool;
 	};
 };
 
-struct seg_node{
- struct list_head list;
- u32 seg_id;
+struct seg_node {
+	struct list_head list;
+	u32 seg_id;
 };
 
-struct nvfuse_file_table{
+struct nvfuse_file_table {
 	inode_t	ino;
 	s64	size;
 	s32	used;
@@ -306,11 +306,11 @@ struct nvfuse_file_table{
 
 #define MAX_FILES_PER_DIR (0x7FFFFFFF)
 
-struct nvfuse_dir_entry{	
+struct nvfuse_dir_entry {
 	inode_t	d_ino;
 	u32	d_flag;
 	u32	d_version;
-	s8	d_filename[FNAME_SIZE];	
+	s8	d_filename[FNAME_SIZE];
 };
 
 #define NVFUSE_SUPERBLOCK_OFFSET  0
@@ -321,7 +321,7 @@ struct nvfuse_dir_entry{
 #define NVFUSE_DBITMAP_OFFSET     (NVFUSE_IBITMAP_OFFSET+NVFUSE_IBITMAP_SIZE)
 #define NVFUSE_DBITMAP_SIZE       1
 
-struct nvfuse_segment_summary{
+struct nvfuse_segment_summary {
 	u32 ss_magic;
 	u32 ss_owner;
 	u32 ss_id;
@@ -341,7 +341,7 @@ struct nvfuse_segment_summary{
 	u32 ss_free_inodes;
 	u32 ss_free_blocks;
 
-	u32 ss_next_block;	
+	u32 ss_next_block;
 };
 
 #define DIRECT_BLOCKS       11
@@ -358,28 +358,28 @@ struct nvfuse_segment_summary{
 						(s64)(1 << (PTRS_PER_BLOCK_BITS * 2)) * CLUSTER_SIZE + \
 						(s64)(1 << (PTRS_PER_BLOCK_BITS * 3)) * CLUSTER_SIZE)
 
-struct nvfuse_inode{	
+struct nvfuse_inode {
 	inode_t	i_ino; //4
 	u32	i_type; //8
 	u32 i_bpino;
-	s64	i_size;	//16	
-	u32	i_version; //20	
+	s64	i_size;	//16
+	u32	i_version; //20
 	u32	i_deleted; // 24
 	u32	i_links_count;	/* Links count */ //28
-	u32	i_ptr;		/* for directory entry */ //32	
+	u32	i_ptr;		/* for directory entry */ //32
 	u32	i_atime;	/* Access time */ //36
 	u32	i_ctime;	/* Inode change time */ //40
 	u32	i_mtime;	/* Modification time */ //44
 	u32	i_dtime;	/* Deletion Time */ //48
 	u16	i_gid;		/* Low 16 bits of Group Id */ //50
-	u16	i_uid;		/* Low 16 bits of Owner Uid */	//52 	
+	u16	i_uid;		/* Low 16 bits of Owner Uid */	//52
 	u16	i_mode;		/* File mode */ //54
 	u32 resv1[1]; //64
 	u32 i_blocks[TINDIRECT_BLOCKS + 1];
-	u32 resv2[1];	
+	u32 resv2[1];
 };
 
-struct nvfuse_inode_ctx{
+struct nvfuse_inode_ctx {
 	inode_t ictx_ino;
 	struct list_head ictx_cache_list;   /* cache list */
 	struct hlist_node ictx_hash;		/* hash list*/
@@ -388,11 +388,11 @@ struct nvfuse_inode_ctx{
 	struct nvfuse_buffer_head *ictx_bh;
 
 	struct list_head ictx_meta_bh_head;
-	struct list_head ictx_data_bh_head;	
+	struct list_head ictx_data_bh_head;
 
 #ifdef USE_RBNODE
-    struct rb_root ictx_meta_bh_rbroot;	
-    struct rb_root ictx_data_bh_rbroot;
+	struct rb_root ictx_meta_bh_rbroot;
+	struct rb_root ictx_data_bh_rbroot;
 #endif
 
 	s32 ictx_meta_dirty_count;
@@ -404,11 +404,11 @@ struct nvfuse_inode_ctx{
 };
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
-struct iovec{
+struct iovec {
 	s8 *iov_base;
 	u32 iov_len;
 };
-#endif 
+#endif
 
 #define nvfuse_dirname fat_dirname
 #define nvfuse_filename fat_filename
@@ -434,11 +434,11 @@ struct nvfuse_ipc_context {
 	/* IPC Ring Queue Name */
 	char _SEC_2_PRI[SPDK_NUM_CORES][64];
 	char _PRI_2_SEC[SPDK_NUM_CORES][64];
-	
+
 	/* IPC Ring Structure */
 	struct rte_ring *send_ring[SPDK_NUM_CORES];
 	struct rte_ring *recv_ring[SPDK_NUM_CORES];
-	
+
 	/* ID Gen Ring */
 	char ID_GEN[64];
 	struct rte_ring *id_gen;
@@ -460,7 +460,7 @@ struct nvfuse_handle {
 	struct nvfuse_superblock nvh_sb;
 	struct nvfuse_io_manager nvh_iom;
 	struct nvfuse_params nvh_params;
-	struct nvfuse_ipc_context nvh_ipc_ctx;	
+	struct nvfuse_ipc_context nvh_ipc_ctx;
 
 	u32 nvh_cwd_ino;
 	u32 nvh_root_dir;
@@ -472,12 +472,13 @@ s32 error_msg(s8 *str);
 void nvfuse_dir_hash(s8 *filename, u32 *hash, u32 *hash2);
 int nvfuse_read_block(char *buf, unsigned long block, struct nvfuse_io_manager *io_manager);
 
-struct nvfuse_superblock * nvfuse_read_super(struct nvfuse_handle *nvh);
+struct nvfuse_superblock *nvfuse_read_super(struct nvfuse_handle *nvh);
 void nvfuse_release_super(struct nvfuse_superblock *sb);
 
 
 void nvfuse_print_inode(struct nvfuse_inode *inode, s8 *str);
-struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino);
+struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb,
+		struct nvfuse_inode_ctx *ictx, inode_t ino);
 
 inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
 
@@ -486,14 +487,18 @@ s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_ino
 void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx);
 
 void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size);
-s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb,struct nvfuse_inode *inode,s8 *filename,u32 offset);
-s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename,bitem_t *offset);
-s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename,bitem_t *offset);
-s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,s8 *filename);
+s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
+			    u32 offset);
+s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
+			    bitem_t *offset);
+s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
+			    bitem_t *offset);
+s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename);
 s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head, s32 num_blocks);
 
 s32 nvfuse_umount(struct nvfuse_handle *nvh);
-void nvfuse_copy_mem_sb_to_disk_sb(struct nvfuse_superblock *disk, struct nvfuse_superblock *memory);
+void nvfuse_copy_mem_sb_to_disk_sb(struct nvfuse_superblock *disk,
+				   struct nvfuse_superblock *memory);
 void nvfuse_copy_disk_sb_to_sb(struct nvfuse_superblock *memory, struct nvfuse_superblock *disk);
 s32 nvfuse_is_sb(s8 *buf);
 s32 nvfuse_is_ss(s8 *buf);
@@ -505,26 +510,32 @@ u64 get_no_of_sectors(s32 fd);
 s32 nvfuse_dir(struct nvfuse_handle *nvh);
 
 s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb);
-s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino,s8 *filename,mode_t mode);
-s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
-s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct nvfuse_dir_entry *get);
-s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset, s32 position);
+s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino, s8 *filename, mode_t mode);
+s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename,
+		     struct nvfuse_dir_entry *get);
+s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename,
+		      struct nvfuse_dir_entry *get);
+s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset,
+		s32 position);
 s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino);
-s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino,s8 *name,u32 *ino);
-u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t offset);
+s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, u32 *ino);
+u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino,
+		   lbno_t offset);
 
-s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 tail, s32 dirty);
+s32 nvfuse_release_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh, s32 tail,
+		      s32 dirty);
 
-s32  nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str,s8 *ssize);
+s32  nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize);
 s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str);
 void nvfuse_test(struct nvfuse_handle *nvh);
 s32 nvfuse_rdfile(struct nvfuse_handle *nvh, s8 *str);
-bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno,bkey_t *key,u32 type);
+bkey_t *nvfuse_make_key(inode_t ino, lbno_t lbno, bkey_t *key, u32 type);
 void nvfuse_make_pbno_key(inode_t ino, lbno_t lbno, u64 *key, u32 type);
 s32 nvfuse_mount(struct nvfuse_handle *nvh);
 
 s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_size);
-s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, nvfuse_off_t trunc_size);
+s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
+		    nvfuse_off_t trunc_size);
 u32 nvfuse_create_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode *inode);
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, u32 *alloc_blks, u32 num_blocks);
 u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 seg_id, nvfuse_loff_t offset, u32 count);
@@ -538,8 +549,8 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force);
 
 void nvfuse_inc_free_inodes(struct nvfuse_superblock *sb, inode_t ino);
 
-#define nvfuse_lock()	
-#define nvfuse_unlock() 
+#define nvfuse_lock()
+#define nvfuse_unlock()
 
 void nvfuse_lock_init(void);
 void nvfuse_lock_exit(void);
@@ -563,7 +574,8 @@ void nvfuse_move_curr_seg_id(struct nvfuse_superblock *sb, s32 seg_id, s32 is_in
 s32 nvfuse_add_seg(struct nvfuse_superblock *sb, u32 seg_id);
 s32 nvfuse_remove_seg(struct nvfuse_superblock *sb, u32 seg_id);
 
-void nvfuse_update_sb_with_ss_info(struct nvfuse_superblock *sb, s32 seg_id, s32 is_root_container, s32 increament);
+void nvfuse_update_sb_with_ss_info(struct nvfuse_superblock *sb, s32 seg_id, s32 is_root_container,
+				   s32 increament);
 
 s32 nvfuse_check_free_inode(struct nvfuse_superblock *sb);
 s32 nvfuse_check_free_block(struct nvfuse_superblock *sb, u32 num_blocks);

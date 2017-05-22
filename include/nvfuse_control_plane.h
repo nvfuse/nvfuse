@@ -22,15 +22,15 @@
 #define MAX_CONTAINERS          4
 
 struct app_manage_node {
-    struct list_head list;
-    s32 channel_id;
-    s8 name[16];
-    s32 root_seg_id; /* identify to container */
+	struct list_head list;
+	s32 channel_id;
+	s8 name[16];
+	s32 root_seg_id; /* identify to container */
 };
 
 struct control_plane_context {
 	/*
-	* registered application table 
+	* registered application table
 	*/
 	struct app_manage_node *app_manage_table;
 	s32 app_table_size;
@@ -38,7 +38,7 @@ struct control_plane_context {
 	s64 app_table_generation;
 	s32 app_table_cur_log_file;
 	s32 app_table_max_log_file;
-	
+
 	/*
 	* container list table
 	*/
@@ -73,7 +73,7 @@ s32 nvfuse_store_app_table(struct nvfuse_handle *nvh);
 s32 nvfuse_load_app_table(struct nvfuse_handle *nvh);
 
 /* Superblock Copy Functions */
-s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname, 
+s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname,
 			   struct superblock_copy_cpl *msg, struct nvfuse_superblock_common *sb_common);
 
 /* Buffer Allocation Functions */
@@ -84,16 +84,20 @@ void nvfuse_control_plane_buffer_deinit(struct nvfuse_handle *nvh);
 
 /* Container Management Functions */
 s32 nvfuse_control_plane_container_table_init(struct nvfuse_handle *nvh, s32 num_containers);
-s32 nvfuse_control_plane_container_alloc(struct nvfuse_handle *nvh, s32 core_id, s32 type, s32 status);
-s32 nvfuse_control_plane_container_release(struct nvfuse_handle *nvh, s32 core_id, s32 container_id);
+s32 nvfuse_control_plane_container_alloc(struct nvfuse_handle *nvh, s32 core_id, s32 type,
+		s32 status);
+s32 nvfuse_control_plane_container_release(struct nvfuse_handle *nvh, s32 core_id,
+		s32 container_id);
 void nvfuse_control_plane_container_table_deinit(struct nvfuse_handle *nvh);
-s32 nvfuse_control_plane_container_release_by_coreid(struct nvfuse_handle *nvh, s32 core_id, s32 clear_owner);
-    
+s32 nvfuse_control_plane_container_release_by_coreid(struct nvfuse_handle *nvh, s32 core_id,
+		s32 clear_owner);
+
 s32 nvfuse_store_container_table(struct nvfuse_handle *nvh);
 s32 nvfuse_load_container_table(struct nvfuse_handle *nvh);
 
 /* Container Reservation Functions */
-s32 nvfuse_control_plane_reservation_acquire(struct nvfuse_handle *nvh, s32 container_id, enum reservation_type type);
+s32 nvfuse_control_plane_reservation_acquire(struct nvfuse_handle *nvh, s32 container_id,
+		enum reservation_type type);
 s32 nvfuse_control_plane_reservation_release(struct nvfuse_handle *nvh, s32 container_id);
 
 /* Control Plane Init/Deinit Functions */

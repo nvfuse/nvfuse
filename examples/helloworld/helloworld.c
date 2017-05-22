@@ -34,19 +34,18 @@ int main(int argc, char *argv[])
 	int fd;
 	int count;
 	char *buf;
-	
+
 	ret = nvfuse_parse_args(argc, argv, &params);
 	if (ret < 0)
 		return -1;
-	
+
 	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
 	if (ret < 0)
 		return -1;
 
 	/* create nvfuse_handle with user spcified parameters */
 	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
-	if (nvh == NULL)
-	{
+	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
@@ -76,7 +75,7 @@ int main(int argc, char *argv[])
 			printf(" Error: file write() \n");
 		}
 	}
-		
+
 	nvfuse_lseek(nvh, fd, 0, SEEK_SET);
 
 	memset(buf, 0x00, 4096);
@@ -92,11 +91,12 @@ int main(int argc, char *argv[])
 
 	/* release memory */
 	nvfuse_free_aligned_buffer(buf);
-		
+
 	/* close file */
 	nvfuse_closefile(nvh, fd);
 
-RET:;
+RET:
+	;
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);

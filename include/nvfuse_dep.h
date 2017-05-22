@@ -18,9 +18,9 @@
 #ifndef __NVFUSE_DEP_H__
 #define __NVFUSE_DEP_H__
 
-s32 ext2fs_set_bit(u32 nr,void * addr);
-s32 ext2fs_clear_bit(u32 nr, void * addr);
-s32 ext2fs_test_bit(u32 nr, const void * addr);
+s32 ext2fs_set_bit(u32 nr, void *addr);
+s32 ext2fs_clear_bit(u32 nr, void *addr);
+s32 ext2fs_test_bit(u32 nr, const void *addr);
 s32 fat_dirname(const s8 *path, s8 *dest);
 s32 fat_filename(const s8 *path, s8 *dest);
 

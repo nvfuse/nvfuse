@@ -35,7 +35,7 @@ struct nvfuse_aio_ctx {
 	s32 actx_opcode; /* Read or Write */
 	void *actx_buf; /* actual data buffer */
 	s64 actx_offset; /* start address in bytes */
-	s64 actx_bytes; /* number of bytes */	
+	s64 actx_bytes; /* number of bytes */
 	s32 actx_error; /* return error code */
 	s32 actx_status; /* status (e.g., ready, submitted, and completed) */
 	struct list_head actx_list; /* linked list */
@@ -64,7 +64,7 @@ struct nvfuse_aio_queue {
 	struct list_head acq_head; /* completion queue head */
 	s32 acq_max_depth; /* maximum completion queue depth */
 	s32 acq_cur_depth; /* current completion queue depth */
-	
+
 	s32 aio_cur_depth;
 
 	s32 max_completions;
@@ -77,7 +77,7 @@ struct nvfuse_aio_queue {
 };
 
 s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue *aioq, s32 max_depth);
-void nvfuse_aio_queue_deinit(struct nvfuse_handle *nvh, struct nvfuse_aio_queue * aioq);
+void nvfuse_aio_queue_deinit(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq);
 s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);
 s32 nvfuse_aio_queue_dequeue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);
 s32 nvfuse_aio_queue_move(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_ctx *actx, s32 qtype);

@@ -46,7 +46,7 @@
 #endif
 
 /*
-* global variable for control plane 
+* global variable for control plane
 */
 #define LOG_CHUNK_SIZE 4096
 
@@ -83,7 +83,7 @@ s8 *get_app_table_log_name(struct nvfuse_handle *nvh, s32 log_number)
 
 	cp = nvh->nvh_sb.sb_control_plane_ctx;
 	log_name = cp->app_log_name;
-	
+
 	sprintf(log_name, "app_table_%d.file", log_number);
 	return log_name;
 }
@@ -91,8 +91,8 @@ s8 *get_app_table_log_name(struct nvfuse_handle *nvh, s32 log_number)
 s32 nvfuse_app_manage_table_init(struct nvfuse_handle *nvh)
 {
 	struct control_plane_context *cp;
-    int i;
-    int size;
+	int i;
+	int size;
 
 	cp = nvh->nvh_sb.sb_control_plane_ctx;
 	/*
@@ -105,27 +105,26 @@ s32 nvfuse_app_manage_table_init(struct nvfuse_handle *nvh)
 	cp->app_table_cur_log_file = 0;
 	cp->app_table_max_log_file = 2;
 
-    size = DIV_UP(sizeof(struct app_manage_node) * SPDK_NUM_CORES, CLUSTER_SIZE);
+	size = DIV_UP(sizeof(struct app_manage_node) * SPDK_NUM_CORES, CLUSTER_SIZE);
 	cp->app_table_size = size;
 	printf(" %s: App Table Size = %d \n", __FUNCTION__, size);
-    cp->app_manage_table = nvfuse_alloc_aligned_buffer(size);
-    if (cp->app_manage_table == NULL)
-    {
-	    fprintf(stderr," ERROR: malloc() \n");
-	    return -1;
-    }
-    memset(cp->app_manage_table, 0x00, size);
+	cp->app_manage_table = nvfuse_alloc_aligned_buffer(size);
+	if (cp->app_manage_table == NULL) {
+		fprintf(stderr, " ERROR: malloc() \n");
+		return -1;
+	}
+	memset(cp->app_manage_table, 0x00, size);
 
-    cp->app_valid_count = 0;
-    for (i = 0;i < SPDK_NUM_CORES;i++) {
-        struct app_manage_node *node;
+	cp->app_valid_count = 0;
+	for (i = 0; i < SPDK_NUM_CORES; i++) {
+		struct app_manage_node *node;
 
-        node = cp->app_manage_table + i;
-        INIT_LIST_HEAD(&node->list);
-        node->channel_id = -1;
-    }
+		node = cp->app_manage_table + i;
+		INIT_LIST_HEAD(&node->list);
+		node->channel_id = -1;
+	}
 
-    return 0;    
+	return 0;
 }
 
 s32 nvfuse_store_app_table(struct nvfuse_handle *nvh)
@@ -141,7 +140,7 @@ s32 nvfuse_store_app_table(struct nvfuse_handle *nvh)
 
 	cp = nvh->nvh_sb.sb_control_plane_ctx;
 
-	at_size = cp->app_table_size;	
+	at_size = cp->app_table_size;
 	printf(" %s: App Table Size = %d bytes \n", __FUNCTION__, at_size);
 
 	/* 4KB memory allocation */
@@ -167,12 +166,12 @@ s32 nvfuse_store_app_table(struct nvfuse_handle *nvh)
 	while (offset < at_size + chunk_size) {
 
 		/* store generation number at the begining of file */
-		if (offset == 0) { 
+		if (offset == 0) {
 			s64 *p = (s64 *)buf;
 			*p = cp->app_table_generation++;
 		} else {
 			s8 *p = (s8 *)cp->app_manage_table;
-			rte_memcpy(buf, p + offset - chunk_size, chunk_size); 
+			rte_memcpy(buf, p + offset - chunk_size, chunk_size);
 		}
 
 		ret = nvfuse_writefile(nvh, fd, buf, chunk_size, offset);
@@ -193,7 +192,7 @@ s32 nvfuse_store_app_table(struct nvfuse_handle *nvh)
 
 	/* release memory */
 	nvfuse_free_aligned_buffer(buf);
-		
+
 	/* close file */
 	nvfuse_closefile(nvh, fd);
 RET:
@@ -248,8 +247,7 @@ s32 nvfuse_load_app_table(struct nvfuse_handle *nvh)
 		nvfuse_closefile(nvh, fd);
 	}
 
-	if (latest_log_file == 0)
-	{
+	if (latest_log_file == 0) {
 		fprintf(stdout, " app table log is not found. \n");
 		return 0;
 	}
@@ -276,13 +274,13 @@ s32 nvfuse_load_app_table(struct nvfuse_handle *nvh)
 		}
 
 		/* store generation number at the begining of file */
-		if (offset == 0) { 
+		if (offset == 0) {
 			s64 *p = (s64 *)buf;
 			cp->app_table_generation = *p;
 			cp->app_table_generation++;
 		} else {
 			s8 *p = (s8 *)cp->app_manage_table;
-			rte_memcpy(p + offset - chunk_size, buf, chunk_size); 
+			rte_memcpy(p + offset - chunk_size, buf, chunk_size);
 		}
 
 		offset += chunk_size;
@@ -340,12 +338,12 @@ s32 nvfuse_store_container_table(struct nvfuse_handle *nvh)
 	while (offset < ct_size + chunk_size) {
 
 		/* store generation number at the begining of file */
-		if (offset == 0) { 
+		if (offset == 0) {
 			s64 *p = (s64 *)buf;
 			*p = cp->container_generation++;
 		} else {
 			s8 *p = (s8 *)cp->reservation_table;
-			rte_memcpy(buf, p + offset - chunk_size, chunk_size); 
+			rte_memcpy(buf, p + offset - chunk_size, chunk_size);
 		}
 
 		ret = nvfuse_writefile(nvh, fd, buf, chunk_size, offset);
@@ -366,7 +364,7 @@ s32 nvfuse_store_container_table(struct nvfuse_handle *nvh)
 
 	/* release memory */
 	nvfuse_free_aligned_buffer(buf);
-		
+
 	/* close file */
 	nvfuse_closefile(nvh, fd);
 RET:
@@ -421,8 +419,7 @@ s32 nvfuse_load_container_table(struct nvfuse_handle *nvh)
 		nvfuse_closefile(nvh, fd);
 	}
 
-	if (latest_log_file == 0)
-	{
+	if (latest_log_file == 0) {
 		fprintf(stdout, " app table log is not found. \n");
 		return 0;
 	}
@@ -449,13 +446,13 @@ s32 nvfuse_load_container_table(struct nvfuse_handle *nvh)
 		}
 
 		/* store generation number at the begining of file */
-		if (offset == 0) { 
+		if (offset == 0) {
 			s64 *p = (s64 *)buf;
 			cp->container_generation = *p;
 			cp->container_generation++;
 		} else {
 			s8 *p = (s8 *)cp->reservation_table;
-			rte_memcpy(p + offset - chunk_size, buf, chunk_size); 
+			rte_memcpy(p + offset - chunk_size, buf, chunk_size);
 		}
 
 		offset += chunk_size;
@@ -488,34 +485,32 @@ s32 nvfuse_app_manage_table_add(struct nvfuse_handle *nvh, s32 channel_id, s8 *n
 	char *dir_name;
 	s32 res;
 
-	if (channel_id == 0 || channel_id >= SPDK_NUM_CORES)
-	{
+	if (channel_id == 0 || channel_id >= SPDK_NUM_CORES) {
 		fprintf(stderr, " Invalid core id = %d\n", channel_id);
 		return -1;
 	}
 
 	cp = nvh->nvh_sb.sb_control_plane_ctx;
-	
+
 	node = nvfuse_get_app_node_by_coreid(nvh, channel_id);
 	node->channel_id = channel_id;
 	strcpy(node->name, name);
-	
+
 	/* the first container is reserved for the container management. */
 	printf(" Add app: channel_id = %d name = %s root_seg = %d\n", channel_id, name, node->root_seg_id);
 
 	dir_name = get_container_name(nvh, name);
 	res = nvfuse_getattr(nvh, dir_name, &st_buf);
-	if (res) /* if container isn't in FS, it will be created as a directory */
-	{
+	if (res) { /* if container isn't in FS, it will be created as a directory */
 		/* allocation of root container (e.g., segment) */
-		node->root_seg_id = nvfuse_control_plane_container_alloc(nvh, channel_id, CONTAINER_NEW_ALLOC, UNLOCKED);
+		node->root_seg_id = nvfuse_control_plane_container_alloc(nvh, channel_id, CONTAINER_NEW_ALLOC,
+				    UNLOCKED);
 
 		/* work around: container directory and related objects to be located in allocated container */
 		nvh->nvh_sb.sb_last_allocated_ino = node->root_seg_id * nvh->nvh_sb.sb_no_of_inodes_per_seg;
 		printf(" Create container direcotory %s in container %d\n", dir_name, node->root_seg_id);
 		res = nvfuse_mkdir_path(nvh, (const char *)dir_name, 0644);
-		if (res < 0)
-		{
+		if (res < 0) {
 			printf(" Error: create dir = %s \n", dir_name);
 			return res;
 		}
@@ -523,9 +518,7 @@ s32 nvfuse_app_manage_table_add(struct nvfuse_handle *nvh, s32 channel_id, s8 *n
 		nvh->nvh_sb.sb_last_allocated_ino = 0;
 
 		printf(" Add app: created dir = %s\n", dir_name);
-	} 
-	else
-	{
+	} else {
 		fprintf(stderr, " directory %s is already created.\n", dir_name);
 	}
 
@@ -553,15 +546,13 @@ s32 nvfuse_destroy_containers_for_app_unregistration(struct nvfuse_handle *nvh, 
 	/* rmdir container_yy */
 	dir_name = get_container_name(nvh, node->name);
 	res = nvfuse_rmdir_path(nvh, (const char *)dir_name);
-	if (res < 0)
-	{
+	if (res < 0) {
 		printf(" Error: rmdir = %s \n", dir_name);
 		return res;
 	}
 
 	/* reset all bitmap tables of containers */
-	for (container_id = 0; container_id < cp->nr_containers; container_id++)
-	{
+	for (container_id = 0; container_id < cp->nr_containers; container_id++) {
 		cr = &cp->reservation_table[container_id];
 
 		if (cr->owner_core_id != core_id)
@@ -571,8 +562,8 @@ s32 nvfuse_destroy_containers_for_app_unregistration(struct nvfuse_handle *nvh, 
 		ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
 
 		/* format segment (container) summary with initial value */
-		nvfuse_make_segment_summary(ss, container_id, 
-				container_id * sb->sb_no_of_blocks_per_seg, sb->sb_no_of_blocks_per_seg);
+		nvfuse_make_segment_summary(ss, container_id,
+					    container_id * sb->sb_no_of_blocks_per_seg, sb->sb_no_of_blocks_per_seg);
 		nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
 
 		/* clear data bitmap tables */
@@ -598,8 +589,7 @@ s32 nvfuse_app_manage_table_remove(struct nvfuse_handle *nvh, s32 core_id, s32 d
 	struct app_manage_node *node;
 	s32 res;
 
-	if (core_id == 0 || core_id >= SPDK_NUM_CORES)
-	{
+	if (core_id == 0 || core_id >= SPDK_NUM_CORES) {
 		fprintf(stderr, " Invalid core id = %d\n", core_id);
 		return -1;
 	}
@@ -607,30 +597,26 @@ s32 nvfuse_app_manage_table_remove(struct nvfuse_handle *nvh, s32 core_id, s32 d
 	cp = nvh->nvh_sb.sb_control_plane_ctx;
 
 	node = nvfuse_get_app_node_by_coreid(nvh, core_id);
-	if (node->channel_id != core_id)
-	{
+	if (node->channel_id != core_id) {
 		fprintf(stderr, " Core (%d) is not registered.\n", core_id);
 		return -1;
 	}
 
-	if (destroy_containers == APP_UNREGISTER_WITH_DESTROYING_CONTAINERS)
-	{
+	if (destroy_containers == APP_UNREGISTER_WITH_DESTROYING_CONTAINERS) {
 		fprintf(stderr, " Destroying containers when unregistering app is not supported\n");
 
 		/* invalidate container summary, ibitmap table , and dbitmap table*/
 		nvfuse_destroy_containers_for_app_unregistration(nvh, core_id);
-		
-		nvfuse_control_plane_container_release_by_coreid(nvh, core_id, 1 /* clear ownership */ );
 
-		
+		nvfuse_control_plane_container_release_by_coreid(nvh, core_id, 1 /* clear ownership */);
+
+
 		printf(" Remove app permanently: core_id = %d name = %s\n", core_id, node->name);
 
 		node->channel_id = -1;
 		memset(node->name, 0x0, NAME_SIZE);
 		node->root_seg_id = 0;
-	}
-	else
-	{
+	} else {
 		/* status set to UNLOCKED */
 		nvfuse_control_plane_container_release_by_coreid(nvh, core_id, 0 /* keep ownership */);
 
@@ -647,59 +633,58 @@ s32 nvfuse_app_manage_table_remove(struct nvfuse_handle *nvh, s32 core_id, s32 d
 	return 0;
 }
 
-s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname, struct superblock_copy_cpl *msg, struct nvfuse_superblock_common *sb_common)
+s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname, struct superblock_copy_cpl *msg,
+			   struct nvfuse_superblock_common *sb_common)
 {
-    struct nvfuse_dir_entry dir_entry;
-    struct nvfuse_inode_ctx *ictx;
+	struct nvfuse_dir_entry dir_entry;
+	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
-    struct nvfuse_superblock *sb;
-    char *path;
-    char filename[128];
-    int res;
-    s32 container_root_ino;
+	struct nvfuse_superblock *sb;
+	char *path;
+	char filename[128];
+	int res;
+	s32 container_root_ino;
 
-    path = get_container_name(nvh, appname);
+	path = get_container_name(nvh, appname);
 
-    res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
-    if (res < 0)
-    {
-        printf(" No such superblock for container %s\n", appname);
-        return -1;
-    }
-    
-    sb = nvfuse_read_super(nvh);
-    if(nvfuse_lookup(sb, NULL, &dir_entry, filename, dir_entry.d_ino) < 0){
-       printf(" No such superblock for container %s\n", appname);
-        return -1;
-    }    
+	res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
+	if (res < 0) {
+		printf(" No such superblock for container %s\n", appname);
+		return -1;
+	}
+
+	sb = nvfuse_read_super(nvh);
+	if (nvfuse_lookup(sb, NULL, &dir_entry, filename, dir_entry.d_ino) < 0) {
+		printf(" No such superblock for container %s\n", appname);
+		return -1;
+	}
 	nvfuse_release_super(sb);
 
-    rte_memcpy(&msg->superblock_common, sb_common, sizeof(struct nvfuse_superblock_common));
-    
-    msg->superblock_common.sb_root_ino = dir_entry.d_ino;
-    msg->superblock_common.asb.asb_root_seg_id = dir_entry.d_ino / sb->sb_no_of_inodes_per_seg;
+	rte_memcpy(&msg->superblock_common, sb_common, sizeof(struct nvfuse_superblock_common));
 
-    msg->superblock_common.asb.asb_free_inodes = 0;
-    msg->superblock_common.asb.asb_free_blocks = 0;
-    msg->superblock_common.asb.asb_no_of_used_blocks = 0;    
+	msg->superblock_common.sb_root_ino = dir_entry.d_ino;
+	msg->superblock_common.asb.asb_root_seg_id = dir_entry.d_ino / sb->sb_no_of_inodes_per_seg;
 
-    printf(" Container root inode = %d\n", dir_entry.d_ino);
+	msg->superblock_common.asb.asb_free_inodes = 0;
+	msg->superblock_common.asb.asb_free_blocks = 0;
+	msg->superblock_common.asb.asb_no_of_used_blocks = 0;
 
-    return 0;
+	printf(" Container root inode = %d\n", dir_entry.d_ino);
+
+	return 0;
 }
 
 s32 nvfuse_control_plane_buffer_init(struct nvfuse_handle *nvh, s32 size)
 {
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
-    if (size == 0)
-    {
-        fprintf( stderr, " Invalid buffer size = %d pages.\n", size);
-        return -1;
-    }
-    
-    cp->curr_buffer_size = cp->total_buffer_size = size;
+	if (size == 0) {
+		fprintf(stderr, " Invalid buffer size = %d pages.\n", size);
+		return -1;
+	}
 
-    return 0;
+	cp->curr_buffer_size = cp->total_buffer_size = size;
+
+	return 0;
 }
 
 void nvfuse_control_plane_buffer_deinit(struct nvfuse_handle *nvh)
@@ -710,44 +695,42 @@ void nvfuse_control_plane_buffer_deinit(struct nvfuse_handle *nvh)
 s32 nvfuse_control_plane_buffer_alloc(struct nvfuse_handle *nvh, s32 size)
 {
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
-    s32 allocated_size;
-    
-    if (cp->curr_buffer_size < size)
-    {
-        fprintf( stderr, " buffers are not sufficient. \n");
-		rte_malloc_dump_stats(stdout, NULL);
-        return 0;
-    }
-	
-    cp->curr_buffer_size -= size;
-    allocated_size = size;
-#if 0
-	printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
-		(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
-		(double)cp->curr_buffer_size / 256 / 1024);
-#endif
-    assert(allocated_size);
+	s32 allocated_size;
 
-    return allocated_size;
+	if (cp->curr_buffer_size < size) {
+		fprintf(stderr, " buffers are not sufficient. \n");
+		rte_malloc_dump_stats(stdout, NULL);
+		return 0;
+	}
+
+	cp->curr_buffer_size -= size;
+	allocated_size = size;
+#if 0
+	printf(" Remaining buffers = %.3f%% (%.3fGB)\n",
+	       (double)cp->curr_buffer_size * 100 / cp->total_buffer_size,
+	       (double)cp->curr_buffer_size / 256 / 1024);
+#endif
+	assert(allocated_size);
+
+	return allocated_size;
 }
 
 s32 nvfuse_control_plane_buffer_free(struct nvfuse_handle *nvh, s32 size)
 {
-    struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
+	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 
-	if (size == 0 || cp->curr_buffer_size + size > cp->total_buffer_size)
-    {
-        return -1;
-    }
+	if (size == 0 || cp->curr_buffer_size + size > cp->total_buffer_size) {
+		return -1;
+	}
 
-    cp->curr_buffer_size += size;
-    assert(cp->curr_buffer_size <= cp->total_buffer_size);
+	cp->curr_buffer_size += size;
+	assert(cp->curr_buffer_size <= cp->total_buffer_size);
 
-	//printf(" Remaining buffers = %.3f%% (%.3fGB)\n", 
-	//	(double)cp->curr_buffer_size * 100 / cp->total_buffer_size, 
+	//printf(" Remaining buffers = %.3f%% (%.3fGB)\n",
+	//	(double)cp->curr_buffer_size * 100 / cp->total_buffer_size,
 	//	(double)cp->curr_buffer_size / 256 / 1024);
 
-    return 0;
+	return 0;
 }
 
 s32 nvfuse_control_plane_container_table_init(struct nvfuse_handle *nvh, s32 num_containers)
@@ -776,9 +759,8 @@ s32 nvfuse_control_plane_container_table_init(struct nvfuse_handle *nvh, s32 num
 	printf(" %s: Container Table Size = %d \n", __FUNCTION__, size);
 
 	cp->reservation_table = nvfuse_alloc_aligned_buffer(size);
-	if (cp->reservation_table == NULL)
-	{
-		fprintf( stderr, " Error: malloc() \n");
+	if (cp->reservation_table == NULL) {
+		fprintf(stderr, " Error: malloc() \n");
 		return -1;
 	}
 
@@ -788,18 +770,16 @@ s32 nvfuse_control_plane_container_table_init(struct nvfuse_handle *nvh, s32 num
 	cp->reservation_table[0].owner_core_id = ~0;
 	cp->free_containers --;
 
-#if 1 
+#if 1
 	{
 		int i;
-		int count = 0; 
+		int count = 0;
 
-		for (i = 0;i < cp->nr_containers; i++)
-		{
-			if (cp->reservation_table[i].owner_core_id == 0)
-			{
+		for (i = 0; i < cp->nr_containers; i++) {
+			if (cp->reservation_table[i].owner_core_id == 0) {
 				count++;
 			}
-		}            
+		}
 		assert(cp->free_containers == count);
 		printf(" free_containers is validated = %d %d \n", cp->free_containers, count);
 	}
@@ -813,93 +793,85 @@ void nvfuse_pcontrin_plane_print_container_table(struct nvfuse_handle *nvh)
 {
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;
-    int count = 0; 
+	int count = 0;
 	int i;
 
-    for (i = 0;i < cp->nr_containers; i++)
-    {
-        if (reservation_table[i].owner_core_id == 0)
-        {
-            count++;
-        }
-        else
-        {
-            printf(" valid = %d, owner = %d, status = %d, ref = %d \n", i,
-            reservation_table[i].owner_core_id,
-            reservation_table[i].status,
-            reservation_table[i].ref_count
-            );
-        }
-    }
-    printf(" free_containers is validated = %d %d \n", cp->free_containers, count);
-    assert(cp->free_containers == count);
+	for (i = 0; i < cp->nr_containers; i++) {
+		if (reservation_table[i].owner_core_id == 0) {
+			count++;
+		} else {
+			printf(" valid = %d, owner = %d, status = %d, ref = %d \n", i,
+			       reservation_table[i].owner_core_id,
+			       reservation_table[i].status,
+			       reservation_table[i].ref_count
+			      );
+		}
+	}
+	printf(" free_containers is validated = %d %d \n", cp->free_containers, count);
+	assert(cp->free_containers == count);
 }
 
-s32 nvfuse_control_plane_container_alloc(struct nvfuse_handle *nvh, s32 core_id, s32 type, s32 status)
+s32 nvfuse_control_plane_container_alloc(struct nvfuse_handle *nvh, s32 core_id, s32 type,
+		s32 status)
 {
-    struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
+	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;
 	s32 container_id;
 
-    assert(core_id != 0);
+	assert(core_id != 0);
 
-    if (type == CONTAINER_NEW_ALLOC)
-    {
-	    if (cp->free_containers == 0)
-		    return 0;
+	if (type == CONTAINER_NEW_ALLOC) {
+		if (cp->free_containers == 0)
+			return 0;
 
-	    container_id = (cp->last_alloc_container_id + 1) % cp->nr_containers;
+		container_id = (cp->last_alloc_container_id + 1) % cp->nr_containers;
 
-	    while(reservation_table[container_id].owner_core_id != 0 ||
-		 	  reservation_table[container_id].status != UNLOCKED) {
+		while (reservation_table[container_id].owner_core_id != 0 ||
+		       reservation_table[container_id].status != UNLOCKED) {
 			container_id = (container_id + 1) % cp->nr_containers;
 		}
-	    
-	    assert(container_id != 0);
-	    assert(reservation_table[container_id].owner_core_id == 0);
+
+		assert(container_id != 0);
+		assert(reservation_table[container_id].owner_core_id == 0);
 		assert(reservation_table[container_id].status == UNLOCKED);
 
-	    reservation_table[container_id].owner_core_id = core_id;
-	    reservation_table[container_id].status = status;
-	    reservation_table[container_id].ref_count = 0;
-	    cp->free_containers--;
-	    
-	    cp->last_alloc_container_id = container_id;
-    }
-    else // type == CONTAINER_ALLOCATED_ALLOC
-    {
-	    s32 max_try_count = cp->nr_containers;
+		reservation_table[container_id].owner_core_id = core_id;
+		reservation_table[container_id].status = status;
+		reservation_table[container_id].ref_count = 0;
+		cp->free_containers--;
 
-	    container_id = (cp->last_alloc_container_id + 1) % cp->nr_containers;
-	    while(reservation_table[container_id].owner_core_id != core_id || 
-			  reservation_table[container_id].status != UNLOCKED)
-	    {
+		cp->last_alloc_container_id = container_id;
+	} else { // type == CONTAINER_ALLOCATED_ALLOC
+		s32 max_try_count = cp->nr_containers;
+
+		container_id = (cp->last_alloc_container_id + 1) % cp->nr_containers;
+		while (reservation_table[container_id].owner_core_id != core_id ||
+		       reservation_table[container_id].status != UNLOCKED) {
 			container_id = (container_id + 1) % cp->nr_containers;
-			if (--max_try_count == 0)
-			{				
+			if (--max_try_count == 0) {
 				container_id = 0;
 				printf(" No such containers for core %d\n\n", core_id);
 				goto RET;
 			}
-	    }	    
+		}
 
-	    assert(container_id != 0);
-	    assert(reservation_table[container_id].owner_core_id == core_id);
+		assert(container_id != 0);
+		assert(reservation_table[container_id].owner_core_id == core_id);
 		assert(reservation_table[container_id].status == UNLOCKED);
-	    
-	    reservation_table[container_id].status = status;
-	    reservation_table[container_id].ref_count = 0;	    
-	    
-	    cp->last_alloc_container_id = container_id;
-    }
 
-    //fprintf( stdout, " allocated container id = %d, remained containers = %d \n", container_id, free_containers);
-	
+		reservation_table[container_id].status = status;
+		reservation_table[container_id].ref_count = 0;
+
+		cp->last_alloc_container_id = container_id;
+	}
+
+	//fprintf( stdout, " allocated container id = %d, remained containers = %d \n", container_id, free_containers);
+
 	/* logging container allocation table */
 	nvfuse_store_container_table(nvh);
 RET:
 
-    return container_id;
+	return container_id;
 }
 
 s32 nvfuse_control_plane_container_release(struct nvfuse_handle *nvh, s32 core_id, s32 container_id)
@@ -907,16 +879,14 @@ s32 nvfuse_control_plane_container_release(struct nvfuse_handle *nvh, s32 core_i
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;
 
-	if (reservation_table[container_id].owner_core_id != core_id)
-	{
+	if (reservation_table[container_id].owner_core_id != core_id) {
 		fprintf(stderr, " ERROR: owner does not match %d\n", core_id);
 		return -1;
 	}
 
-	if (reservation_table[container_id].ref_count)
-	{
-		fprintf(stderr, " ERROR: container is reserved by other cores (refcount = %d).\n", 
-				reservation_table[container_id].ref_count);
+	if (reservation_table[container_id].ref_count) {
+		fprintf(stderr, " ERROR: container is reserved by other cores (refcount = %d).\n",
+			reservation_table[container_id].ref_count);
 		return -1;
 	}
 
@@ -931,21 +901,20 @@ s32 nvfuse_control_plane_container_release(struct nvfuse_handle *nvh, s32 core_i
 	return 0;
 }
 
-s32 nvfuse_control_plane_container_release_by_coreid(struct nvfuse_handle *nvh, s32 core_id, s32 clear_owner)
+s32 nvfuse_control_plane_container_release_by_coreid(struct nvfuse_handle *nvh, s32 core_id,
+		s32 clear_owner)
 {
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;
 	s32 container_id;
 
-	for (container_id = 1; container_id < cp->nr_containers; container_id++)
-	{
+	for (container_id = 1; container_id < cp->nr_containers; container_id++) {
 		if (reservation_table[container_id].owner_core_id != core_id)
 			continue;
 
-		if (reservation_table[container_id].ref_count)
-		{
-			fprintf(stderr, " ERROR: container is reserved by other cores (refcount = %d).\n", 
-					reservation_table[container_id].ref_count);
+		if (reservation_table[container_id].ref_count) {
+			fprintf(stderr, " ERROR: container is reserved by other cores (refcount = %d).\n",
+				reservation_table[container_id].ref_count);
 			return -1;
 		}
 
@@ -962,47 +931,41 @@ s32 nvfuse_control_plane_container_release_by_coreid(struct nvfuse_handle *nvh, 
 	return 0;
 }
 
-s32 nvfuse_control_plane_reservation_acquire(struct nvfuse_handle *nvh, s32 container_id, enum reservation_type type)
+s32 nvfuse_control_plane_reservation_acquire(struct nvfuse_handle *nvh, s32 container_id,
+		enum reservation_type type)
 {
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;
 
-    switch (type)
-    {
-        case RESV_WRITE_LOCK:
-            if (reservation_table[container_id].status == UNLOCK)
-            {
-                reservation_table[container_id].status = WRITE_LOCKED;
-                reservation_table[container_id].ref_count++;
-            }
-            else
-            {
-                fprintf(stderr, " Error: current container (%d) is locked with %d\n", container_id, 
-                                    reservation_table[container_id].status);
-                return -1;
-            }
-            break;
-        case RESV_READ_LOCK:
-            if (reservation_table[container_id].status == READ_LOCKED || 
-                reservation_table[container_id].status == UNLOCKED)
-            {
-                reservation_table[container_id].status = READ_LOCKED;
-                reservation_table[container_id].ref_count++;
-            }
-            else
-            {
-                fprintf(stderr, " Error: current container (%d) is locked with %d\n", container_id, 
-                                    reservation_table[container_id].status);
-                return -1;
-            }
-            
-            break;
-        default:    
-            fprintf( stderr, " Invalid reservation type = %d \n", type);
-            return -1;
-    }
+	switch (type) {
+	case RESV_WRITE_LOCK:
+		if (reservation_table[container_id].status == UNLOCK) {
+			reservation_table[container_id].status = WRITE_LOCKED;
+			reservation_table[container_id].ref_count++;
+		} else {
+			fprintf(stderr, " Error: current container (%d) is locked with %d\n", container_id,
+				reservation_table[container_id].status);
+			return -1;
+		}
+		break;
+	case RESV_READ_LOCK:
+		if (reservation_table[container_id].status == READ_LOCKED ||
+		    reservation_table[container_id].status == UNLOCKED) {
+			reservation_table[container_id].status = READ_LOCKED;
+			reservation_table[container_id].ref_count++;
+		} else {
+			fprintf(stderr, " Error: current container (%d) is locked with %d\n", container_id,
+				reservation_table[container_id].status);
+			return -1;
+		}
 
-    return 0;
+		break;
+	default:
+		fprintf(stderr, " Invalid reservation type = %d \n", type);
+		return -1;
+	}
+
+	return 0;
 }
 
 s32 nvfuse_control_plane_reservation_release(struct nvfuse_handle *nvh, s32 container_id)
@@ -1010,31 +973,30 @@ s32 nvfuse_control_plane_reservation_release(struct nvfuse_handle *nvh, s32 cont
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;
 
-    switch (reservation_table[container_id].status)
-    {
-        case WRITE_LOCKED:
-            reservation_table[container_id].status = UNLOCKED;
-            reservation_table[container_id].ref_count--;
-            assert(reservation_table[container_id].ref_count == 0);
-            break;
-        case READ_LOCKED:            
-            reservation_table[container_id].ref_count--;
-            if (reservation_table[container_id].ref_count == 0)
-                reservation_table[container_id].status = UNLOCKED;
-            break;
-        default:    
-            fprintf( stderr, " Invalid reservation status = %d \n", 
-            reservation_table[container_id].status);
-            return -1;
-    }
-    
-    return 0;
+	switch (reservation_table[container_id].status) {
+	case WRITE_LOCKED:
+		reservation_table[container_id].status = UNLOCKED;
+		reservation_table[container_id].ref_count--;
+		assert(reservation_table[container_id].ref_count == 0);
+		break;
+	case READ_LOCKED:
+		reservation_table[container_id].ref_count--;
+		if (reservation_table[container_id].ref_count == 0)
+			reservation_table[container_id].status = UNLOCKED;
+		break;
+	default:
+		fprintf(stderr, " Invalid reservation status = %d \n",
+			reservation_table[container_id].status);
+		return -1;
+	}
+
+	return 0;
 }
 
 s32 nvfuse_control_plane_health_check(s32 core_id)
 {
 
-    return 0;
+	return 0;
 }
 
 void nvfuse_control_plane_container_table_deinit(struct nvfuse_handle *nvh)
@@ -1042,47 +1004,44 @@ void nvfuse_control_plane_container_table_deinit(struct nvfuse_handle *nvh)
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 
 	nvfuse_store_container_table(nvh);
-	nvfuse_free_aligned_buffer(cp->reservation_table); 
+	nvfuse_free_aligned_buffer(cp->reservation_table);
 }
 
 s32 nvfuse_control_plane_init(struct nvfuse_handle *nvh)
 {
-    struct control_plane_context *cp;
+	struct control_plane_context *cp;
 	s32 nr_buffers = nvh->nvh_sb.sb_control_plane_buffer_size;
 	s32 nr_segments = nvh->nvh_sb.sb_segment_num;
-	s32 ret = 0; 
+	s32 ret = 0;
 
 	cp = nvfuse_malloc(sizeof(struct control_plane_context));
 	if (cp == NULL)
 		return -1;
-	
+
 	nvh->nvh_sb.sb_control_plane_ctx = cp;
 
-    ret = nvfuse_app_manage_table_init(nvh);
-    if (ret < 0)
-    {
-        fprintf(stderr, " Error: app_manage_table_init()\n");
-    }
+	ret = nvfuse_app_manage_table_init(nvh);
+	if (ret < 0) {
+		fprintf(stderr, " Error: app_manage_table_init()\n");
+	}
 
-    ret = nvfuse_control_plane_buffer_init(nvh, nr_buffers);
-    if (ret < 0)
-    {
-        fprintf(stderr, " Error: control_plane_buffer_init()\n");
-    }
+	ret = nvfuse_control_plane_buffer_init(nvh, nr_buffers);
+	if (ret < 0) {
+		fprintf(stderr, " Error: control_plane_buffer_init()\n");
+	}
 
 	ret = nvfuse_control_plane_container_table_init(nvh, nr_segments); /* excluding 0 container */
-    if (ret < 0)
-    {
-        fprintf(stderr, " Error: control_plane_container_table_init()\n");
-    }
-    return ret;
+	if (ret < 0) {
+		fprintf(stderr, " Error: control_plane_container_table_init()\n");
+	}
+	return ret;
 }
 
 void nvfuse_control_plane_exit(struct nvfuse_handle *nvh)
 {
-    nvfuse_control_plane_container_table_deinit(nvh);
-    nvfuse_control_plane_buffer_deinit(nvh);
-    nvfuse_app_manage_table_deinit(nvh);
+	nvfuse_control_plane_container_table_deinit(nvh);
+	nvfuse_control_plane_buffer_deinit(nvh);
+	nvfuse_app_manage_table_deinit(nvh);
 	/* free memory */
 	nvfuse_free(nvh->nvh_sb.sb_control_plane_ctx);
 }

@@ -13,7 +13,7 @@ struct hlist_head {
 };
 
 struct hlist_node {
-	struct hlist_node *next, **pprev;
+	struct hlist_node *next, * *pprev;
 };
 
 /*
@@ -59,8 +59,8 @@ static inline void __list_add(struct list_head *new,
 }
 #else
 extern void __list_add(struct list_head *new,
-			      struct list_head *prev,
-			      struct list_head *next);
+		       struct list_head *prev,
+		       struct list_head *next);
 #endif
 
 /**
@@ -97,7 +97,7 @@ static inline void list_add_tail(struct list_head *new, struct list_head *head)
  * This is only for internal list manipulation where we know
  * the prev/next entries already!
  */
-static inline void __list_del(struct list_head * prev, struct list_head * next)
+static inline void __list_del(struct list_head *prev, struct list_head *next)
 {
 	next->prev = prev;
 	prev->next = next;
@@ -143,7 +143,7 @@ static inline void list_replace(struct list_head *old,
 }
 
 static inline void list_replace_init(struct list_head *old,
-					struct list_head *new)
+				     struct list_head *new)
 {
 	list_replace(old, new);
 	INIT_LIST_HEAD(old);
@@ -188,7 +188,7 @@ static inline void list_move_tail(struct list_head *list,
  * @head: the head of the list
  */
 static inline int list_is_last(const struct list_head *list,
-				const struct list_head *head)
+			       const struct list_head *head)
 {
 	return list->next == head;
 }
@@ -245,7 +245,7 @@ static inline int list_is_singular(const struct list_head *head)
 }
 
 static inline void __list_cut_position(struct list_head *list,
-		struct list_head *head, struct list_head *entry)
+				       struct list_head *head, struct list_head *entry)
 {
 	struct list_head *new_first = entry->next;
 	list->next = head->next;
@@ -271,12 +271,12 @@ static inline void __list_cut_position(struct list_head *list,
  *
  */
 static inline void list_cut_position(struct list_head *list,
-		struct list_head *head, struct list_head *entry)
+				     struct list_head *head, struct list_head *entry)
 {
 	if (list_empty(head))
 		return;
 	if (list_is_singular(head) &&
-		(head->next != entry && head != entry))
+	    (head->next != entry && head != entry))
 		return;
 	if (entry == head)
 		INIT_LIST_HEAD(list);
@@ -304,7 +304,7 @@ static inline void __list_splice(const struct list_head *list,
  * @head: the place to add it in the first list.
  */
 static inline void list_splice(const struct list_head *list,
-				struct list_head *head)
+			       struct list_head *head)
 {
 	if (!list_empty(list))
 		__list_splice(list, head, head->next);
@@ -316,7 +316,7 @@ static inline void list_splice(const struct list_head *list,
  * @head: the place to add it in the first list.
  */
 static inline void list_splice_tail(struct list_head *list,
-				struct list_head *head)
+				    struct list_head *head)
 {
 	if (!list_empty(list))
 		__list_splice(list, head->prev, head);
@@ -347,7 +347,7 @@ static inline void list_splice_init(struct list_head *list,
  * The list at @list is reinitialised
  */
 static inline void list_splice_tail_init(struct list_head *list,
-					 struct list_head *head)
+		struct list_head *head)
 {
 	if (!list_empty(list)) {
 		__list_splice(list, head->prev, head);
@@ -395,7 +395,7 @@ static inline void list_splice_tail_init(struct list_head *list,
 #define list_for_each(pos, head) \
 	for (pos = (head)->next; pos != (head); \
         	pos = pos->next)
-#endif 
+#endif
 /**
  * __list_for_each	-	iterate over a list
  * @pos:	the &struct list_head to use as a loop cursor.
@@ -649,7 +649,7 @@ static inline void hlist_add_head(struct hlist_node *n, struct hlist_head *h)
 
 /* next must be != NULL */
 static inline void hlist_add_before(struct hlist_node *n,
-					struct hlist_node *next)
+				    struct hlist_node *next)
 {
 	n->pprev = next->pprev;
 	n->next = next;
@@ -658,13 +658,13 @@ static inline void hlist_add_before(struct hlist_node *n,
 }
 
 static inline void hlist_add_after(struct hlist_node *n,
-					struct hlist_node *next)
+				   struct hlist_node *next)
 {
 	next->next = n->next;
 	n->next = next;
 	next->pprev = &n->next;
 
-	if(next->next)
+	if (next->next)
 		next->next->pprev  = &next->next;
 }
 
