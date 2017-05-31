@@ -216,7 +216,7 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 				return NULL;
 #endif
 			} else if (!strcmp("block", optarg)) {
-				io_manager_type = IO_MANAGER_UNIXIO;
+				io_manager_type = IO_MANAGER_BLKDEVIO;
 			} else if (!strcmp("file", optarg)) {
 				io_manager_type = IO_MANAGER_FILEDISK;
 			} else if (!strcmp("ramdisk", optarg)) {

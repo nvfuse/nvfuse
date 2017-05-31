@@ -1029,7 +1029,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 	assert(num_blocks <= AIO_MAX_QDEPTH);
 
 #if (NVFUSE_OS==NVFUSE_OS_LINUX)
-	if (sb->io_manager->type == IO_MANAGER_SPDK || sb->io_manager->type == IO_MANAGER_UNIXIO) {
+	if (sb->io_manager->type == IO_MANAGER_SPDK || sb->io_manager->type == IO_MANAGER_BLKDEVIO) {
 
 		res = nvfuse_make_jobs(sb, jobs, num_blocks);
 		if (res != 0) {
@@ -1885,7 +1885,7 @@ u64 get_no_of_sectors(s32 fd)
 {
 	u64 no_of_sectors;
 
-#if USE_UNIXIO == 1
+#if USE_BLKDEVIO == 1
 	ioctl(fd, BLKGETSIZE, &no_of_sectors);
 #endif
 
@@ -1913,7 +1913,7 @@ s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 #		if USE_RAMDISK == 1 || USE_FILEDISK == 1
 	num_sectors = NO_OF_SECTORS;
 	num_clu = (u32)NVFUSE_NUM_CLU;
-#		elif USE_UNIX_IO == 1
+#		elif USE_BLKDEVIO == 1
 	num_sectors = get_no_of_sectors(cur_sb->io_manager->dev);
 	num_clu = num_sectors / (u32)SECTORS_PER_CLUSTER;
 #		elif USE_SPDK == 1

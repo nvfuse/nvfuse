@@ -42,12 +42,12 @@
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	0
-#define EXAM_USE_UNIXIO		0
+#define EXAM_USE_BLKDEV		0
 #define EXAM_USE_SPDK		1
 #else
 #define EXAM_USE_RAMDISK	0
 #define EXAM_USE_FILEDISK	1
-#define EXAM_USE_UNIXIO		0
+#define EXAM_USE_BLKDEV		0
 #define EXAM_USE_SPDK		0
 #endif
 

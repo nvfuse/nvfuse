@@ -64,7 +64,7 @@ u64 get_no_of_sectors(s32 fd)
 {
 	u64 no_of_sectors;
 
-#if USE_UNIXIO == 1
+#if USE_BLKDEVIO == 1
 	ioctl(fd, BLKGETSIZE, &no_of_sectors);
 #endif
 
@@ -498,8 +498,8 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 #		if USE_RAMDISK == 1 || USE_FILEDISK == 1
 	num_sectors = NO_OF_SECTORS;
 	num_clu = (u32)NVFUSE_NUM_CLU;
-#		elif USE_UNIX_IO == 1
-	printf(" unix: nvfuse_io_manager = %p\n", io_manager);
+#		elif USE_BLKDEVIO == 1
+	printf(" blkdev: nvfuse_io_manager = %p\n", io_manager);
 	num_sectors = io_manager->total_blkcount;
 	num_clu = num_sectors / SECTORS_PER_CLUSTER;
 #		elif USE_SPDK == 1

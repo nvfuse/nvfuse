@@ -35,7 +35,7 @@
 //#define USE_BUFFER_POOL 0
 
 #define IO_MANAGER_SPDK		1
-#define IO_MANAGER_UNIXIO	2
+#define IO_MANAGER_BLKDEVIO	2
 #define IO_MANAGER_FILEDISK	3
 #define IO_MANAGER_RAMDISK	4
 
@@ -46,20 +46,20 @@
 #	define USE_FILEDISK 0
 #   ifdef SPDK_ENABLED
 #	define USE_SPDK	    1
-#	define USE_UNIXIO   0
+#	define USE_BLKDEVIO   0
 #   else
 #	define USE_SPDK	    0
-#	define USE_UNIXIO   1
+#	define USE_BLKDEVIO   1
 #   endif
 #else
 #	define USE_RAMDISK  0
 #	define USE_FILEDISK 1
-#	define USE_UNIXIO   0
+#	define USE_BLKDEVIO   0
 #endif
 #else
 #	define USE_RAMDISK  0
 #	define USE_FILEDISK 0
-#	define USE_UNIXIO   1
+#	define USE_BLKDEVIO   1
 #endif
 
 // #define DISK_NAME "/dev/nvme0n1p1"
@@ -200,7 +200,7 @@ struct nvfuse_io_manager {
 	(io_manager)->dev_flush(io_manager);
 
 extern struct nvfuse_io_manager *nvfuse_io_manager;
-void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth);
+void nvfuse_init_blkdevio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth);
 void nvfuse_init_spdk(struct nvfuse_io_manager *io_manager, char *filename, char *path,
 		      int iodepth);
 void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *path, int dev_size);

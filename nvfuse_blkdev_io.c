@@ -31,11 +31,11 @@
 #	include <sys/types.h>
 #endif
 
-static int unix_open(struct nvfuse_io_manager *io_manager, int flags);
-static int unix_close(struct nvfuse_io_manager *io_manager);
-static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block,
+static int blkdev_open(struct nvfuse_io_manager *io_manager, int flags);
+static int blkdev_close(struct nvfuse_io_manager *io_manager);
+static int blkdev_read_blk(struct nvfuse_io_manager *io_manager, long block,
 			 int count, void *buf);
-static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block,
+static int blkdev_write_blk(struct nvfuse_io_manager *io_manager, long block,
 			  int count, void *buf);
 
 static void io_getevents_error(int error)
@@ -237,7 +237,7 @@ static int libaio_cancel(struct nvfuse_io_manager *io_manager, struct io_job *jo
 	return 0;
 }
 
-void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth)
+void nvfuse_init_blkdevio(struct nvfuse_io_manager *io_manager, char *name, char *path, int qdepth)
 {
 	int len;
 	int i;
@@ -254,10 +254,10 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 	strcpy(io_manager->io_name, name);
 
 	/* Sync I/O Function Pointers */
-	io_manager->io_open = unix_open;
-	io_manager->io_close = unix_close;
-	io_manager->io_read = unix_read_blk;
-	io_manager->io_write = unix_write_blk;
+	io_manager->io_open = blkdev_open;
+	io_manager->io_close = blkdev_close;
+	io_manager->io_read = blkdev_read_blk;
+	io_manager->io_write = blkdev_write_blk;
 
 	io_manager->cjob_head = 0;
 	io_manager->cjob_tail = 0;
@@ -281,7 +281,7 @@ void nvfuse_init_unixio(struct nvfuse_io_manager *io_manager, char *name, char *
 }
 
 
-static int unix_open(struct nvfuse_io_manager *io_manager, int flags)
+static int blkdev_open(struct nvfuse_io_manager *io_manager, int flags)
 {
 	int	retval = 0, try_num = 0;
 	int	open_flags = O_RDWR;
@@ -317,12 +317,12 @@ RETRY:
 		io_manager->total_blkcount = no_of_sectors;
 	}
 
-	printf(" Init io manager(unix) = %ld sectors\n", io_manager->total_blkcount);
+	printf(" Init io manager (blkdev) = %ld sectors\n", io_manager->total_blkcount);
 	return retval;
 }
 
 
-static int unix_close(struct nvfuse_io_manager *io_manager)
+static int blkdev_close(struct nvfuse_io_manager *io_manager)
 {
 	int retval = 0;
 
@@ -340,7 +340,7 @@ RES:
 	return retval;
 }
 
-static int unix_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf)
+static int blkdev_read_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf)
 {
 	int	size, rbytes = 0;
 	s64	location;
@@ -365,7 +365,7 @@ RETRY:
 
 }
 
-static int unix_write_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf)
+static int blkdev_write_blk(struct nvfuse_io_manager *io_manager, long block, int count, void *buf)
 {
 	int	size, wbytes = 0;
 	s64	location;
