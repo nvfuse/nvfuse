@@ -218,7 +218,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 {
 	u32 new_block = 0;
 	s32 ret = 0;
-	u32 seg_id;
+	u32 bg_id;
 	u32 next_id;
 	u32 cnt = 0;
 	u32 once = 1;
@@ -232,7 +232,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
 		if (container_id > 0) {
 			/* insert allocated container to process */
-			nvfuse_add_seg(sb, container_id);
+			nvfuse_add_bg(sb, container_id);
 			assert(nvfuse_check_free_block(sb, num_blocks) == 1);
 		} else {
 			printf(" No free containers in the file system\n");
@@ -240,48 +240,48 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 		}
 	}
 
-	seg_id = inode->i_ino / sb->sb_no_of_inodes_per_seg;
-	if (seg_id != sb->sb_last_allocated_sid && inode->i_ino == sb->sb_last_allocated_sid_by_ino) {
-		seg_id = sb->sb_last_allocated_sid;
+	bg_id = inode->i_ino / sb->sb_no_of_inodes_per_bg;
+	if (bg_id != sb->sb_last_allocated_bgid && inode->i_ino == sb->sb_last_allocated_bgid_by_ino) {
+		bg_id = sb->sb_last_allocated_bgid;
 	}
 
-	next_id = seg_id;
+	next_id = bg_id;
 
 	do {
-		if (nvfuse_get_free_blocks(sb, seg_id)) {
-			ret = nvfuse_alloc_dbitmap(sb, seg_id, alloc_blks + cnt, num_blocks);
+		if (nvfuse_get_free_blocks(sb, bg_id)) {
+			ret = nvfuse_alloc_dbitmap(sb, bg_id, alloc_blks + cnt, num_blocks);
 			num_blocks -= ret;
 			cnt += ret;
 
 			/* retain hint information to rapidly find free blocks */
-			sb->sb_last_allocated_sid = seg_id;
-			sb->sb_last_allocated_sid_by_ino = inode->i_ino;
+			sb->sb_last_allocated_bgid = bg_id;
+			sb->sb_last_allocated_bgid_by_ino = inode->i_ino;
 
 			if (!num_blocks) {
 				break;
 			}
 		}
 
-		//printf(" sid %d free blocks %d \n", seg_id, nvfuse_get_free_blocks(sb, seg_id));
-		//printf("1. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
+		//printf(" sid %d free blocks %d \n", bg_id, nvfuse_get_free_blocks(sb, bg_id));
+		//printf("1. cur bg = %d %d\n", bg_id, nvfuse_get_curr_bg_id(sb, 0 /* data */));
 #if 1
 		if (once && nvfuse_process_model_is_dataplane()) {
-			nvfuse_move_curr_seg_id(sb, seg_id, 0 /* data type */);
+			nvfuse_move_curr_bg_id(sb, bg_id, 0 /* data type */);
 			once--;
 		}
 #endif
-		//printf("2. cur seg = %d %d\n", seg_id, nvfuse_get_curr_seg_id(sb, 0 /* data */));
+		//printf("2. cur bg = %d %d\n", bg_id, nvfuse_get_curr_bg_id(sb, 0 /* data */));
 		if (nvfuse_process_model_is_dataplane())
-			seg_id = nvfuse_get_next_seg_id(sb, 0 /* data type */);
+			bg_id = nvfuse_get_next_bg_id(sb, 0 /* data type */);
 		else
-			seg_id = (seg_id + 1) % sb->sb_segment_num;
-		//printf("3. alloc block: cur seg = %d, next_seg = %d \n", seg_id, next_id);
-	} while (seg_id != next_id);
+			bg_id = (bg_id + 1) % sb->sb_bg_num;
+		//printf("3. alloc block: cur bg = %d, next_bg = %d \n", bg_id, next_id);
+	} while (bg_id != next_id);
 
 	/* FIXME: how to handle this exception case! */
 	if (!cnt) {
 		printf(" Warning: it runs out of free blocks.\n");
-		nvfuse_print_seg_list(sb);
+		nvfuse_print_bg_list(sb);
 		assert(0);
 	}
 
@@ -311,7 +311,7 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 		new_blocks[0] = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
 		if (new_blocks[0] != total_blocks) {
 			printf(" Warning: it runs out of free blocks.\n");
-			nvfuse_print_seg_list(sb);
+			nvfuse_print_bg_list(sb);
 			assert(0);
 			if (error) {
 				*error = -1;
@@ -331,7 +331,7 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 			printf(" Warning: it runs out of free blocks. (requested = %d, allocated = %d)\n",
 			       total_blocks, new_blocks[1]);
 			printf(" current free blocks = %ld \n", sb->asb.asb_free_blocks);
-			nvfuse_print_seg_list(sb);
+			nvfuse_print_bg_list(sb);
 			assert(0);
 			if (error) {
 				*error = -1;

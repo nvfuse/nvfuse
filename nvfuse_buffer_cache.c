@@ -259,8 +259,6 @@ struct nvfuse_buffer_head *nvfuse_get_bh(struct nvfuse_superblock *sb,
 
 	if (bc->bc_pno) {
 		if (sync_read && !bc->bc_load) {
-			sb->sb_read_blocks++;
-			sb->sb_read_ios++;
 			bc->bc_load = 1;
 			nvfuse_read_block(bc->bc_buf, bc->bc_pno, sb->io_manager);
 		}

@@ -1,9 +1,11 @@
-On-disk Layout
-|----|---------|---------|---------|---------|---------|---------|---------|---------|
-| sb | segment | segment | segment | segment | segment | segment | segment | journal |
-|----|---------|---------|---------|---------|---------|---------|---------|---------|
+NVFUSE layout inspired by EXT2/3 family file system
 
-Segment Layout
+On-disk Layout
+|----|-------------|-------------|-------------|-------------|-------------|
+| sb | Block Group | Block Group | Block Group | Block Group | Block Group | 
+|----|-------------|-------------|-------------|-------------|-------------|
+
+Block Group Layout
 |------------|------------|---------|---------|-------------|-------------|
-| super block| seg summary| ibitmap | dbitmap | inode table | data blocks |
+| super block| block desc | ibitmap | dbitmap | inode table | data blocks |
 |------------|------------|---------|---------|-------------|-------------|

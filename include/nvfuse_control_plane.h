@@ -25,7 +25,7 @@ struct app_manage_node {
 	struct list_head list;
 	s32 channel_id;
 	s8 name[16];
-	s32 root_seg_id; /* identify to container */
+	s32 root_bg_id; /* identify to container */
 };
 
 struct control_plane_context {

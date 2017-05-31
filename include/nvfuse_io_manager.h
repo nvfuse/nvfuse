@@ -60,7 +60,6 @@
 #	define USE_RAMDISK  0
 #	define USE_FILEDISK 0
 #	define USE_UNIXIO   1
-#	define USE_MTDIO    0
 #endif
 
 // #define DISK_NAME "/dev/nvme0n1p1"

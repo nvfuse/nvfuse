@@ -78,7 +78,7 @@ static inline int nvfuse_process_model_is_dataplane()
 /* Default Inode Context Size */
 #define NVFUSE_ICTXC_SIZE (32*1024)
 
-/* RATIO SEGMENT TO BUFFER Cache */
+/* RATIO BG TO BUFFER Cache */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.001) /* data optimized */
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.005) /* meta optimized*/
 //#define NVFUSE_BUFFER_RATIO_TO_DATA (0.01) /* meta optimized*/
@@ -167,8 +167,8 @@ enum bp_mempool_type {
 //#define NVFUSE_DEBUG
 #endif
 
-#define NVFUSE_SEGMENT_SIZE_BITS 22
-#define NVFUSE_SEGMENT_GROUP_NUM 1
+#define NVFUSE_BG_SIZE_BITS 22
+#define NVFUSE_BG_GROUP_NUM 1
 
 #define NVFUSE_USE_MINISH
 

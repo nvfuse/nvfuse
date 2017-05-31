@@ -1,7 +1,7 @@
 File System Subsystem and Layout
 	+ Unix Indirect Block (complete)
 	+ get_bh, release_bh, read_inode(), release_inode(); (complete)
-	+ free/used block stats per segment or disk (complete)
+	+ free/used block stats per BG or disk (complete)
 
 File System Performance
 	+ Lock Manager

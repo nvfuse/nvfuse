@@ -437,8 +437,8 @@ static int spdk_read_blk(struct nvfuse_io_manager *io_manager, long block, int c
 	job.is_completed = 0;
 	job.ns_entry = ns_entry;
 
-	/*if ( block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
-	printf(" ss read: block = %ld count = %d \n", block, count);*/
+	/*if ( block/32768 < 10 &&  (block % 32768) == NVFUSE_BD_OFFSET)
+	printf(" bd read: block = %ld count = %d \n", block, count);*/
 
 	io_manager->perf_stat_dev.stat_dev.total_io_count += count;
 	io_manager->perf_stat_dev.stat_dev.read_io_count += count;
@@ -473,8 +473,8 @@ static int spdk_write_blk(struct nvfuse_io_manager *io_manager, long block, int 
 	int wbytes = 0;
 	int res;
 
-	/*if (block/32768 < 10 &&  (block % 32768) == NVFUSE_SUMMARY_OFFSET)
-	printf(" ss write: block = %ld count = %d \n", block, count);*/
+	/*if (block/32768 < 10 &&  (block % 32768) == NVFUSE_BD_OFFSET)
+	printf(" bd write: block = %ld count = %d \n", block, count);*/
 
 	io_manager->perf_stat_dev.stat_dev.total_io_count += count;
 	io_manager->perf_stat_dev.stat_dev.write_io_count += count;

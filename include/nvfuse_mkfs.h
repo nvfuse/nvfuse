@@ -15,7 +15,7 @@
 #ifndef __NVFUSE_MKFS__
 #define __NVFUSE_MKFS__
 
-void nvfuse_make_segment_summary(struct nvfuse_segment_summary *ss, u32 seg_id, u32 seg_start,
-				 u32 seg_size);
+void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 bg_start,
+				 u32 bg_size);
 
 #endif

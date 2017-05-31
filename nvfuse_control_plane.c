@@ -497,18 +497,18 @@ s32 nvfuse_app_manage_table_add(struct nvfuse_handle *nvh, s32 channel_id, s8 *n
 	strcpy(node->name, name);
 
 	/* the first container is reserved for the container management. */
-	printf(" Add app: channel_id = %d name = %s root_seg = %d\n", channel_id, name, node->root_seg_id);
+	printf(" Add app: channel_id = %d name = %s root_bg = %d\n", channel_id, name, node->root_bg_id);
 
 	dir_name = get_container_name(nvh, name);
 	res = nvfuse_getattr(nvh, dir_name, &st_buf);
 	if (res) { /* if container isn't in FS, it will be created as a directory */
-		/* allocation of root container (e.g., segment) */
-		node->root_seg_id = nvfuse_control_plane_container_alloc(nvh, channel_id, CONTAINER_NEW_ALLOC,
+		/* allocation of root container (e.g., block group) */
+		node->root_bg_id = nvfuse_control_plane_container_alloc(nvh, channel_id, CONTAINER_NEW_ALLOC,
 				    UNLOCKED);
 
 		/* work around: container directory and related objects to be located in allocated container */
-		nvh->nvh_sb.sb_last_allocated_ino = node->root_seg_id * nvh->nvh_sb.sb_no_of_inodes_per_seg;
-		printf(" Create container direcotory %s in container %d\n", dir_name, node->root_seg_id);
+		nvh->nvh_sb.sb_last_allocated_ino = node->root_bg_id * nvh->nvh_sb.sb_no_of_inodes_per_bg;
+		printf(" Create container direcotory %s in container %d\n", dir_name, node->root_bg_id);
 		res = nvfuse_mkdir_path(nvh, (const char *)dir_name, 0644);
 		if (res < 0) {
 			printf(" Error: create dir = %s \n", dir_name);
@@ -530,8 +530,8 @@ s32 nvfuse_destroy_containers_for_app_unregistration(struct nvfuse_handle *nvh, 
 	struct control_plane_context *cp;
 	struct container_reservation *cr;
 	struct nvfuse_superblock *sb;
-	struct nvfuse_buffer_head *dbitmap_bh, *ibitmap_bh, *ss_bh;
-	struct nvfuse_segment_summary *ss;
+	struct nvfuse_buffer_head *dbitmap_bh, *ibitmap_bh, *bd_bh;
+	struct nvfuse_bg_descriptor *bd;
 	struct app_manage_node *node;
 
 	char *dir_name;
@@ -558,13 +558,13 @@ s32 nvfuse_destroy_containers_for_app_unregistration(struct nvfuse_handle *nvh, 
 		if (cr->owner_core_id != core_id)
 			continue;
 
-		ss_bh = nvfuse_get_bh(sb, NULL, SS_INO, container_id, READ, NVFUSE_TYPE_META);
-		ss = (struct nvfuse_segment_summary *)ss_bh->bh_buf;
+		bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, container_id, READ, NVFUSE_TYPE_META);
+		bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
 
-		/* format segment (container) summary with initial value */
-		nvfuse_make_segment_summary(ss, container_id,
-					    container_id * sb->sb_no_of_blocks_per_seg, sb->sb_no_of_blocks_per_seg);
-		nvfuse_release_bh(sb, ss_bh, 0, DIRTY);
+		/* format bg (container) summary with initial value */
+		nvfuse_make_bg_descriptor(bd, container_id,
+					    container_id * sb->sb_no_of_blocks_per_bg, sb->sb_no_of_blocks_per_bg);
+		nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
 
 		/* clear data bitmap tables */
 		dbitmap_bh = nvfuse_get_bh(sb, NULL, DBITMAP_INO, container_id, READ, NVFUSE_TYPE_META);
@@ -615,7 +615,7 @@ s32 nvfuse_app_manage_table_remove(struct nvfuse_handle *nvh, s32 core_id, s32 d
 
 		node->channel_id = -1;
 		memset(node->name, 0x0, NAME_SIZE);
-		node->root_seg_id = 0;
+		node->root_bg_id = 0;
 	} else {
 		/* status set to UNLOCKED */
 		nvfuse_control_plane_container_release_by_coreid(nvh, core_id, 0 /* keep ownership */);
@@ -663,7 +663,7 @@ s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname, struct superb
 	rte_memcpy(&msg->superblock_common, sb_common, sizeof(struct nvfuse_superblock_common));
 
 	msg->superblock_common.sb_root_ino = dir_entry.d_ino;
-	msg->superblock_common.asb.asb_root_seg_id = dir_entry.d_ino / sb->sb_no_of_inodes_per_seg;
+	msg->superblock_common.asb.asb_root_bg_id = dir_entry.d_ino / sb->sb_no_of_inodes_per_bg;
 
 	msg->superblock_common.asb.asb_free_inodes = 0;
 	msg->superblock_common.asb.asb_free_blocks = 0;
@@ -1011,7 +1011,7 @@ s32 nvfuse_control_plane_init(struct nvfuse_handle *nvh)
 {
 	struct control_plane_context *cp;
 	s32 nr_buffers = nvh->nvh_sb.sb_control_plane_buffer_size;
-	s32 nr_segments = nvh->nvh_sb.sb_segment_num;
+	s32 nr_bgs = nvh->nvh_sb.sb_bg_num;
 	s32 ret = 0;
 
 	cp = nvfuse_malloc(sizeof(struct control_plane_context));
@@ -1030,7 +1030,7 @@ s32 nvfuse_control_plane_init(struct nvfuse_handle *nvh)
 		fprintf(stderr, " Error: control_plane_buffer_init()\n");
 	}
 
-	ret = nvfuse_control_plane_container_table_init(nvh, nr_segments); /* excluding 0 container */
+	ret = nvfuse_control_plane_container_table_init(nvh, nr_bgs); /* excluding 0 container */
 	if (ret < 0) {
 		fprintf(stderr, " Error: control_plane_container_table_init()\n");
 	}

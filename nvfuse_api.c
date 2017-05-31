@@ -443,7 +443,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 					rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
 				}
 
-				assert(dir->d_ino > 0 && dir->d_ino < sb->sb_no_of_inodes_per_seg * sb->sb_segment_num);
+				assert(dir->d_ino > 0 && dir->d_ino < sb->sb_no_of_inodes_per_bg * sb->sb_bg_num);
 
 				res = 0;
 
@@ -763,7 +763,6 @@ s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 	ft->size = 0;
 	ft->used = 0;
 	ft->rwoffset = 0;
-	ft->prefetch_cur = 0;
 	ft->flags = 0;
 
 	nvfuse_release_super(sb);

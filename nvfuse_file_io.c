@@ -146,9 +146,9 @@ static int file_write_blk(struct nvfuse_io_manager *io_manager, long block,
 
 	/* debug code */
 #if 0
-	if (block % 32768 == NVFUSE_SUMMARY_OFFSET) {
-		struct nvfuse_segment_summary *ss = buf;
-		assert(ss->ss_dbitmap_size);
+	if (block % 32768 == NVFUSE_BD_OFFSET) {
+		struct nvfuse_bg_descriptor *bd = buf;
+		assert(bd->bd_dbitmap_size);
 	}
 #endif
 
