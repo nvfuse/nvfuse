@@ -170,7 +170,7 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	s32 cpu_core_mask = 0x1; /* 1 core set to as default */
 	s8 *appname = NULL; /* e.g., rocksdb */
 	s32 need_format = 0;
-	s32 need_mount = 1;
+	s32 need_mount = 0;
 	s32 qdepth = AIO_MAX_QDEPTH;
 	s32 dev_size = 0; /* in MB units */
 	s32 buffer_size = 0; /* in MB units */
