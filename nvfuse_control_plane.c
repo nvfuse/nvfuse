@@ -479,7 +479,6 @@ struct app_manage_node *nvfuse_get_app_node_by_coreid(struct nvfuse_handle *nvh,
 
 s32 nvfuse_app_manage_table_add(struct nvfuse_handle *nvh, s32 channel_id, s8 *name)
 {
-	struct control_plane_context *cp;
 	struct app_manage_node *node;
 	struct stat st_buf;
 	char *dir_name;
@@ -489,8 +488,6 @@ s32 nvfuse_app_manage_table_add(struct nvfuse_handle *nvh, s32 channel_id, s8 *n
 		fprintf(stderr, " Invalid core id = %d\n", channel_id);
 		return -1;
 	}
-
-	cp = nvh->nvh_sb.sb_control_plane_ctx;
 
 	node = nvfuse_get_app_node_by_coreid(nvh, channel_id);
 	node->channel_id = channel_id;
@@ -581,20 +578,17 @@ s32 nvfuse_destroy_containers_for_app_unregistration(struct nvfuse_handle *nvh, 
 	}
 
 	nvfuse_check_flush_dirty(sb, 1 /* force */);
+	return 0;
 }
 
 s32 nvfuse_app_manage_table_remove(struct nvfuse_handle *nvh, s32 core_id, s32 destroy_containers)
 {
-	struct control_plane_context *cp;
 	struct app_manage_node *node;
-	s32 res;
 
 	if (core_id == 0 || core_id >= SPDK_NUM_CORES) {
 		fprintf(stderr, " Invalid core id = %d\n", core_id);
 		return -1;
 	}
-
-	cp = nvh->nvh_sb.sb_control_plane_ctx;
 
 	node = nvfuse_get_app_node_by_coreid(nvh, core_id);
 	if (node->channel_id != core_id) {
@@ -637,13 +631,10 @@ s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname, struct superb
 			   struct nvfuse_superblock_common *sb_common)
 {
 	struct nvfuse_dir_entry dir_entry;
-	struct nvfuse_inode_ctx *ictx;
-	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char *path;
 	char filename[128];
 	int res;
-	s32 container_root_ino;
 
 	path = get_container_name(nvh, appname);
 
@@ -789,7 +780,7 @@ s32 nvfuse_control_plane_container_table_init(struct nvfuse_handle *nvh, s32 num
 	return 0;
 }
 
-void nvfuse_pcontrin_plane_print_container_table(struct nvfuse_handle *nvh)
+void nvfuse_control_plane_print_container_table(struct nvfuse_handle *nvh)
 {
 	struct control_plane_context *cp = nvh->nvh_sb.sb_control_plane_ctx;
 	struct container_reservation *reservation_table = cp->reservation_table;

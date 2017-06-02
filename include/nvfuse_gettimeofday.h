@@ -12,15 +12,11 @@
 * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
 * more details.
 */
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-#	include <Windows.h>
-#else
-#	include <sys/time.h>
-#	include <time.h>
-#endif
+#include <sys/time.h>
+#include <time.h>
 
-#ifndef GETTIMEOFDAY_H
-#define GETTIMEOFDAY_H
+#ifndef __GETTIMEOFDAY_H__
+#define __GETTIMEOFDAY_H__
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 int gettimeofday(struct timeval *tp, void *tzp);
@@ -32,4 +28,4 @@ double time_since_ms(struct timeval *start_tv, struct timeval *stop_tv);
 double time_since(struct timeval *start_tv, struct timeval *stop_tv);
 double time_since_now(struct timeval *start_tv);
 float tv_to_sec(struct timeval *tv);
-#endif /* GETTIMEOFDAY_H */
+#endif /* __GETTIMEOFDAY_H__ */

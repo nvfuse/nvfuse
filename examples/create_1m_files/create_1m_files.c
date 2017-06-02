@@ -24,6 +24,7 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
+#include "nvfuse_misc.h"
 #include "spdk/env.h"
 #include <rte_lcore.h>
 
@@ -31,10 +32,6 @@
 #define UMOUNT		1
 
 #define NUM_ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
-
-#define MB (1024*1024)
-#define GB (1024*1024*1024)
-#define TB ((s64)1024*1024*1024*1024)
 
 #define RT_TEST_TYPE MILL_TEST
 
@@ -57,7 +54,19 @@ static struct nvfuse_params *g_params = &_g_params;
 static s32 last_percent;
 static s32 test_type = MILL_TEST;
 
-void rt_progress_reset()
+/* Function Declaration */
+void rt_progress_reset(void);
+void rt_progress_report(s32 curr, s32 max);
+char *rt_decode_test_type(s32 type);
+int rt_create_files(struct nvfuse_handle *nvh, u32 arg);
+int rt_stat_files(struct nvfuse_handle *nvh, u32 arg);
+int rt_rm_files(struct nvfuse_handle *nvh, u32 arg);
+void rt_usage(char *cmd);
+static int rt_main(void *arg);
+static void print_stats(s32 num_cores, s32 num_tc);
+
+
+void rt_progress_reset(void)
 {
 	last_percent = 0;
 }
@@ -102,7 +111,6 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	s32 max_inodes;
 	s32 i;
 	s32 fd;
-	s32 res;
 
 	if (nvfuse_statvfs(nvh, NULL, &stat) < 0) {
 		printf(" statfs error \n");
@@ -166,8 +174,6 @@ int rt_stat_files(struct nvfuse_handle *nvh, u32 arg)
 	s8 buf[FNAME_SIZE];
 	s32 max_inodes;
 	s32 i;
-	s32 fd;
-	s32 res;
 
 	if (nvfuse_statvfs(nvh, NULL, &stat) < 0) {
 		printf(" statfs error \n");
@@ -225,8 +231,6 @@ int rt_rm_files(struct nvfuse_handle *nvh, u32 arg)
 	s8 buf[FNAME_SIZE];
 	s32 max_inodes;
 	s32 i;
-	s32 fd;
-	s32 res;
 
 	if (nvfuse_statvfs(nvh, NULL, &stat) < 0) {
 		printf(" statfs error \n");
@@ -258,8 +262,7 @@ int rt_rm_files(struct nvfuse_handle *nvh, u32 arg)
 	for (i = 0; i < max_inodes; i++) {
 		sprintf(buf, "file%d\n", i);
 
-		res = nvfuse_rmfile_path(nvh, buf);
-		if (res) {
+		if (nvfuse_rmfile_path(nvh, buf)) {
 			printf(" rmfile = %s error \n", buf);
 			return -1;
 		}
@@ -301,10 +304,10 @@ static int rt_main(void *arg)
 	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;
 	struct rte_ring *stat_rx_ring;
-	struct ret_mempool *stat_message_pool;
+	struct rte_mempool *stat_message_pool;
 	union perf_stat perf_stat;
 	union perf_stat _perf_stat_rusage;
-	struct perf_stat_rusage *rusage_stat = &_perf_stat_rusage;
+	struct perf_stat_rusage *rusage_stat = (struct perf_stat_rusage *)&_perf_stat_rusage;
 	struct timeval tv;
 	double execution_time;
 	s32 ret;
@@ -368,7 +371,7 @@ static int rt_main(void *arg)
 		if (ret < 0)
 			return -1;
 
-		nvfuse_stat_ring_put(stat_rx_ring, stat_message_pool, rusage_stat);
+		nvfuse_stat_ring_put(stat_rx_ring, stat_message_pool, (union perf_stat *)rusage_stat);
 	}
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
@@ -380,7 +383,7 @@ RET:
 static void print_stats(s32 num_cores, s32 num_tc)
 {
 	struct rte_ring *stat_rx_ring;
-	struct ret_mempool *stat_message_pool;
+	struct rte_mempool *stat_message_pool;
 	union perf_stat *per_core_stat, *cur_stat, sum_stat, temp_stat;
 	s32 ret;
 	s32 cur;
@@ -397,7 +400,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* stat ring lookup */
 	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RT_STAT);
 	if (ret < 0)
-		return -1;
+		return;
 
 	memset(per_core_stat, 0x00, sizeof(union perf_stat) * num_cores * num_tc);
 	memset(&sum_stat, 0x00, sizeof(union perf_stat));
@@ -413,7 +416,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	for (i = 0; i < num_cores * num_tc; i++) {
 		ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 		if (ret < 0)
-			return -1;
+			return;
 
 		assert(temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id < num_cores * num_tc);
 
@@ -450,7 +453,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* Device Level Stat */
 	{
 		union perf_stat _sum_stat;
-		struct perf_stat_dev *sum_stat = &_sum_stat;
+		struct perf_stat_dev *sum_stat = (struct perf_stat_dev *)&_sum_stat;
 		struct perf_stat_dev *cur_stat;
 
 		memset(sum_stat, 0x00, sizeof(struct perf_stat_dev));
@@ -458,13 +461,13 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		/* stat ring lookup */
 		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, DEVICE_STAT);
 		if (ret < 0)
-			return -1;
+			return;
 
 		/* gather dev stats */
 		for (i = 0; i < num_cores; i++) {
 			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 			if (ret < 0)
-				return -1;
+				return;
 
 			cur_stat = (struct perf_stat_dev *)&temp_stat;
 
@@ -490,7 +493,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* IPC Stat */
 	if (nvfuse_process_model_is_dataplane()) {
 		union perf_stat _sum_stat;
-		struct perf_stat_ipc *sum_stat = &_sum_stat;
+		struct perf_stat_ipc *sum_stat = (struct perf_stat_ipc *)&_sum_stat;
 		struct perf_stat_ipc *cur_stat;
 		s32 type;
 
@@ -499,13 +502,13 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		/* stat ring lookup */
 		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, IPC_STAT);
 		if (ret < 0)
-			return -1;
+			return;
 
 		/* gather dev stats */
 		for (i = 0; i < num_cores; i++) {
 			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 			if (ret < 0)
-				return -1;
+				return;
 
 			cur_stat = (struct perf_stat_ipc *)&temp_stat;
 			for (type = APP_REGISTER_REQ; type < HEALTH_CHECK_CPL; type++) {
@@ -545,22 +548,21 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* Rusage Stat */
 	{
 		union perf_stat _sum_stat;
-		struct perf_stat_rusage *sum_stat = &_sum_stat;
+		struct perf_stat_rusage *sum_stat = (struct perf_stat_rusage *)&_sum_stat;
 		struct perf_stat_rusage *cur_stat;
-		s32 type;
 
 		memset(sum_stat, 0x00, sizeof(struct perf_stat_rusage));
 
 		/* stat ring lookup */
 		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RUSAGE_STAT);
 		if (ret < 0)
-			return -1;
+			return;
 
 		/* gather rusage stats */
 		for (i = 0; i < num_cores; i++) {
 			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 			if (ret < 0)
-				return -1;
+				return;
 
 			cur_stat = (struct perf_stat_rusage *)&temp_stat;
 
@@ -573,7 +575,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		}
 
 		if (num_cores > 1) {
-			sprintf(name, "Avg", i);
+			sprintf(name, "Avg");
 			print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
 		}
 	}
@@ -585,7 +587,9 @@ int main(int argc, char *argv[])
 	char *core_argv[128];
 	int app_argc = 0;
 	char *app_argv[128];
+#if 0
 	char op;
+#endif
 	int ret = 0;
 	int num_cores = 0;
 	int lcore_id;
@@ -657,9 +661,10 @@ int main(int argc, char *argv[])
 	nvfuse_deinit_spdk(g_io_manager, g_ipc_ctx);
 
 	return ret;
-
+#if 0
 INVALID_ARGS:
 	;
+#endif
 	nvfuse_core_usage(argv[0]);
 	rt_usage(argv[0]);
 	nvfuse_core_usage_example(argv[0]);

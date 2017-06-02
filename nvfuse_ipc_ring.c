@@ -146,7 +146,10 @@ s8 *nvfuse_ipc_opcode_decode(enum ipc_opcode opcode)
 		return "HEALTH_CHECK_REQ";
 	case HEALTH_CHECK_CPL:
 		return "HEALTH_CHECK_CPL";
+	default:
+		break;
 	}
+	return "UNKOWN_OPCODE";
 }
 
 void nvfuse_make_app_register_req(struct app_register_req *req)
@@ -326,7 +329,6 @@ void nvfuse_make_container_reservation_release_cpl(struct container_reservation_
 void nvfuse_try_ring_dequeue(struct rte_ring *recv_ring, union nvfuse_ipc_msg **msg, int timeout)
 {
 	void *ptr;
-	int count = 0;
 
 	do {
 		if (rte_ring_dequeue(recv_ring, &ptr) < 0) {
@@ -618,7 +620,6 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 				    union nvfuse_ipc_msg *ipc_msg, s32 opcode)
 {
 	int ret;
-	int cpl_opcode;
 
 	switch (opcode) {
 	case APP_REGISTER_REQ:

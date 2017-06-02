@@ -65,12 +65,18 @@ struct nvfuse_handle;
 struct nvfuse_superblock_common;
 
 /* App Management Functions */
-s32 nvfuse_app_manage_table_init();
+s8 *get_container_name(struct nvfuse_handle *nvh, s8 *name);
+s8 *get_container_log_name(struct nvfuse_handle *nvh, s32 log_number);
+s8 *get_app_table_log_name(struct nvfuse_handle *nvh, s32 log_number);
+struct app_manage_node *nvfuse_get_app_node_by_coreid(struct nvfuse_handle *nvh, s32 core_id);
+s32 nvfuse_app_manage_table_init(struct nvfuse_handle *nvh);
 s32 nvfuse_app_manage_table_add(struct nvfuse_handle *nvh, s32 core_id, s8 *name);
 s32 nvfuse_app_manage_table_remove(struct nvfuse_handle *nvh, s32 core_id, s32 destroy_containers);
 void nvfuse_app_manage_table_deinit(struct nvfuse_handle *nvh);
 s32 nvfuse_store_app_table(struct nvfuse_handle *nvh);
 s32 nvfuse_load_app_table(struct nvfuse_handle *nvh);
+s32 nvfuse_destroy_containers_for_app_unregistration(struct nvfuse_handle *nvh, s32 core_id);
+void nvfuse_control_plane_print_container_table(struct nvfuse_handle *nvh);
 
 /* Superblock Copy Functions */
 s32 nvfuse_superblock_copy(struct nvfuse_handle *nvh, s8 *appname,
@@ -103,5 +109,6 @@ s32 nvfuse_control_plane_reservation_release(struct nvfuse_handle *nvh, s32 cont
 /* Control Plane Init/Deinit Functions */
 s32 nvfuse_control_plane_init(struct nvfuse_handle *nvh);
 void nvfuse_control_plane_exit(struct nvfuse_handle *nvh);
+s32 nvfuse_control_plane_health_check(s32 core_id);
 
 #endif

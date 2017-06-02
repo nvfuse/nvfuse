@@ -34,15 +34,12 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
+#include "nvfuse_misc.h"
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
 #define NUM_ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
-
-#define MB (1024*1024)
-#define GB (1024*1024*1024)
-#define TB ((s64)1024*1024*1024*1024)
 
 #define RANDOM		1
 #define SEQUENTIAL	0
@@ -56,6 +53,11 @@ struct nvfuse_ipc_context *g_ipc_ctx = &_g_ipc_ctx;
 /* global params */
 struct nvfuse_params _g_params;
 struct nvfuse_params *g_params = &_g_params;
+
+int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 is_read,
+	     s32 direct, s32 qdepth, s32 runtime);
+void perf_usage(char *cmd);
+void _print_stats(struct perf_stat_aio *cur_stat, char *name);
 
 int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 is_read,
 	     s32 direct, s32 qdepth, s32 runtime)
@@ -98,7 +100,6 @@ void perf_usage(char *cmd)
 }
 
 #define AIO 1
-#define SYNC 2
 static int core_argc = 0;
 static char *core_argv[128];
 static int app_argc = 0;
@@ -116,7 +117,7 @@ static int runtime = 0; /* runtime in seconds */
 static int perf_main(void *arg)
 {
 	struct nvfuse_handle *nvh;
-	s32 ret;
+	s32 ret = 0;
 
 	printf(" start perf (lcore = %d)...\n", rte_lcore_id());
 
@@ -136,11 +137,9 @@ static int perf_main(void *arg)
 		printf(" sync io is not supported \n");;
 	}
 
-RET:
-	;
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 
-	return 0;
+	return ret;
 }
 
 void _print_stats(struct perf_stat_aio *cur_stat, char *name)
@@ -182,7 +181,7 @@ void _print_stats(struct perf_stat_aio *cur_stat, char *name)
 static void print_stats(s32 num_cores)
 {
 	struct rte_ring *stat_rx_ring;
-	struct ret_mempool *stat_message_pool;
+	struct rte_mempool *stat_message_pool;
 	union perf_stat *per_core_stat, *cur_stat, sum_stat;
 	s32 ret;
 	s32 cur;
@@ -196,7 +195,7 @@ static void print_stats(s32 num_cores)
 	/* stat ring lookup */
 	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, AIO_STAT);
 	if (ret < 0)
-		return -1;
+		return;
 
 	memset(per_core_stat, 0x00, sizeof(union perf_stat) * num_cores);
 	memset(&sum_stat, 0x00, sizeof(union perf_stat));
@@ -208,10 +207,12 @@ static void print_stats(s32 num_cores)
 		cur_stat = per_core_stat + cur;
 		ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)cur_stat);
 		if (ret < 0)
-			return -1;
+			return;
 
 		sprintf(name, "lcore %d", cur);
-		_print_stats(cur_stat, name);
+
+		_print_stats((struct perf_stat_aio *)cur_stat, name);
+
 		sum_stat.stat_aio.aio_execution_tsc += cur_stat->stat_aio.aio_execution_tsc;
 		sum_stat.stat_aio.aio_lat_total_count += cur_stat->stat_aio.aio_lat_total_count;	// io count
 		sum_stat.stat_aio.aio_lat_total_tsc += cur_stat->stat_aio.aio_lat_total_tsc;		// latency total
@@ -229,7 +230,7 @@ static void print_stats(s32 num_cores)
 
 	sum_stat.stat_aio.aio_execution_tsc /= num_cores;
 	sprintf(name, "group");
-	_print_stats(&sum_stat, name);
+	_print_stats((struct perf_stat_aio *)&sum_stat, name);
 
 	free(per_core_stat);
 }
@@ -243,7 +244,7 @@ int main(int argc, char *argv[])
 		goto INVALID_ARGS;
 	}
 
-	printf(" %s (pid %ld, parent pid %ld)\n", argv[0], getpid(), getppid());
+	printf(" %s (pid %d, parent pid %d)\n", argv[0], getpid(), getppid());
 
 	/* distinguish cmd line into core args and app args */
 	nvfuse_distinguish_core_and_app_options(argc, argv,
@@ -264,7 +265,7 @@ int main(int argc, char *argv[])
 			break;
 		case 'B':
 			block_size = atoi(optarg);
-			if (block_size % CLUSTER_SIZE | block_size < CLUSTER_SIZE) {
+			if ((block_size % CLUSTER_SIZE) | (block_size < CLUSTER_SIZE)) {
 				printf("\n Error: block size (%d) is not alinged with 4KB\n", block_size);
 				goto INVALID_ARGS;
 			}

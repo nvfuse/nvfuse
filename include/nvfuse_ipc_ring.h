@@ -289,6 +289,8 @@ struct rte_ring *nvfuse_ipc_get_recvq(struct nvfuse_ipc_context *ipc_ctx, int ch
 struct rte_mempool *nvfuse_ipc_mempool(struct nvfuse_ipc_context *ipc_ctx);
 s8 *nvfuse_ipc_opcode_decode(enum ipc_opcode opcode);
 
+void nvfuse_make_unkown_cpl(struct unknown_cpl *req, s32 ret);
+
 void nvfuse_make_app_register_req(struct app_register_req *req);
 void nvfuse_make_app_register_cpl(struct app_register_cpl *req, s32 ret);
 void nvfuse_make_app_unregister_req(struct app_unregister_req *req);

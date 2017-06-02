@@ -24,6 +24,7 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
+#include "nvfuse_misc.h"
 #include "spdk/env.h"
 #include <rte_lcore.h>
 
@@ -32,9 +33,11 @@
 
 #define NUM_ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
 
+#if 0
 #define MB (1024*1024)
 #define GB (1024*1024*1024)
 #define TB ((s64)1024*1024*1024*1024)
+#endif
 
 #define RT_TEST_TYPE MILL_TEST
 
@@ -57,7 +60,23 @@ static struct nvfuse_params *g_params = &_g_params;
 static s32 last_percent;
 static s32 test_type = QUICK_TEST;
 
-void rt_progress_reset()
+void rt_progress_reset(void);
+void rt_progress_report(s32 curr, s32 max);
+char *rt_decode_test_type(s32 type);
+int rt_create_files(struct nvfuse_handle *nvh, u32 arg);
+int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg);
+int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg);
+int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 direct,
+		  s32 qdepth);
+int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand);
+int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand);
+int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg);
+void rt_usage(char *cmd);
+static int rt_main(void *arg);
+static void print_stats(s32 num_cores, s32 num_tc);
+int main(int argc, char *argv[]);
+
+void rt_progress_reset(void)
 {
 	last_percent = 0;
 }
@@ -362,8 +381,8 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 	/* NOTE: Allocated size may differ from requested size. */
 	file_allocated_size = stat_buf.st_size;
 
-	printf(" requested size %dMB.\n", (long)file_size / MB);
-	printf(" allocated size %dMB.\n", (long)file_allocated_size / MB);
+	printf(" requested size %ldMB.\n", (long)file_size / MB);
+	printf(" allocated size %ldMB.\n", (long)file_allocated_size / MB);
 
 	printf(" nvfuse fallocate throughput %.3fMB/s (%0.3fs).\n",
 	       (double)file_allocated_size / MB / time_since_now(&tv), time_since_now(&tv));
@@ -396,7 +415,7 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 
 	/* write phase */
 	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, WRITE, direct, is_rand);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, WRITE, direct, is_rand, 0);
 		if (res < 0) {
 			printf(" Error: aio write test \n");
 			goto AIO_ERROR;
@@ -413,7 +432,7 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 	gettimeofday(&tv, NULL);
 	/* read phase */
 	{
-		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, READ, direct, is_rand);
+		res = nvfuse_aio_test_rw(nvh, str, file_size, block_size, qdepth, READ, direct, is_rand, 0);
 		if (res < 0) {
 			printf(" Error: aio read test \n");
 			goto AIO_ERROR;
@@ -443,9 +462,9 @@ int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
 	struct statvfs statvfs_buf;
 	s32 direct;
 	s32 qdepth;
-	s32 res;
 	s64 file_size;
 	s32 block_size;
+	s32 res;
 
 	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0) {
 		printf(" statfs error \n");
@@ -475,7 +494,7 @@ int rt_create_max_sized_file_aio_4KB(struct nvfuse_handle *nvh, u32 is_rand)
 	block_size = 4096;
 	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
 
-	return NVFUSE_SUCCESS;
+	return res;
 }
 
 int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
@@ -483,9 +502,9 @@ int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
 	struct statvfs statvfs_buf;
 	s32 direct;
 	s32 qdepth;
-	s32 res;
 	s64 file_size;
 	s32 block_size;
+	s32 res;
 
 	if (nvfuse_statvfs(nvh, NULL, &statvfs_buf) < 0) {
 		printf(" statfs error \n");
@@ -515,7 +534,7 @@ int rt_create_max_sized_file_aio_128KB(struct nvfuse_handle *nvh, u32 is_rand)
 	block_size = 128 * 1024;
 	res = rt_gen_aio_rw(nvh, file_size, block_size, is_rand, direct, qdepth);
 
-	return NVFUSE_SUCCESS;
+	return res;
 }
 
 int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
@@ -656,15 +675,18 @@ static int rt_main(void *arg)
 	struct nvfuse_handle *nvh;
 	struct regression_test_ctx *cur_rt_ctx;
 	struct rte_ring *stat_rx_ring;
-	struct ret_mempool *stat_message_pool;
+	struct rte_mempool *stat_message_pool;
 	union perf_stat perf_stat;
 	union perf_stat _perf_stat_rusage;
-	struct perf_stat_rusage *rusage_stat = &_perf_stat_rusage;
+	struct perf_stat_rusage *rusage_stat;
 	struct timeval tv;
 	double execution_time;
 	s32 ret;
+	s32 id = (s32)(s64 *)arg;
 
-	printf(" Perform test %s thread id = %d... \n", rt_decode_test_type(test_type), (s32)arg);
+	printf(" Perform test %s thread id = %d... \n", rt_decode_test_type(test_type), id);
+
+	rusage_stat = (struct perf_stat_rusage *) &_perf_stat_rusage;
 
 	/* create nvfuse_handle with user spcified parameters */
 	nvh = nvfuse_create_handle(g_io_manager, g_ipc_ctx, g_params);
@@ -674,7 +696,7 @@ static int rt_main(void *arg)
 	}
 
 	/* stat ring lookup */
-	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RT_STAT);
+	ret = perf_stat_ring_lookup(&stat_rx_ring, (struct rte_mempool **)&stat_message_pool, RT_STAT);
 	if (ret < 0)
 		return -1;
 
@@ -723,7 +745,7 @@ static int rt_main(void *arg)
 		if (ret < 0)
 			return -1;
 
-		nvfuse_stat_ring_put(stat_rx_ring, stat_message_pool, rusage_stat);
+		nvfuse_stat_ring_put(stat_rx_ring, stat_message_pool, (union perf_stat *)rusage_stat);
 	}
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
@@ -734,7 +756,7 @@ RET:
 static void print_stats(s32 num_cores, s32 num_tc)
 {
 	struct rte_ring *stat_rx_ring;
-	struct ret_mempool *stat_message_pool;
+	struct rte_mempool *stat_message_pool;
 	union perf_stat *per_core_stat, *cur_stat, sum_stat, temp_stat;
 	s32 ret;
 	s32 cur;
@@ -750,8 +772,10 @@ static void print_stats(s32 num_cores, s32 num_tc)
 
 	/* stat ring lookup */
 	ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RT_STAT);
-	if (ret < 0)
-		return -1;
+	if (ret < 0) {
+		printf(" Error ring lookup error in %s\n", __FUNCTION__);
+		return;
+	}
 
 	memset(per_core_stat, 0x00, sizeof(union perf_stat) * num_cores * num_tc);
 	memset(&sum_stat, 0x00, sizeof(union perf_stat));
@@ -767,7 +791,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	for (i = 0; i < num_cores * num_tc; i++) {
 		ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 		if (ret < 0)
-			return -1;
+			return;
 
 		assert(temp_stat.stat_rt.sequence * num_cores + temp_stat.stat_rt.lcore_id < num_cores * num_tc);
 
@@ -792,7 +816,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			group_exec_time += cur_stat->stat_rt.total_time;
 			printf(" Per core %d execution = %.6f\n", cur, cur_stat->stat_rt.total_time);
 		}
-		printf(" Avg execution = %.6f sec \n", tc, rt_ctx[tc].test_name, tc_total / num_cores);
+		printf(" TC %d %s Avg execution = %.6f sec \n", tc, rt_ctx[tc].test_name, tc_total / num_cores);
 		printf("\n");
 	}
 
@@ -805,7 +829,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* Device Level Stat */
 	{
 		union perf_stat _sum_stat;
-		struct perf_stat_dev *sum_stat = &_sum_stat;
+		struct perf_stat_dev *sum_stat = (struct perf_stat_dev *)&_sum_stat;
 		struct perf_stat_dev *cur_stat;
 
 		memset(sum_stat, 0x00, sizeof(struct perf_stat_dev));
@@ -813,13 +837,13 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		/* stat ring lookup */
 		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, DEVICE_STAT);
 		if (ret < 0)
-			return -1;
+			return;
 
 		/* gather dev stats */
 		for (i = 0; i < num_cores; i++) {
 			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 			if (ret < 0)
-				return -1;
+				return;
 
 			cur_stat = (struct perf_stat_dev *)&temp_stat;
 
@@ -845,7 +869,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* IPC Stat */
 	if (nvfuse_process_model_is_dataplane()) {
 		union perf_stat _sum_stat;
-		struct perf_stat_ipc *sum_stat = &_sum_stat;
+		struct perf_stat_ipc *sum_stat = (struct perf_stat_ipc *)&_sum_stat;
 		struct perf_stat_ipc *cur_stat;
 		s32 type;
 
@@ -854,13 +878,13 @@ static void print_stats(s32 num_cores, s32 num_tc)
 		/* stat ring lookup */
 		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, IPC_STAT);
 		if (ret < 0)
-			return -1;
+			return;
 
 		/* gather dev stats */
 		for (i = 0; i < num_cores; i++) {
 			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 			if (ret < 0)
-				return -1;
+				return;
 
 			cur_stat = (struct perf_stat_ipc *)&temp_stat;
 			for (type = APP_REGISTER_REQ; type < HEALTH_CHECK_CPL; type++) {
@@ -900,22 +924,21 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	/* Rusage Stat */
 	{
 		union perf_stat _sum_stat;
-		struct perf_stat_rusage *sum_stat = &_sum_stat;
+		struct perf_stat_rusage *sum_stat = (struct perf_stat_rusage *)&_sum_stat;
 		struct perf_stat_rusage *cur_stat;
-		s32 type;
 
 		memset(sum_stat, 0x00, sizeof(struct perf_stat_rusage));
 
 		/* stat ring lookup */
 		ret = perf_stat_ring_lookup(&stat_rx_ring, &stat_message_pool, RUSAGE_STAT);
 		if (ret < 0)
-			return -1;
+			return;
 
 		/* gather rusage stats */
 		for (i = 0; i < num_cores; i++) {
 			ret = nvfuse_stat_ring_get(stat_rx_ring, stat_message_pool, (union perf_stat *)&temp_stat);
 			if (ret < 0)
-				return -1;
+				return;
 
 			cur_stat = (struct perf_stat_rusage *)&temp_stat;
 
@@ -927,7 +950,7 @@ static void print_stats(s32 num_cores, s32 num_tc)
 			//printf(" tag = %x\n", cur_stat->tag);
 		}
 
-		sprintf(name, "Avg", i);
+		sprintf(name, "Avg");
 		print_rusage(&sum_stat->result, name, num_cores, group_exec_time);
 	}
 }

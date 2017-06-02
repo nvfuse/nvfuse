@@ -57,6 +57,10 @@ enum primary_status {
 
 s32 status = PROC_STOP;
 
+int primary_poll_core(struct nvfuse_handle *nvh, union nvfuse_ipc_msg *ipc_msg);
+int primary_poll(struct nvfuse_handle *nvh);
+void sig_handler(int signum);
+
 int primary_poll_core(struct nvfuse_handle *nvh, union nvfuse_ipc_msg *ipc_msg)
 {
 	struct nvfuse_superblock *sb = &nvh->nvh_sb;
@@ -133,11 +137,11 @@ int primary_poll_core(struct nvfuse_handle *nvh, union nvfuse_ipc_msg *ipc_msg)
 		nvfuse_make_unkown_cpl(&ipc_msg->unknown_cpl, ret);
 	}
 
+	return 0;
 }
 
 int primary_poll(struct nvfuse_handle *nvh)
 {
-	struct nvfuse_superblock *sb = &nvh->nvh_sb;
 	struct rte_ring *send_ring[SPDK_NUM_CORES], *recv_ring;
 	struct rte_mempool *mempool;
 	union nvfuse_ipc_msg *ipc_msg;
@@ -155,7 +159,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 	u64 processing_start = 0;
 
 	printf(" Process performs as primary process.\n");
-	printf(" sizeof(ipc_msg) = %d bytes\n", sizeof(union nvfuse_ipc_msg));
+	printf(" sizeof(ipc_msg) = %ld bytes\n", sizeof(union nvfuse_ipc_msg));
 
 	ret = nvfuse_control_plane_init(nvh);
 	if (ret < 0) {
@@ -175,7 +179,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 	recv_ring = nvfuse_ipc_get_recvq(&nvh->nvh_ipc_ctx, 0);
 
 	/* initialization of memory pool */
-	mempool = nvfuse_ipc_mempool(nvfuse_ipc_mempool);
+	mempool = nvfuse_ipc_mempool(&nvh->nvh_ipc_ctx);
 
 	/* set as PROC_RUNNING */
 	status = PROC_RUNNING;
@@ -194,7 +198,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 		}
 
 		ring_rx_start = spdk_get_ticks();
-		if (rte_ring_dequeue(recv_ring, &ipc_msg) < 0) {
+		if (rte_ring_dequeue(recv_ring, (void **)&ipc_msg) < 0) {
 			ring_rx_ticks += (spdk_get_ticks() - ring_rx_start);
 
 			ring_wait_start = spdk_get_ticks();
@@ -238,7 +242,7 @@ int primary_poll(struct nvfuse_handle *nvh)
 		processing_ticks += (spdk_get_ticks() - processing_start);
 
 		ring_tx_start = spdk_get_ticks();
-		if (rte_ring_enqueue(send_ring[ipc_msg->chan_id], ipc_msg) < 0) {
+		if (rte_ring_enqueue(send_ring[ipc_msg->chan_id], (void **)ipc_msg) < 0) {
 			printf("Failed to send message - message discarded\n");
 			rte_mempool_put(mempool, ipc_msg);
 		}
@@ -254,6 +258,8 @@ int primary_poll(struct nvfuse_handle *nvh)
 	printf(" > processing time %.6f sec\n", (double)processing_ticks / spdk_get_ticks_hz());
 	printf(" ----------------------------------------\n");
 	nvfuse_control_plane_exit(nvh);
+
+	return 0;
 }
 
 void sig_handler(int signum)

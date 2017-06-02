@@ -22,16 +22,6 @@
 #ifndef _NVFUSE_API_H
 #define _NVFUSE_API_H
 
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-struct dirent {
-	int d_ino;
-	char d_name[128];
-	int d_type;
-};
-#define DT_DIR 1
-#define DT_REG 2
-#endif
-
 //#define VERIFY_BEFORE_RM_FILE
 
 s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count,
@@ -143,9 +133,18 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 			 nvfuse_off_t roffset, s32 sync_read);
 s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filename,
 			struct nvfuse_dir_entry *direntry);
-s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, s32 *num_alloc);
-void nvfuse_core_usage(char *cmd);
+s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, u32 *num_alloc);
 s32 nvfuse_make_first_directory(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
 				struct nvfuse_inode *inode);
+
+void nvfuse_core_usage(char *cmd);
+void nvfuse_core_usage_example(char *cmd);
+s8 *nvfuse_get_core_options(void);
+s32 nvfuse_is_core_option(s8 option);
+s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params);
+
+s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx,
+						  s32 cpu_core_mask, s32 qdepth);
+void nvfuse_deinit_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx);
 
 #endif

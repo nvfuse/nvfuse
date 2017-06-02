@@ -212,12 +212,15 @@ static struct io_job *libaio_getnextcjob(struct nvfuse_io_manager *io_manager)
 	io_manager->cjob[io_manager->cjob_tail] = NULL;
 
 	io_manager->cjob_tail = (io_manager->cjob_tail + 1) % io_manager->iodepth;
+	return cur_job;
 }
 
+#if 0
 static void libaio_resetnextsjob(struct nvfuse_io_manager *io_manager)
 {
 
 }
+#endif
 
 static void libaio_resetnextcjob(struct nvfuse_io_manager *io_manager)
 {
@@ -283,11 +286,8 @@ void nvfuse_init_blkdevio(struct nvfuse_io_manager *io_manager, char *name, char
 
 static int blkdev_open(struct nvfuse_io_manager *io_manager, int flags)
 {
-	int	retval = 0, try_num = 0;
+	int	retval = 0;
 	int	open_flags = O_RDWR;
-
-RETRY:
-	;
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	open_flags |= O_LARGEFILE;
@@ -348,9 +348,6 @@ static int blkdev_read_blk(struct nvfuse_io_manager *io_manager, long block, int
 	size =  count * CLUSTER_SIZE;
 	location = ((s64) block * (s64)CLUSTER_SIZE);
 
-RETRY:
-	;
-
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	rbytes = pread64(io_manager->dev, buf, size, location);
 #endif
@@ -372,9 +369,6 @@ static int blkdev_write_blk(struct nvfuse_io_manager *io_manager, long block, in
 
 	size = count * CLUSTER_SIZE;
 	location = ((s64) block * (s64)CLUSTER_SIZE);
-
-RETRY:
-	;
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 	wbytes = pwrite64(io_manager->dev, buf, size, location);

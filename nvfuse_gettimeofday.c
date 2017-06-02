@@ -15,14 +15,10 @@
 
 #include <time.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/time.h>
 #include "nvfuse_config.h"
-
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-#	include <windows.h>
-#elif NVFUSE_OS == NVFUSE_OS_LINUX
-#	include <unistd.h>
-#	include <sys/time.h>
-#endif
+#include "nvfuse_gettimeofday.h"
 
 int timeval_subtract(struct timeval *result, struct timeval *x, struct timeval *y)
 {

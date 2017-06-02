@@ -28,6 +28,7 @@
 #include "nvfuse_aio.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
+#include "nvfuse_misc.h"
 #include "time.h"
 
 
@@ -39,8 +40,6 @@
 #include <windows.h>
 #endif
 
-s64 nvfuse_rand();
-
 //extern struct nvfuse_handle *g_nvh;
 
 s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
@@ -49,7 +48,6 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 	u64 size;
 	s32 i = CLUSTER_SIZE, fd, write_block_size = BLOCK_IO_SIZE;
 	s32 ret = 0;
-	s32 num_block;
 	s8 file_source[BLOCK_IO_SIZE];
 
 	if (strlen(str) < 1 || strlen(str) >= FNAME_SIZE)
@@ -71,7 +69,7 @@ s32 nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize)
 
 		if (size  < 1) size = CLUSTER_SIZE;
 
-		for (size; size >= write_block_size; size -= write_block_size) {
+		for (; size >= write_block_size; size -= write_block_size) {
 			ret = nvfuse_writefile(nvh, fd, file_source, write_block_size, 0);
 
 			if (ret == -1)
@@ -173,7 +171,6 @@ s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io
 {
 	struct nvfuse_aio_queue aioq;
 	s32 ret;
-	s32 i;
 
 	s32 last_progress = 0;
 	s32 curr_progress = 0;
@@ -326,6 +323,7 @@ static int print_timeval(struct timeval *tv, struct timeval *tv_end, int op_inde
 	printf("    %s end   : %lf  micro seconds \n", op_list[op_index], tv_e);
 #endif
 	printf("    %s : %lf              seconds \n", op_list[op_index], tv_e - tv_s);
+	return 0;
 }
 
 s32 nvfuse_metadata_test(struct nvfuse_handle *nvh, s8 *str, s32 meta_check, s32 count)
@@ -333,11 +331,10 @@ s32 nvfuse_metadata_test(struct nvfuse_handle *nvh, s8 *str, s32 meta_check, s32
 	struct timeval tv, tv_end;
 	struct dirent cur_dirent;
 
-	s32 flags_create, flags_rdwr, state, fid, par_ino, i;
+	s32 flags_create, flags_rdwr, state, fid, i;
 
 	char *path_dir = "test_direcpty";
 	char *path_file = "test_file.txt";
-	char *path_cur = ".";
 	off_t offset = 0;
 
 	char buf[20] = {0,};
@@ -645,10 +642,6 @@ s32 nvfuse_metadata_test(struct nvfuse_handle *nvh, s8 *str, s32 meta_check, s32
 
 	nvfuse_sync(nvh);
 	return NVFUSE_SUCCESS;
-
-CLOSE_META:
-
-	return NVFUSE_ERROR;
 }
 
 s32 nvfuse_aio_test(struct nvfuse_handle *nvh, s32 direct)
@@ -786,7 +779,7 @@ s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str)
 
 void nvfuse_test(struct nvfuse_handle *nvh)
 {
-	s32 i, k, j;
+	s32 i, k;
 	s8 str[128];
 	s32 nr = 100000;
 	s32 iter = 2;
@@ -914,7 +907,7 @@ void nvfuse_srand(long seed)
 #endif
 }
 
-s64 nvfuse_rand()
+s64 nvfuse_rand(void)
 {
 	s64 val;
 #if (NVFUSE_OS==NVFUSE_OS_LINUX)

@@ -141,7 +141,7 @@ void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
 }
 
 s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx,
-			  s32 cpu_core_mask, s32 qdepth)
+						  s32 cpu_core_mask, s32 qdepth)
 {
 	s32 ret;
 
@@ -162,6 +162,7 @@ s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ip
 		printf(" Error: ipc_init()\n");
 		return -1;
 	}
+	return 0;
 }
 
 s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
@@ -827,7 +828,7 @@ RES:
 s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count,
 				  nvfuse_off_t roffset, s32 sync_read)
 {
-	struct nvfuse_inode_ctx *ictx;
+	struct nvfuse_inode_ctx *ictx = NULL;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
 	s32 rcount = 0;
@@ -864,8 +865,8 @@ s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buf
 		of->size = of->rwoffset;
 
 RET:
-	;
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	if (ictx)
+		nvfuse_release_inode(sb, ictx, CLEAN);
 
 	return rcount;
 }
@@ -1127,12 +1128,6 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 	return 0;
 }
 
-/* ported from fuse_ext2 project */
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-#define major(dev) ((int)(((unsigned int) (dev) >> 8) & 0xff))
-#define minor(dev) ((int)((dev) & 0xff))
-#define makedev(x, y) (x | y)
-#endif
 static inline u16 old_encode_dev(dev_t dev)
 {
 	return (major(dev) << 8) | minor(dev);
@@ -1401,7 +1396,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 {
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode = NULL;
-	struct nvfuse_dir_entry *dir;
+	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
 
 	s64 read_bytes = 0;
@@ -1529,7 +1524,7 @@ s32 nvfuse_unlink(struct nvfuse_handle *nvh, const char *path)
 
 s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 {
-	struct nvfuse_dir_entry *dir;
+	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode = NULL, *inode = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
@@ -2170,7 +2165,7 @@ s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, 
 	if (!nvfuse_lookup(sb, NULL, NULL, name, parent))
 		return error_msg(" exist file or directory\n");
 
-	res = nvfuse_createfile(sb, parent, (char *)name, &ino, 0777 | S_IFLNK, 0);
+	res = nvfuse_createfile(sb, parent, (char *)name, (inode_t *)&ino, 0777 | S_IFLNK, 0);
 	if (res != NVFUSE_SUCCESS) {
 		printf(" create file error \n");
 		return res;
@@ -2249,7 +2244,7 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 	struct nvfuse_inode *inode;
 	struct nvfuse_superblock *sb;
 	char filename[FNAME_SIZE];
-	int res;
+	s32 res = 0;
 
 	memset(stbuf, 0, sizeof(struct stat));
 
@@ -2631,7 +2626,7 @@ s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 	struct nvfuse_buffer_head *bh;
 	struct nvfuse_buffer_cache *bc;
 	s32 flushing_count = 0;
-	s32 res;
+	s32 res = 0;
 
 	/* ictx doesn't keep dirty data */
 	if (!ictx->ictx_data_dirty_count &&
@@ -2861,11 +2856,10 @@ RET:
 	return res;
 }
 
-s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, s32 *num_alloc)
+s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_blocks, u32 *num_alloc)
 {
 	struct nvfuse_file_table *of;
 	struct nvfuse_inode_ctx *ictx;
-	struct nvfuse_inode *inode;
 	s32 blk;
 	s32 ret;
 
@@ -2877,9 +2871,7 @@ s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_bloc
 		return -1;
 	}
 
-	inode = ictx->ictx_inode;
-
-	ret = nvfuse_get_block(sb, ictx, lblk, max_blocks, num_alloc, &blk, 0);
+	ret = nvfuse_get_block(sb, ictx, lblk, max_blocks, num_alloc, (u32 *)&blk, 0);
 	if (ret < 0) {
 		printf(" Error: nvfuse_get_block\n");
 		return -1;

@@ -33,12 +33,12 @@
 #define NVFUSE_PROCESS_STANDALONE	0
 #define NVFUSE_PROCESS_DATAPLANE	1
 
-static inline int nvfuse_process_model_is_standalone()
+inline int nvfuse_process_model_is_standalone(void)
 {
 	return NVFUSE_PROCESS_MODEL == NVFUSE_PROCESS_STANDALONE;
 }
 
-static inline int nvfuse_process_model_is_dataplane()
+inline int nvfuse_process_model_is_dataplane(void)
 {
 	return NVFUSE_PROCESS_MODEL == NVFUSE_PROCESS_DATAPLANE;
 }

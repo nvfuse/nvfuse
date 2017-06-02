@@ -364,10 +364,9 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	return 0;
 }
 
-void 	bp_init_root(master_node_t *master)
+void bp_init_root(master_node_t *master)
 {
 	struct nvfuse_inode_ctx *ictx;
-	struct nvfuse_inode *inode;
 	index_node_t *root;
 	struct nvfuse_buffer_head *bh;
 	offset_t new_bno;
@@ -375,7 +374,6 @@ void 	bp_init_root(master_node_t *master)
 	/* allocation of root node block */
 	//ictx = nvfuse_read_inode(master->m_sb, NULL, master->m_ino);
 	ictx = master->m_ictx;
-	inode = ictx->ictx_inode;
 
 	new_bno = bp_alloc_bitmap(master, ictx);
 	bh = nvfuse_get_bh(master->m_sb, ictx, master->m_ino, new_bno, READ, NVFUSE_TYPE_META);
@@ -400,6 +398,7 @@ int compare_str(void *src1, void *src2)
 	return B_KEY_CMP((bkey_t *)src1, (bkey_t *)src2);
 }
 
+#if 0
 static int compmi(void *k1, void *k2, void *start, size_t num, int mid)
 {
 	bkey_t  *key1 = k1;
@@ -415,6 +414,7 @@ static int comp_item(void *k1, void *k2)
 
 	return B_ITEM_CMP(key1, key2->i_item);
 }
+#endif
 
 int bp_bin_search(bkey_t *key, key_pair_t *pair, int max,
 		  int (*compare)(void *, void *, void *start, int num, int mid))
@@ -450,15 +450,14 @@ int bp_bin_search(bkey_t *key, key_pair_t *pair, int max,
 	return -1;
 }
 
-index_node_t *bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *key,
-			       bitem_t *value)
+index_node_t *bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t *value)
 {
 	index_node_t *parent_ip;
 	index_node_t *dp_left, *dp_right;
 	index_node_t *node = NULL;
 	key_pair_t *pair;
 	key_pair_t *src, *dst;
-	int i, offset = 0;
+	int offset = 0;
 	int alloc_num;
 
 	dp_left = B_dALLOC(master, 0, ALLOC_CREATE);
@@ -613,7 +612,9 @@ int bp_split_data_node(master_node_t *master,
 	key_pair_t *pair_array;
 	int i, offset = 0, count = 0;
 	int alloc_num = dp->i_num + 1;
+#if 0
 	int seq_detection = 1;
+#endif
 
 	pair_array = bp_alloc_pair(master, alloc_num);
 	if (pair_array == NULL)
@@ -696,8 +697,8 @@ int bp_split_data_node(master_node_t *master,
 		}
 	}
 
-	bp_merge_key2(pair, B_KEY_GET(dp_left, dp_left->i_num - 1), &dp_left->i_offset, ++count);
-	bp_merge_key2(pair, B_KEY_GET(dp_right, dp_right->i_num - 1), &dp_right->i_offset, ++count);
+	bp_merge_key2(pair, B_KEY_GET(dp_left, dp_left->i_num - 1), (u32 *)&(dp_left->i_offset), ++count);
+	bp_merge_key2(pair, B_KEY_GET(dp_right, dp_right->i_num - 1), (u32 *)&(dp_right->i_offset), ++count);
 
 	B_WRITE(master, dp_left, dp_left->i_offset);
 	B_WRITE(master, dp_right, dp_right->i_offset);
@@ -763,9 +764,9 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 			B_PAIR_INIT(median, 0);
 
 			if (B_KEY_CMP(&key, B_KEY_GET(new_child, new_child->i_num)) > 0) {
-				bp_merge_key2(pair_arr, &key, &new_child->i_offset, ip->i_num + 1);
+				bp_merge_key2(pair_arr, &key, (u32 *)(&new_child->i_offset), ip->i_num + 1);
 			} else {
-				bp_merge_key2(pair_arr, B_KEY_GET(new_child, new_child->i_num), &new_child->i_offset,
+				bp_merge_key2(pair_arr, B_KEY_GET(new_child, new_child->i_num), (u32 *)(&new_child->i_offset),
 					      ip->i_num + 1);
 			}
 
@@ -854,8 +855,6 @@ void bp_insert_value_tree(index_node_t *ip,
 int bp_find_key(master_node_t *master, bkey_t *key, bitem_t *value)
 {
 	int index;
-	int res;
-	bitem_t temp;
 
 	index = B_SEARCH(master, key, NULL);
 	if (index >= 0) {
@@ -874,7 +873,6 @@ int bp_find_key(master_node_t *master, bkey_t *key, bitem_t *value)
 int bp_update_key_tree(master_node_t *master, bkey_t *key, bitem_t *value)
 {
 	int index;
-	int res;
 
 	index = B_SEARCH(master, key, NULL);
 	if (index < 0) {
@@ -942,10 +940,9 @@ int bp_insert_key_tree(master_node_t *master,
 		       bitem_t *cur_value,
 		       int update)
 {
-	int i, j, index, res = 0;
+	int index, res = 0;
 	index_node_t *root;
 	index_node_t *dp;
-	key_pair_t *pair;
 
 	/* root node allocation */
 	root = B_dALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
@@ -1004,15 +1001,14 @@ RES:
 }
 
 
-int bp_redist_data_child(master_node_t *master, index_node_t *ip, index_node_t *child,
-			 int data_node)
+int bp_redist_data_child(master_node_t *master, index_node_t *ip, index_node_t *child, int data_node)
 {
 	index_node_t *child2;
 	index_node_t *node, *de_alloc = NULL;
 	index_node_t *prev = NULL, *next = NULL;
 	key_pair_t *pair;
 	int count = 0, alloc_num = 0;
-	int i, key_count = 0;
+	int i;
 	int target1 = 0, target2 = 0;
 	int max_count;
 
@@ -1274,7 +1270,6 @@ static int bp_compare_index_node(void *k1, void *k2, void *start, int num, int m
 	bkey_t  *key1 = (bkey_t *) k1;
 	bkey_t *key2 = (bkey_t *) k2;
 	key_pair_t	*base = (key_pair_t *) start;
-	key_pair_t *prev_key;
 	int ret1, ret2;
 	int last;
 	int prev;
@@ -1283,7 +1278,6 @@ static int bp_compare_index_node(void *k1, void *k2, void *start, int num, int m
 	prev = last - 1;
 
 	if (prev < 0) {
-		prev_key = NULL;
 		ret1 = 1;
 	} else {
 		ret1 = B_KEY_CMP(key1, &base->i_key[prev]);
@@ -1301,9 +1295,9 @@ static int bp_compare_index_node(void *k1, void *k2, void *start, int num, int m
 
 index_node_t *bp_next_node(master_node_t *master, index_node_t *ip, bkey_t *key)
 {
-	key_pair_t *pair = NULL;
 	int offset = 0;
 	int key_num = 0;
+
 	if (B_KEY_CMP(key, B_KEY_GET(ip, ip->i_num - 1)) > 0) {
 		offset = *B_ITEM_GET(ip, ip->i_num);
 	} else {
@@ -1335,7 +1329,6 @@ index_node_t *traverse_empty(master_node_t *master, index_node_t *ip, bkey_t *ke
 int rsearch_data_node(master_node_t *master, bkey_t *s_key, bkey_t *e_key)
 {
 	index_node_t *ip;
-	bitem_t item = 0;
 	int index;
 
 	ip = B_iALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
@@ -1415,9 +1408,8 @@ int get_pair_tree(index_node_t *dp, bkey_t *key)
 int bp_remove_key(master_node_t *master, bkey_t *key)
 {
 	index_node_t *dp;
-	key_pair_t *pair, *base;
-	int  i;
 	int res = 0;
+	int  i;
 
 	i = B_SEARCH(master, key, &dp);
 	if (i < 0) {
@@ -1462,7 +1454,7 @@ int bp_remove_key(master_node_t *master, bkey_t *key)
 
 RES:
 	;
-	return 1;
+	return res;
 }
 
 
@@ -1470,6 +1462,7 @@ void bp_copy_node_to_raw(index_node_t *node, char *raw)
 {
 	if (node->i_flag != 0 && node->i_flag != 1) {
 		printf(" error copy node to raw \n");
+		assert(0);
 	}
 
 	rte_memcpy(raw, node, BP_NODE_HEAD_SIZE);
@@ -1590,7 +1583,6 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 
 		/* alloc sub master node */
 		if (new_bno % BP_NODES_PER_MASTER == 0) {
-			master_node_t *sub_master;
 			s8 *bitmap;
 
 			/* alloc data block */
@@ -1603,8 +1595,6 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 			//bp_inc_free_bitmap(master, new_bno);
 
 			bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);
-			sub_master = (master_node_t *)bh->bh_buf;
-			/* sub_master->free_count--;*/
 
 			bitmap = bh->bh_buf + BP_NODE_HEAD_SIZE;
 

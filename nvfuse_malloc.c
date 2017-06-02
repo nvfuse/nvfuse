@@ -18,6 +18,7 @@
 #include <string.h>
 #include <assert.h>
 #include "nvfuse_types.h"
+#include "nvfuse_malloc.h"
 
 static u64 memalloc_allocated_size = 0;
 #if NVFUSE_OS == NVFUSE_OS_LINUX

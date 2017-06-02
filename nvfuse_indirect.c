@@ -57,6 +57,7 @@
 #include "nvfuse_dirhash.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_ipc_ring.h"
+#include "nvfuse_indirect.h"
 
 typedef struct {
 	u32 *p;
@@ -105,7 +106,6 @@ int nvfuse_block_to_path(s32 block, u32 offsets[4], u32 *boundary)
 	int ptrs = PTRS_PER_BLOCK;
 	int ptrs_bits = PTRS_PER_BLOCK_BITS;
 	const long direct_blocks = DIRECT_BLOCKS,
-		   indirect_blocks = ptrs,
 		   double_blocks = (1 << (ptrs_bits * 2));
 	int n = 0;
 	int final = 0;
@@ -216,7 +216,6 @@ no_block:
 u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,
 			    u32 *alloc_blks, u32 num_blocks)
 {
-	u32 new_block = 0;
 	s32 ret = 0;
 	u32 bg_id;
 	u32 next_id;
@@ -227,7 +226,6 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 
 	if (nvfuse_process_model_is_dataplane() && !nvfuse_check_free_block(sb, num_blocks)) {
 		s32 container_id;
-		s32 nr_buffers;
 
 		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
 		if (container_id > 0) {
@@ -523,9 +521,6 @@ failed:
 static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
 				 Indirect *where, u32 *direct_map, int num, int blks)
 {
-	int i;
-	u32 current_block;
-
 	/* XXX LOCKING probably should have i_meta_lock ?*/
 	/* That's it */
 
@@ -536,7 +531,7 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 	* direct blocks blocks
 	*/
 	if (num == 0 && blks > 1) {
-		//current_block = where->key + 1;
+		u32 i;
 		for (i = 1; i < blks; i++) {
 			*(where->p + i) = *direct_map;
 			direct_map++;
@@ -577,12 +572,11 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 lblock,
 		     u32 maxblocks, u32 *num_alloc_blocks, u32 *pblock, u32 create)
 {
-	u32 offsets[INDIRECT_BLOCKS_LEVEL];
+	s32 offsets[INDIRECT_BLOCKS_LEVEL];
 	Indirect chain[INDIRECT_BLOCKS_LEVEL];
 	Indirect *partial;
 	int err = 0;
 	u32 depth;
-	u32 new_block;
 	u32 indirect_blks;
 	u32 first_block = 0;
 	int count = 0;
@@ -594,10 +588,10 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 	if (num_alloc_blocks)
 		*num_alloc_blocks = 0;
 
-	depth = nvfuse_block_to_path(lblock, offsets, &blocks_to_boundary);
+	depth = nvfuse_block_to_path(lblock, (u32 *)offsets, (u32 *)&blocks_to_boundary);
 	if (depth == 0)
 		return -1;
-	partial = nvfuse_get_branch(sb, ictx, ictx->ictx_inode, depth, offsets, chain, &err);
+	partial = nvfuse_get_branch(sb, ictx, ictx->ictx_inode, depth, (s32 *)offsets, chain, &err);
 	if (!partial) {
 		first_block = chain[depth - 1].key;
 		//clear_buffer_new(bh_result); /* What's this do? */
@@ -672,9 +666,6 @@ cleanup:
 		return err;
 
 	return 0;
-
-failed:
-	return -1;
 }
 
 /*
@@ -883,7 +874,7 @@ static void __nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse
 	blocksize = CLUSTER_SIZE;
 	iblock = NVFUSE_SIZE_TO_BLK(offset + blocksize - 1);
 
-	n = nvfuse_block_to_path(iblock, offsets, NULL);
+	n = nvfuse_block_to_path(iblock, (u32 *)offsets, NULL);
 	if (n == 0)
 		return;
 

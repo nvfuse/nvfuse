@@ -59,7 +59,6 @@ void nvfuse_init_fileio(struct nvfuse_io_manager *io_manager, char *name, char *
 
 static int file_open(struct nvfuse_io_manager *io_manager, int flags)
 {
-	struct stat	st;
 	FILE *fp;
 	char buf[CLUSTER_SIZE];
 	int	retval = 0;

@@ -77,9 +77,11 @@ s32 nvfuse_aio_queue_init(struct nvfuse_aio_queue *aioq, s32 max_depth)
 void nvfuse_aio_queue_deinit(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq)
 {
 #ifdef SPDK_ENABLED
+#if 0
 	double io_per_second, mb_per_second;
 	double average_latency, min_latency, max_latency;
 	u64 tsc_rate = spdk_get_ticks_hz();
+#endif
 	struct nvfuse_ipc_context *ipc_ctx = &nvh->nvh_ipc_ctx;
 	struct rusage rusage_end;
 
@@ -253,17 +255,15 @@ void nvfuse_aio_gen_dev_cpls_buffered(void *arg)
 
 		if (actx->actx_opcode == WRITE) {
 			bc->bc_ref--;
-			nvfuse_remove_bh_in_bc(actx->actx_sb, bc);
+			nvfuse_remove_bhs_in_bc(actx->actx_sb, bc);
 			assert(bc->bc_dirty);
 			bc->bc_dirty = 0;
 		} else { //if (actx->actx_opcode == READ)
 			bc->bc_load = 1;
 			nvfuse_release_bh(actx->actx_sb, bh, 0, CLEAN);
 		}
-		if (bc->bc_ref) {
-			printf("debug\n");
-		}
-		nvfuse_move_buffer_type(actx->actx_sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
+		assert(bc->bc_ref);
+		nvfuse_move_buffer_list(actx->actx_sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
 	}
 
 	/* move actx to comletion queue*/
@@ -374,7 +374,7 @@ s32 nvfuse_aio_gen_dev_reqs_directio(struct nvfuse_superblock *sb, struct nvfuse
 		s32 pblk;
 		s32 lblk;
 		s32 max_blocks;
-		s32 num_alloc;
+		u32 num_alloc;
 
 		lblk = (s64)start / CLUSTER_SIZE;
 #ifdef	SPDK_ENABLED

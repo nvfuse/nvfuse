@@ -6,3 +6,12 @@ tags
 *.a
 cscope.out
 cscope.files
+
+control_plane_proc
+create_1m_files
+fsync_test
+helloworld
+fuse_example
+nvfuse_cli
+perf
+regression_test

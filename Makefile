@@ -31,6 +31,7 @@ LDFLAGS += -lm -lpthread -laio -lrt
 CFLAGS = $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 #CFLAGS = -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 CFLAGS += -march=native -m64
+CFLAGS += $(WARNING_OPTION)
 
 
 OBJS=$(SRCS:.c=.o)
@@ -46,16 +47,13 @@ CC=gcc
 	@$(RM) $@
 	$(CC) $(OPTIMIZATION) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
-all:  $(LIB_NVFUSE) helloworld nvfuse_cli libfuse regression_test perf control_plane_proc fsync_test create_1m_files
+all:  $(LIB_NVFUSE) helloworld libfuse regression_test perf control_plane_proc fsync_test create_1m_files
 
 $(LIB_NVFUSE)	:	$(OBJS)
 	$(AR) rcv $@ $(OBJS)
 
 helloworld:
 	make -C examples/helloworld
-
-nvfuse_cli:
-	make -C examples/nvfuse_cli
 
 libfuse:
 	make -C examples/libfuse
@@ -78,7 +76,6 @@ control_plane_proc:
 clean:
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
 	make -C examples/helloworld/ clean
-	make -C examples/nvfuse_cli/ clean
 	make -C examples/libfuse/ clean
 	make -C examples/regression_test/ clean
 	make -C examples/create_1m_files/ clean

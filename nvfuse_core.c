@@ -54,39 +54,6 @@
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_dirhash.h"
 
-struct nvfuse_superblock *nvfuse_read_super(struct nvfuse_handle *nvh)
-{
-	return &nvh->nvh_sb;
-}
-
-void nvfuse_release_super(struct nvfuse_superblock *sb)
-{
-	return;
-}
-
-s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir)
-{
-	if (dir->d_flag == DIR_EMPTY || dir->d_flag == DIR_DELETED)
-		return 1;
-
-	return 0;
-}
-
-void nvfuse_print_inode(struct nvfuse_inode *inode, s8 *str)
-{
-	if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
-		printf("%-13s/ [%ld] ino : %3d\n", str, (long)inode->i_size, inode->i_ino);
-	} else if (inode->i_type == NVFUSE_TYPE_FILE) {
-		printf("%-14s [%ld] ino : %3d\n", str, (long)inode->i_size, inode->i_ino);
-	}
-}
-
-struct nvfuse_bg_descriptor *nvfuse_get_bd(struct nvfuse_superblock *sb, u32 bg_id)
-{
-	assert(bg_id == sb->sb_bd[bg_id].bd_id);
-	return sb->sb_bd + bg_id;
-}
-
 struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb,
 		struct nvfuse_inode_ctx *ictx, inode_t ino)
 {
@@ -136,15 +103,11 @@ void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx)
 
 void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 dirty)
 {
-	struct nvfuse_inode *inode;
-	struct nvfuse_inode *ip;
 	struct nvfuse_buffer_head *bh;
-	u32 offset, block;
 
 	if (ictx == NULL)
 		return;
 
-	inode = ictx->ictx_inode;
 	bh = ictx->ictx_bh;
 	if (bh) {
 		nvfuse_set_bh_status(bh, BUFFER_STATUS_META);
@@ -152,9 +115,6 @@ void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx 
 	}
 
 	ictx->ictx_bh = NULL;
-
-	//assert(ictx->ictx_ref == 1);
-
 	nvfuse_release_ictx(sb, ictx, dirty);
 }
 
@@ -177,183 +137,12 @@ s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_ino
 	return 0;
 }
 
-void nvfuse_update_owner_in_bd_info(struct nvfuse_superblock *sb, s32 bg_id)
-{
-	struct nvfuse_bg_descriptor *bd = NULL;
-	struct nvfuse_buffer_head *bd_bh;
-
-	bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
-	bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
-	bd->bd_owner = sb->asb.asb_core_id;
-
-	//printf(" Update bg id = %d, owner = %d\n", bg_id, bd->bd_owner);
-
-	nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
-}
-
-u32 nvfuse_scan_free_ibitmap(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
-			     u32 bg_id, u32 hint_free_inode)
-{
-	struct nvfuse_bg_descriptor *bd = NULL;
-	struct nvfuse_buffer_head *bd_bh;
-	struct nvfuse_buffer_head *bh;
-	void *buf;
-	u32 count = 0;
-	u32 free_inode = hint_free_inode;
-	u32 found = 0;
-
-	bd_bh = nvfuse_get_bh(sb, ictx, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
-	bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
-	assert(bd->bd_id == bg_id);
-
-	bh = nvfuse_get_bh(sb, ictx, IBITMAP_INO, bg_id, READ, NVFUSE_TYPE_META);
-	buf = bh->bh_buf;
-
-	while (bd->bd_free_inodes && count < sb->sb_no_of_inodes_per_bg) {
-		if (!ext2fs_test_bit(free_inode, buf)) {
-			//printf(" bg = %d free block %d found \n", bg_id, free_inode);
-			found = 1;
-			break;
-		}
-		free_inode = (free_inode + 1) % sb->sb_no_of_inodes_per_bg;
-		count++;
-	}
-
-	if (found && free_inode < sb->sb_no_of_inodes_per_bg) {
-		ext2fs_set_bit(free_inode, buf);
-		free_inode += (bg_id * bd->bd_max_inodes);
-	} else {
-		free_inode = 0;
-	}
-
-	nvfuse_release_bh(sb, bd_bh, 0, CLEAN);
-	if (found)
-		nvfuse_release_bh(sb, bh, 0, DIRTY);
-	else
-		nvfuse_release_bh(sb, bh, 0, CLEAN);
-
-	return free_inode;
-}
-
-u32 nvfuse_get_next_bg_id(struct nvfuse_superblock *sb, s32 is_inode)
-{
-	u32 next_bg_id;
-
-	if (!spdk_process_is_primary()) {
-		struct list_head *first_node;
-		struct bg_node *bg_node;
-
-		if (is_inode) {
-			first_node = sb->sb_bg_search_ptr_for_inode;
-		} else {
-			first_node = sb->sb_bg_search_ptr_for_data;
-		}
-
-		if (list_is_last(first_node, &sb->sb_bg_list)) {
-			printf(" list_is_last ..!! %s\n", is_inode ? "inode" : "data");
-			first_node = &sb->sb_bg_list;
-		}
-
-		if (is_inode) {
-			sb->sb_bg_search_ptr_for_inode = first_node->next;
-			first_node = sb->sb_bg_search_ptr_for_inode;
-		} else {
-			sb->sb_bg_search_ptr_for_data = first_node->next;
-			first_node = sb->sb_bg_search_ptr_for_data;
-		}
-
-		bg_node = container_of(first_node, struct bg_node, list);
-
-		next_bg_id = bg_node->bg_id;
-		assert(next_bg_id != 0);
-	} else {
-		next_bg_id = 0; /* primary process only utilizes the first container. */
-	}
-
-	return next_bg_id;
-}
-
-void nvfuse_move_curr_bg_id(struct nvfuse_superblock *sb, s32 bg_id, s32 is_inode)
-{
-	u32 curr_bg_id;
-
-	if (!spdk_process_is_primary()) {
-		struct list_head *first_node;
-		struct bg_node *bg_node;
-
-		if (is_inode)
-			first_node = sb->sb_bg_search_ptr_for_inode;
-		else
-			first_node = sb->sb_bg_search_ptr_for_data;
-
-		assert(first_node != NULL);
-		assert(first_node != &sb->sb_bg_list);
-
-		do {
-			//if (is_inode == 0)
-			//	nvfuse_print_bg_list(sb);
-			bg_node = container_of(first_node, struct bg_node, list);
-			if (bg_node->bg_id == bg_id) {
-				if (is_inode)
-					sb->sb_bg_search_ptr_for_inode = first_node;
-				else
-					sb->sb_bg_search_ptr_for_data = first_node;
-
-				//printf(" set bg id = %d for %s\n", bg_id, is_inode ? "inode" : "data");
-
-				assert(bg_id != 0);
-				break;
-			}
-
-			/* bg 0 is reserved for control plane */
-			assert(bg_id != 0);
-
-			/* skip list head */
-			do {
-				first_node = first_node->next;
-			} while (first_node == &sb->sb_bg_list);
-
-		} while (1);
-	} else {
-		assert(0);
-	}
-}
-
-u32 nvfuse_get_curr_bg_id(struct nvfuse_superblock *sb, s32 is_inode)
-{
-	u32 curr_bg_id;
-
-	if (!spdk_process_is_primary()) {
-		struct list_head *first_node;
-		struct bg_node *bg_node;
-
-		if (is_inode) {
-			first_node = sb->sb_bg_search_ptr_for_inode;
-		} else {
-			first_node = sb->sb_bg_search_ptr_for_data;
-		}
-
-		assert(first_node != NULL);
-		assert(first_node != &sb->sb_bg_list);
-
-		bg_node = container_of(first_node, struct bg_node, list);
-		curr_bg_id = bg_node->bg_id;
-		assert(curr_bg_id != 0);
-	} else {
-		curr_bg_id = 0; /* primary process only utilizes the first container. */
-	}
-
-	return curr_bg_id;
-}
-
-u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
-			   u32 last_ino)
+u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 last_ino)
 {
 	u32 new_ino = 0;
 	u32 hint_ino;
 	u32 bg_id;
 	u32 last_id;
-	s32 ret = 0;
 	/* debug info */
 	s32 count = 0;
 	s32 start_bg = 0;
@@ -402,6 +191,154 @@ u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx
 	return new_ino;
 }
 
+void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size)
+{
+	struct nvfuse_inode *inode;
+	struct nvfuse_buffer_cache *bc;
+	lbno_t offset;
+	u32 num_block, trun_num_block;
+	s32 res;
+	u64 key;
+	s32 unused_count = 0;
+
+	inode = ictx->ictx_inode;
+
+	num_block = NVFUSE_SIZE_TO_BLK(inode->i_size);
+	trun_num_block = NVFUSE_SIZE_TO_BLK(size);
+	if (inode->i_size & (CLUSTER_SIZE - 1))
+		num_block++;
+
+	/* debug code
+	*if(trun_num_block)
+	*	printf(" trun num block = %d\n", trun_num_block);
+	*/
+
+	if (!num_block || num_block <= trun_num_block)
+		return;
+
+	/*
+	 * Too slow when large inode is deleted.
+	 * FIXME: buffers will be managed by RBtree or other structures.
+	 */
+
+	for (offset = num_block - 1; offset >= trun_num_block; offset--) {
+		nvfuse_make_pbno_key(inode->i_ino, offset, &key, NVFUSE_BP_TYPE_DATA);
+		bc = (struct nvfuse_buffer_cache *)nvfuse_hash_lookup(sb->sb_bm, key);
+		if (bc) {
+			nvfuse_remove_bhs_in_bc(sb, bc);
+
+			/* FIXME: reinitialization is necessary */
+			bc->bc_load = 0;
+			bc->bc_pno = 0;
+			bc->bc_dirty = 0;
+			bc->bc_ref = 0;
+
+			nvfuse_move_buffer_list(sb, bc, BUFFER_TYPE_UNUSED, INSERT_HEAD);
+			unused_count++;
+		}
+
+		if (offset == 0)
+			break;
+	}
+
+	if (!sb->sb_nvh->nvh_params.preallocation && nvfuse_process_model_is_dataplane()) {
+		while (unused_count--) {
+			if (sb->sb_bm->bm_list_count[BUFFER_TYPE_UNUSED] >= NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG) {
+				res = nvfuse_remove_buffer_cache(sb, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+				if (res == 0) {
+					nvfuse_send_dealloc_buffer_req(sb->sb_nvh, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
+				}
+			} else {
+				break;
+			}
+		}
+	}
+
+	/* truncate blocks */
+	nvfuse_truncate_blocks(sb, ictx, size);
+}
+
+inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
+{
+	struct nvfuse_buffer_head *bh;
+	struct nvfuse_inode *ip;
+
+	lbno_t search_block = 0, search_entry = 0;
+	inode_t alloc_ino = 0;
+	inode_t hint_ino = 0;
+	inode_t last_allocated_ino = 0;
+	s32 container_id;
+
+	if (nvfuse_process_model_is_dataplane() && !nvfuse_check_free_inode(sb)) {
+		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
+		if (container_id > 0) {
+			/* insert allocated container to process */
+			nvfuse_add_bg(sb, container_id);
+			assert(nvfuse_check_free_inode(sb) == 1);
+		} else {
+			assert(0);
+		}
+	}
+
+	last_allocated_ino = sb->sb_last_allocated_ino;
+	hint_ino = nvfuse_find_free_inode(sb, ictx, last_allocated_ino);
+	if (hint_ino) {
+		search_block = hint_ino / INODE_ENTRY_NUM;
+		search_entry = hint_ino % INODE_ENTRY_NUM;
+	} else {
+		printf(" no more inodes in the file system.");
+		return 0;
+	}
+
+
+	bh = nvfuse_get_bh(sb, ictx, ITABLE_INO, search_block, READ, NVFUSE_TYPE_META);
+	ip = (struct nvfuse_inode *)bh->bh_buf;
+#ifdef NVFUSE_USE_MKFS_INODE_ZEROING
+	for (j = 0; j < INODE_ENTRY_NUM; j++) {
+		if (ip[search_entry].i_ino == 0 &&
+		    (search_entry + search_block * INODE_ENTRY_NUM) >= NUM_RESV_INO) {
+			alloc_ino = search_entry + search_block * INODE_ENTRY_NUM;
+			goto RES;
+		}
+		search_entry = (search_entry + 1) % INODE_ENTRY_NUM;
+	}
+
+	/* FIXME: need to put error handling code  */
+	printf(" Warning: it runs out of free inodes = %d \n", sb->sb_free_inodes);
+	printf(".");
+	while (1);
+
+RES:
+	;
+
+#else
+	alloc_ino = search_entry + search_block * INODE_ENTRY_NUM;
+#endif
+
+	nvfuse_dec_free_inodes(sb, alloc_ino);
+
+	ip += search_entry;
+
+	/* initialization of inode entry */
+	memset(ip, 0x00, INODE_ENTRY_SIZE);
+
+	ip->i_ino = alloc_ino;
+	ip->i_deleted = 0;
+	ip->i_version++;
+
+	nvfuse_release_bh(sb, bh, 0, DIRTY);
+
+	/* keep hit information to rapidly find a free inode */
+	if (!spdk_process_is_primary() || nvfuse_process_model_is_standalone()) {
+		sb->sb_last_allocated_ino = alloc_ino + 1;
+	}
+
+	if (spdk_process_is_primary() && nvfuse_process_model_is_dataplane()) {
+		printf(" allocated ino = %d\n", alloc_ino);
+	}
+
+	return alloc_ino;
+}
 
 void nvfuse_release_ibitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 ino)
 {
@@ -514,6 +451,173 @@ void nvfuse_inc_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 	nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
 }
 
+void nvfuse_update_owner_in_bd_info(struct nvfuse_superblock *sb, s32 bg_id)
+{
+	struct nvfuse_bg_descriptor *bd = NULL;
+	struct nvfuse_buffer_head *bd_bh;
+
+	bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
+	bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
+	bd->bd_owner = sb->asb.asb_core_id;
+
+	//printf(" Update bg id = %d, owner = %d\n", bg_id, bd->bd_owner);
+
+	nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
+}
+
+u32 nvfuse_scan_free_ibitmap(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, 
+								u32 bg_id, u32 hint_free_inode)
+{
+	struct nvfuse_bg_descriptor *bd = NULL;
+	struct nvfuse_buffer_head *bd_bh;
+	struct nvfuse_buffer_head *bh;
+	void *buf;
+	u32 count = 0;
+	u32 free_inode = hint_free_inode;
+	u32 found = 0;
+
+	bd_bh = nvfuse_get_bh(sb, ictx, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
+	bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
+	assert(bd->bd_id == bg_id);
+
+	bh = nvfuse_get_bh(sb, ictx, IBITMAP_INO, bg_id, READ, NVFUSE_TYPE_META);
+	buf = bh->bh_buf;
+
+	while (bd->bd_free_inodes && count < sb->sb_no_of_inodes_per_bg) {
+		if (!ext2fs_test_bit(free_inode, buf)) {
+			//printf(" bg = %d free block %d found \n", bg_id, free_inode);
+			found = 1;
+			break;
+		}
+		free_inode = (free_inode + 1) % sb->sb_no_of_inodes_per_bg;
+		count++;
+	}
+
+	if (found && free_inode < sb->sb_no_of_inodes_per_bg) {
+		ext2fs_set_bit(free_inode, buf);
+		free_inode += (bg_id * bd->bd_max_inodes);
+	} else {
+		free_inode = 0;
+	}
+
+	nvfuse_release_bh(sb, bd_bh, 0, CLEAN);
+	if (found)
+		nvfuse_release_bh(sb, bh, 0, DIRTY);
+	else
+		nvfuse_release_bh(sb, bh, 0, CLEAN);
+
+	return free_inode;
+}
+
+u32 nvfuse_get_next_bg_id(struct nvfuse_superblock *sb, s32 is_inode)
+{
+	u32 next_bg_id;
+
+	if (!spdk_process_is_primary()) {
+		struct list_head *first_node;
+		struct bg_node *bg_node;
+
+		if (is_inode) {
+			first_node = sb->sb_bg_search_ptr_for_inode;
+		} else {
+			first_node = sb->sb_bg_search_ptr_for_data;
+		}
+
+		if (list_is_last(first_node, &sb->sb_bg_list)) {
+			printf(" Debug: list_is_last ..!! %s\n", is_inode ? "inode" : "data");
+			first_node = &sb->sb_bg_list;
+		}
+
+		if (is_inode) {
+			sb->sb_bg_search_ptr_for_inode = first_node->next;
+			first_node = sb->sb_bg_search_ptr_for_inode;
+		} else {
+			sb->sb_bg_search_ptr_for_data = first_node->next;
+			first_node = sb->sb_bg_search_ptr_for_data;
+		}
+
+		bg_node = container_of(first_node, struct bg_node, list);
+
+		next_bg_id = bg_node->bg_id;
+		assert(next_bg_id != 0);
+	} else {
+		next_bg_id = 0; /* primary process only utilizes the first container. */
+	}
+
+	return next_bg_id;
+}
+
+void nvfuse_move_curr_bg_id(struct nvfuse_superblock *sb, s32 bg_id, s32 is_inode)
+{
+	if (!spdk_process_is_primary()) {
+		struct list_head *first_node;
+		struct bg_node *bg_node;
+
+		if (is_inode)
+			first_node = sb->sb_bg_search_ptr_for_inode;
+		else
+			first_node = sb->sb_bg_search_ptr_for_data;
+
+		assert(first_node != NULL);
+		assert(first_node != &sb->sb_bg_list);
+
+		do {
+			//if (is_inode == 0)
+			//	nvfuse_print_bg_list(sb);
+			bg_node = container_of(first_node, struct bg_node, list);
+			if (bg_node->bg_id == bg_id) {
+				if (is_inode)
+					sb->sb_bg_search_ptr_for_inode = first_node;
+				else
+					sb->sb_bg_search_ptr_for_data = first_node;
+
+				//printf(" set bg id = %d for %s\n", bg_id, is_inode ? "inode" : "data");
+
+				assert(bg_id != 0);
+				break;
+			}
+
+			/* bg 0 is reserved for control plane */
+			assert(bg_id != 0);
+
+			/* skip list head */
+			do {
+				first_node = first_node->next;
+			} while (first_node == &sb->sb_bg_list);
+
+		} while (1);
+	} else {
+		assert(0);
+	}
+}
+
+u32 nvfuse_get_curr_bg_id(struct nvfuse_superblock *sb, s32 is_inode)
+{
+	u32 curr_bg_id;
+
+	if (!spdk_process_is_primary()) {
+		struct list_head *first_node;
+		struct bg_node *bg_node;
+
+		if (is_inode) {
+			first_node = sb->sb_bg_search_ptr_for_inode;
+		} else {
+			first_node = sb->sb_bg_search_ptr_for_data;
+		}
+
+		assert(first_node != NULL);
+		assert(first_node != &sb->sb_bg_list);
+
+		bg_node = container_of(first_node, struct bg_node, list);
+		curr_bg_id = bg_node->bg_id;
+		assert(curr_bg_id != 0);
+	} else {
+		curr_bg_id = 0; /* primary process only utilizes the first container. */
+	}
+
+	return curr_bg_id;
+}
+
 void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 {
 	struct nvfuse_bg_descriptor *bd = NULL;
@@ -584,93 +688,6 @@ s32 nvfuse_check_free_block(struct nvfuse_superblock *sb, u32 num_blocks)
 	return ret;
 }
 
-inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
-{
-	struct nvfuse_buffer_head *bh;
-	struct nvfuse_inode *ip;
-
-	lbno_t search_block = 0, search_entry = 0;
-	inode_t alloc_ino = 0;
-	inode_t hint_ino = 0;
-	inode_t last_allocated_ino = 0;
-	u32 block, ifile_num;
-	s32 nr_buffers;
-	s32 i, j;
-	s32 container_id;
-
-	if (nvfuse_process_model_is_dataplane() && !nvfuse_check_free_inode(sb)) {
-		container_id = nvfuse_alloc_container_from_primary_process(sb->sb_nvh, CONTAINER_NEW_ALLOC);
-		if (container_id > 0) {
-			/* insert allocated container to process */
-			nvfuse_add_bg(sb, container_id);
-			assert(nvfuse_check_free_inode(sb) == 1);
-		} else {
-			assert(0);
-		}
-	}
-
-	last_allocated_ino = sb->sb_last_allocated_ino;
-	hint_ino = nvfuse_find_free_inode(sb, ictx, last_allocated_ino);
-	if (hint_ino) {
-		search_block = hint_ino / INODE_ENTRY_NUM;
-		search_entry = hint_ino % INODE_ENTRY_NUM;
-	} else {
-		printf(" no more inodes in the file system.");
-		return 0;
-	}
-
-RETRY:
-	;
-
-	bh = nvfuse_get_bh(sb, ictx, ITABLE_INO, search_block, READ, NVFUSE_TYPE_META);
-	ip = (struct nvfuse_inode *)bh->bh_buf;
-#ifdef NVFUSE_USE_MKFS_INODE_ZEROING
-	for (j = 0; j < INODE_ENTRY_NUM; j++) {
-		if (ip[search_entry].i_ino == 0 &&
-		    (search_entry + search_block * INODE_ENTRY_NUM) >= NUM_RESV_INO) {
-			alloc_ino = search_entry + search_block * INODE_ENTRY_NUM;
-			goto RES;
-		}
-		search_entry = (search_entry + 1) % INODE_ENTRY_NUM;
-	}
-
-	/* FIXME: need to put error handling code  */
-	printf(" Warning: it runs out of free inodes = %d \n", sb->sb_free_inodes);
-	printf(".");
-	while (1);
-
-RES:
-	;
-
-#else
-	alloc_ino = search_entry + search_block * INODE_ENTRY_NUM;
-#endif
-
-	nvfuse_dec_free_inodes(sb, alloc_ino);
-
-	ip += search_entry;
-
-	/* initialization of inode entry */
-	memset(ip, 0x00, INODE_ENTRY_SIZE);
-
-	ip->i_ino = alloc_ino;
-	ip->i_deleted = 0;
-	ip->i_version++;
-
-	nvfuse_release_bh(sb, bh, 0, DIRTY);
-
-	/* keep hit information to rapidly find a free inode */
-	if (!spdk_process_is_primary() || nvfuse_process_model_is_standalone()) {
-		sb->sb_last_allocated_ino = alloc_ino + 1;
-	}
-
-	if (spdk_process_is_primary() && nvfuse_process_model_is_dataplane()) {
-		printf(" allocated ino = %d\n", alloc_ino);
-	}
-
-	return alloc_ino;
-}
-
 void nvfuse_free_blocks(struct nvfuse_superblock *sb, u32 block_to_delete, u32 count)
 {
 	u32 end_blk = block_to_delete + count;
@@ -699,73 +716,6 @@ RESET:
 		}
 		start_blk ++;
 	}
-}
-
-void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size)
-{
-	struct nvfuse_inode *inode;
-	struct nvfuse_buffer_cache *bc;
-	lbno_t offset;
-	u32 num_block, trun_num_block;
-	s32 res;
-	u64 key;
-	s32 unused_count = 0;
-
-	inode = ictx->ictx_inode;
-
-	num_block = NVFUSE_SIZE_TO_BLK(inode->i_size);
-	trun_num_block = NVFUSE_SIZE_TO_BLK(size);
-	if (inode->i_size & (CLUSTER_SIZE - 1))
-		num_block++;
-
-	/* debug code
-	*if(trun_num_block)
-	*	printf(" trun num block = %d\n", trun_num_block);
-	*/
-
-	if (!num_block || num_block <= trun_num_block)
-		return;
-
-	/*
-	 * Too slow when large inode is deleted.
-	 * FIXME: buffers will be managed by RBtree or other structures.
-	 */
-
-	for (offset = num_block - 1; offset >= trun_num_block; offset--) {
-		nvfuse_make_pbno_key(inode->i_ino, offset, &key, NVFUSE_BP_TYPE_DATA);
-		bc = (struct nvfuse_buffer_cache *)nvfuse_hash_lookup(sb->sb_bm, key);
-		if (bc) {
-			nvfuse_remove_bh_in_bc(sb, bc);
-
-			/* FIXME: reinitialization is necessary */
-			bc->bc_load = 0;
-			bc->bc_pno = 0;
-			bc->bc_dirty = 0;
-			bc->bc_ref = 0;
-
-			nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_UNUSED, INSERT_HEAD);
-			unused_count++;
-		}
-
-		if (offset == 0)
-			break;
-	}
-
-	if (!sb->sb_nvh->nvh_params.preallocation && nvfuse_process_model_is_dataplane()) {
-		while (unused_count--) {
-			if (sb->sb_bm->bm_list_count[BUFFER_TYPE_UNUSED] >= NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG) {
-				res = nvfuse_remove_buffer_cache(sb, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
-				if (res == 0) {
-					nvfuse_send_dealloc_buffer_req(sb->sb_nvh, NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG);
-				}
-			} else {
-				break;
-			}
-		}
-	}
-
-	/* truncate blocks */
-	nvfuse_truncate_blocks(sb, ictx, size);
 }
 
 s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
@@ -858,9 +808,8 @@ RES:
 	return res;
 }
 
-
 s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode,
-			       s8 *filename, bitem_t *offset)
+						   s8 *filename, bitem_t *offset)
 {
 	bkey_t key;
 	u32 dir_hash[2];
@@ -965,12 +914,11 @@ void io_cancel_incomplete_ios(struct nvfuse_superblock *sb, struct io_job **jobq
 s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct io_job **jobq, int job_cnt)
 {
 	struct io_job *job;
-	unsigned long blkno;
-	unsigned int bcount;
-	int cc = 0; // completion count
+	int cc; // completion count
 
 	//nvfuse_aio_resetnextcjob(sb->io_manager);
 	while (sb->io_manager->queue_cur_count) {
+
 		cc = nvfuse_aio_complete(sb->io_manager);
 		sb->io_manager->queue_cur_count -= cc;
 		assert(sb->io_manager->queue_cur_count >= 0);
@@ -1018,7 +966,6 @@ void nvfuse_release_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int
 s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head, s32 num_blocks)
 {
 	struct list_head *ptr, *temp;
-	struct nvfuse_buffer_head *bh;
 	struct nvfuse_buffer_cache *bc;
 
 	struct io_job *jobs[AIO_MAX_QDEPTH];
@@ -1077,7 +1024,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 	list_for_each_safe(ptr, temp, head) {
 		bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
 
-		nvfuse_remove_bh_in_bc(sb, bc);
+		nvfuse_remove_bhs_in_bc(sb, bc);
 
 		assert(bc->bc_dirty);
 		bc->bc_dirty = 0;
@@ -1085,7 +1032,7 @@ s32 nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, struct list_head *head,
 		/*if (bc->bc_ref) {
 			printf("debug\n");
 		}*/
-		nvfuse_move_buffer_type(sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
+		nvfuse_move_buffer_list(sb, bc, BUFFER_TYPE_CLEAN, INSERT_HEAD);
 	}
 
 	return 0;
@@ -1107,9 +1054,11 @@ void nvfuse_update_sb_with_bd_info(struct nvfuse_superblock *sb, s32 bg_id, s32 
 		}
 	} else {
 		struct nvfuse_bg_descriptor *bd;
-		struct nvfuse_buffer_head *bd_bh, *bh;
+		struct nvfuse_buffer_head *bd_bh;
+
 		bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
 		bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
+
 		if (increament) {
 			sb->asb.asb_free_blocks += bd->bd_free_blocks;
 			sb->asb.asb_free_inodes += bd->bd_free_inodes;
@@ -1126,7 +1075,7 @@ void nvfuse_update_sb_with_bd_info(struct nvfuse_superblock *sb, s32 bg_id, s32 
 	//		__FUNCTION__, sb->asb.asb_free_blocks, sb->asb.asb_free_inodes);
 }
 
-s32 nvfuse_add_bg(struct nvfuse_superblock *sb, u32 bg_id)
+void nvfuse_add_bg(struct nvfuse_superblock *sb, u32 bg_id)
 {
 	struct list_head *head = &sb->sb_bg_list;
 	struct bg_node *new_node;
@@ -1363,12 +1312,9 @@ void nvfuse_send_health_check_msg_to_primary_process(struct nvfuse_handle *nvh)
 s32 nvfuse_mount(struct nvfuse_handle *nvh)
 {
 	struct nvfuse_superblock *sb;
-	struct nvfuse_buffer_list *bh;
-	struct nvfuse_superblock *nvfuse_sb_disk;
 
-	struct timeval start_tv, end_tv, result_tv;
 	void *buf;
-	s32 i, j, res = 0;
+	s32 i, res = 0;
 	s8 mempool_name[32];
 	s32 mempool_size;
 
@@ -1488,11 +1434,11 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	}
 	memset(sb->sb_file_table, 0x00, sizeof(struct nvfuse_file_table) * MAX_OPEN_FILE);
 
-	//gettimeofday(&start_tv, NULL);
 	if (spdk_process_is_primary() || nvfuse_process_model_is_standalone()) {
 		res = nvfuse_scan_superblock(sb);
 		if (res < 0) {
-			printf(" invalid signature !!\n");
+			printf(" Invalid signature in superblock !!\n");
+			printf(" Please, try mkfs.nvfuse\n");
 			return res;
 		}
 	} else {
@@ -1584,9 +1530,6 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 			exit(0);
 		}
 	}
-	//gettimeofday(&end_tv, NULL);
-	//timeval_subtract(&result_tv, &end_tv, &start_tv);
-	//printf("\n scan time %.3d second\n", (s32)((float)result_tv.tv_sec + (float)result_tv.tv_usec / (float)1000000));
 
 	gettimeofday(&sb->sb_last_update, NULL);
 
@@ -1650,7 +1593,6 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	   in the previous execution from primary process */
 	else {
 		s32 container_id;
-		s32 nr_buffers;
 		s32 bg_count = 0;
 
 		do {
@@ -1678,7 +1620,6 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 	/* create b+tree index for root directory at first mount after formattming */
 	if (sb->sb_mount_cnt == 0 && spdk_process_is_primary()) {
 		struct nvfuse_inode_ctx *root_ictx;
-		struct nvfuse_inode *root_inode;
 
 		/* read root inode */
 		root_ictx = nvfuse_read_inode(sb, NULL, sb->sb_root_ino);
@@ -1737,8 +1678,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 
 s32 nvfuse_umount(struct nvfuse_handle *nvh)
 {
-	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
-	s32 i;
+	struct nvfuse_superblock *sb;
 	s8 *buf;
 
 	if (!nvh->nvh_mounted)
@@ -1751,6 +1691,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 		printf(" Error: alloc aligned buffer \n");
 		return -1;
 	}
+
+	sb = nvfuse_read_super(nvh);
 
 	gettimeofday(&sb->sb_time_end, NULL);
 	timeval_subtract(&sb->sb_time_total, &sb->sb_time_end, &sb->sb_time_start);
@@ -1885,9 +1827,7 @@ u64 get_no_of_sectors(s32 fd)
 {
 	u64 no_of_sectors;
 
-#if USE_BLKDEVIO == 1
 	ioctl(fd, BLKGETSIZE, &no_of_sectors);
-#endif
 
 	printf(" no of sectors = %lu\n", no_of_sectors);
 	return no_of_sectors;
@@ -1896,7 +1836,7 @@ u64 get_no_of_sectors(s32 fd)
 
 s32 nvfuse_scan_superblock(struct nvfuse_superblock *cur_sb)
 {
-	s32 res = -1, i;
+	s32 res = -1;
 	s8 *buf;
 	u64 num_clu, num_sectors, num_bg;
 	pbno_t cno;
@@ -1992,7 +1932,7 @@ s32 nvfuse_dir(struct nvfuse_handle *nvh)
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode;
 	struct nvfuse_buffer_head *dir_bh = NULL;
-	struct nvfuse_dir_entry *dir;
+	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_superblock *sb;
 	s64 read_bytes;
 	s64 dir_size;
@@ -2043,14 +1983,12 @@ s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb)
 {
 	s32 i = 0, fid = -1;
 
-//	pthread_mutex_lock(&sb->sb_file_table_lock);
 	for (i = START_OPEN_FILE; i < MAX_OPEN_FILE; i++) {
 		if (sb->sb_file_table[i].used == FALSE) {
 			fid = i;
 			break;
 		}
 	}
-	//pthread_mutex_unlock(&sb->sb_file_table_lock);
 
 	return fid;
 }
@@ -2059,15 +1997,14 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		    nvfuse_off_t trunc_size)
 {
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
-	struct nvfuse_inode *dir_inode, *inode;
-	struct nvfuse_dir_entry *dir;
-	struct nvfuse_buffer_head *dir_bh;
+	struct nvfuse_inode *dir_inode, *inode = NULL;
+	struct nvfuse_dir_entry *dir = NULL;
+	struct nvfuse_buffer_head *dir_bh = NULL;
 
 	s64 read_bytes = 0;
 	s64 start = 0;
 	u32 offset = 0;
 	s64 dir_size = 0;
-	u32 found_entry;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
@@ -2102,7 +2039,6 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 			if (!strcmp(dir->d_filename, filename)) {
 				ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
 				inode = ictx->ictx_inode;
-				found_entry = read_bytes / DIR_ENTRY_SIZE;
 				break;
 			}
 		}
@@ -2147,8 +2083,8 @@ s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_siz
 s32 nvfuse_chmod(struct nvfuse_handle *nvh, inode_t par_ino, s8 *filename, mode_t mode)
 {
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
-	struct nvfuse_inode *dir_inode, *inode;
-	struct nvfuse_dir_entry *dir;
+	struct nvfuse_inode *dir_inode, *inode = NULL;
+	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	u64 start = 0;
@@ -2234,11 +2170,8 @@ s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename,
 	s8 *token;
 	s8 b[256];
 	u32 local_dir_ino;
-	s32 i;
-	s32 count = 0;
 
 	strcpy(b, path);
-	i = strlen(b);
 
 	if (path[0] == '/')
 		local_dir_ino = nvfuse_get_root_ino(nvh);
@@ -2254,7 +2187,7 @@ s32 nvfuse_path_open(struct nvfuse_handle *nvh, s8 *path, s8 *filename,
 
 		rte_memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
 
-		while (token = strtok(NULL, "/")) {
+		while ((token = strtok(NULL, "/")) != NULL) {
 			local_dir_ino = dir_entry.d_ino;
 			if (nvfuse_lookup(sb, NULL, &dir_entry, token, local_dir_ino) < 0)
 				return NVFUSE_ERROR;
@@ -2273,14 +2206,13 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename,
 		      struct nvfuse_dir_entry *get)
 {
 	struct nvfuse_superblock *sb;
-	struct nvfuse_inode inode;
 	struct nvfuse_dir_entry dir_entry;
 	s8 *token;
 	s8 b[256];
 	u32 local_dir_ino;
 	s32 i;
 	s32 count = 0;
-	s32 res = 0;
+	s32 res = NVFUSE_SUCCESS;
 
 	sb = nvfuse_read_super(nvh);
 
@@ -2323,7 +2255,7 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename,
 
 		rte_memcpy(get, &dir_entry, DIR_ENTRY_SIZE);
 
-		while (token = strtok(NULL, "/")) {
+		while ((token = strtok(NULL, "/")) != NULL) {
 			local_dir_ino = dir_entry.d_ino;
 
 			if (nvfuse_lookup(sb, NULL, &dir_entry, token, local_dir_ino) < 0)
@@ -2337,7 +2269,7 @@ RES:
 
 	nvfuse_release_super(sb);
 
-	return NVFUSE_SUCCESS;
+	return res;
 }
 
 s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position)
@@ -2361,8 +2293,7 @@ s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position)
 	return (NVFUSE_SUCCESS);
 }
 
-s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset,
-		s32 position)
+s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset, s32 position)
 {
 	if (position == SEEK_SET)             /* SEEK_SET */
 		of->rwoffset = offset;
@@ -2415,7 +2346,6 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 *alloc_blk
 	}
 
 	if (flag) {
-		int i;
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
 #if 0
@@ -2484,19 +2414,16 @@ u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, nvfuse_loff_t o
 s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino)
 {
 	struct nvfuse_dir_entry *dir;
-	struct nvfuse_dir_entry dir_entry;
-
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode;
 
-	struct nvfuse_buffer_head *dir_bh = NULL, *dir_bh2;
+	struct nvfuse_buffer_head *dir_bh = NULL;
 
-	s32 j = 0, i = 0;
-	s32 new_entry = 0, flag = 0, new_alloc = 0;
+	s32 i = 0;
+	s32 new_entry = 0, flag = 0;
 	s32 search_lblock = 0, search_entry = 0;
 	s32 dir_num;
 	s32 num_block;
-	u32 dir_hash;
 
 	if (strlen(new_filename) < 1 || strlen(new_filename) >= FNAME_SIZE)
 		return error_msg("mkdir [dir name]\n");
@@ -2557,7 +2484,6 @@ retry:
 
 	/* allocate new direcct block */
 	if (!flag) {
-		new_alloc = 1;
 		nvfuse_release_bh(sb, dir_bh, 0, 0);
 		dir_inode->i_size += CLUSTER_SIZE;
 		goto retry;
@@ -2593,9 +2519,10 @@ find:
 s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, u32 *ino)
 {
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
-	struct nvfuse_inode *dir_inode, *inode;
+	struct nvfuse_inode *dir_inode = NULL;
+	struct nvfuse_inode *inode = NULL;
 
-	struct nvfuse_dir_entry *dir;
+	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	s64 read_bytes = 0;
 	s64 start = 0;
@@ -2668,7 +2595,6 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino,
 		   lbno_t offset)
 {
-	struct nvfuse_inode *inode;
 	bitem_t value = 0;
 	int ret;
 
@@ -2732,8 +2658,8 @@ void nvfuse_dir_hash(s8 *filename, u32 *hash1, u32 *hash2)
 	s32 size = strlen(filename);
 	s32 half = size / 2;
 
-	*hash1 = crc32c_intel(filename, half);
-	*hash2 = crc32c_intel(filename + half, size - half);
+	*hash1 = crc32c_intel((unsigned char *)filename, half);
+	*hash2 = crc32c_intel((unsigned char *)filename + half, size - half);
 #else
 	ext2fs_dirhash(EXT2_HASH_TEA, filename, strlen(filename), 0, hash1, hash2);
 #endif
@@ -2806,4 +2732,37 @@ RES:
 	;
 
 	return;
+}
+
+struct nvfuse_superblock *nvfuse_read_super(struct nvfuse_handle *nvh)
+{
+	return &nvh->nvh_sb;
+}
+
+void nvfuse_release_super(struct nvfuse_superblock *sb)
+{
+	return;
+}
+
+s32 nvfuse_dir_is_invalid(struct nvfuse_dir_entry *dir)
+{
+	if (dir->d_flag == DIR_EMPTY || dir->d_flag == DIR_DELETED)
+		return 1;
+
+	return 0;
+}
+
+void nvfuse_print_inode(struct nvfuse_inode *inode, s8 *str)
+{
+	if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
+		printf("%-13s/ [%ld] ino : %3d\n", str, (long)inode->i_size, inode->i_ino);
+	} else if (inode->i_type == NVFUSE_TYPE_FILE) {
+		printf("%-14s [%ld] ino : %3d\n", str, (long)inode->i_size, inode->i_ino);
+	}
+}
+
+struct nvfuse_bg_descriptor *nvfuse_get_bd(struct nvfuse_superblock *sb, u32 bg_id)
+{
+	assert(bg_id == sb->sb_bd[bg_id].bd_id);
+	return sb->sb_bd + bg_id;
 }

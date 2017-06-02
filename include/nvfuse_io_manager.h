@@ -136,10 +136,6 @@ struct nvfuse_io_manager {
 #endif
 	int queue_cur_count;
 
-	// submit job
-	//struct io_job *io_job_subq[AIO_MAX_QDEPTH];
-	//int io_job_subq_count;
-
 	// complete job
 	struct io_job *cjob[AIO_MAX_QDEPTH];
 	int cjob_head; // head ptr

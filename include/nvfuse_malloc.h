@@ -15,6 +15,7 @@
 
 #ifndef _NVFUSE_MEMALLOC_H_
 #define _NVFUSE_MEMALLOC_H_
+
 void *nvfuse_malloc(size_t size);
 void nvfuse_free(void *ptr);
 

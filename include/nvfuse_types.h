@@ -21,7 +21,8 @@
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 
-typedef signed char			s8;
+/* Note: unsigned char differs from signed char ??? */
+typedef			char			s8;
 typedef signed short		s16;
 typedef signed int			s32;
 typedef signed long         s64;

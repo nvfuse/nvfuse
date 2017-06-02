@@ -75,6 +75,7 @@ static char *ealargs[] = {
 
 int spdk_close(struct nvfuse_io_manager *io_manager);
 int spdk_cleanup(struct nvfuse_io_manager *io_manager);
+s8 *spdk_qname_decode(s32 qid);
 
 static void
 register_ns(struct spdk_nvme_ctrlr *ctrlr, struct spdk_nvme_ns *ns)
@@ -222,7 +223,9 @@ static int spdk_init(struct nvfuse_io_manager *io_manager)
 	struct ns_entry *ns_entry = g_namespaces;
 	int rc = 0;
 	int i;
+#if 0
 	int core;
+#endif
 
 	printf(" called: spdk init \n");
 
@@ -380,10 +383,12 @@ static struct io_job *spdk_getnextcjob(struct nvfuse_io_manager *io_manager)
 	return cur_job;
 }
 
+#if 0
 static void spdk_resetnextsjob(struct nvfuse_io_manager *io_manager)
 {
 
 }
+#endif
 
 static void spdk_resetnextcjob(struct nvfuse_io_manager *io_manager)
 {
@@ -541,17 +546,18 @@ int spdk_close(struct nvfuse_io_manager *io_manager)
 {
 	struct ns_entry *ns_entry = g_namespaces;
 	struct ctrlr_entry *ctrlr_entry = g_controllers;
+#if 0
 	int i;
 	int core;
 
-	// for (i = 0;i < SPDK_QUEUE_NUM; i++)
-	// {
-	//     for (core = 0; core < SPDK_NUM_CORES; core++)
-	//     {
-	//         spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue[core][i]);
-	//     }
-	// }
-
+	for (i = 0;i < SPDK_QUEUE_NUM; i++)
+	{
+	    for (core = 0; core < SPDK_NUM_CORES; core++)
+	    {
+	        spdk_nvme_ctrlr_free_io_qpair(io_manager->spdk_queue[core][i]);
+	    }
+	}
+#endif
 	while (ns_entry) {
 		struct ns_entry *next = ns_entry->next;
 		free(ns_entry);
@@ -678,12 +684,12 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
 static int spdk_dev_format(struct nvfuse_io_manager *io_manager)
 {
 
+#if 0
 	struct ctrlr_entry *ctrlr_entry = g_controllers;
 	struct spdk_nvme_format format = {};
-	u32 ns_id = 1;
-	int ret = 0;
+	s32 ns_id = 1;
+	s32 ret;
 
-#if 0
 	printf(" nvme format: started\n");
 	format.lbaf	= 0; /* LBA format (e.g., 512, 512 + 8, 4096, 4096 + 8 */
 	format.ms	= 0; /* metadata setting */

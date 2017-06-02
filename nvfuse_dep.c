@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "nvfuse_types.h"
+#include "nvfuse_dep.h"
 
 s32 ext2fs_set_bit(u32 nr, void *addr)
 {
@@ -91,3 +92,10 @@ s32 fat_filename(const s8 *path, s8 *dest)
 	strcpy(dest, slash);
 	return 0;
 }
+
+/* ported from fuse_ext2 project */
+#if NVFUSE_OS == NVFUSE_OS_WINDOWS
+#define major(dev) ((int)(((unsigned int) (dev) >> 8) & 0xff))
+#define minor(dev) ((int)((dev) & 0xff))
+#define makedev(x, y) (x | y)
+#endif

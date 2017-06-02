@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include "nvfuse_core.h"
+#include "nvfuse_config.h"
 #include "nvfuse_api.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"

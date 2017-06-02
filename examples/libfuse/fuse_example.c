@@ -68,6 +68,7 @@ void xmp_destroy(void *data);
 int nvfuse_init(int format, s8 *devname)
 {
 	int ret = 0;
+#if 0
 	char *argv[] = 	{
 		"fuse_example",
 #ifdef SPDK_ENABLED
@@ -81,6 +82,7 @@ int nvfuse_init(int format, s8 *devname)
 		"-m", /* mount */
 	};
 	int argc = 2;
+#endif
 
 	/*FIXME: */
 	/* create nvfuse_handle with user spcified parameters */

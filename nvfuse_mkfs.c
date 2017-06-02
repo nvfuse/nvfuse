@@ -29,78 +29,9 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_gettimeofday.h"
+#include "nvfuse_mkfs.h"
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
-
-#ifndef __NOUSE_FUSE__
-
-u32 get_part_size(s32 fd)
-{
-	u32 size, blksize;
-
-#ifndef BLKSSZGET
-	blksize = 512;
-#else
-	ioctl(fd, BLKSSZGET, &blksize);
-#endif
-
-	ioctl(fd, BLKGETSIZE, &size);
-
-	return size * blksize;
-}
-u32 get_sector_size(s32 fd)
-{
-	u32 sector_size;
-
-#ifndef BLKSSZGET
-	sector_size = 512;
-#else
-	ioctl(fd, BLKSSZGET, &sector_size);
-#endif
-	return sector_size;
-}
-
-u64 get_no_of_sectors(s32 fd)
-{
-	u64 no_of_sectors;
-
-#if USE_BLKDEVIO == 1
-	ioctl(fd, BLKGETSIZE, &no_of_sectors);
-#endif
-
-	printf(" no of sectors = %llu\n", no_of_sectors);
-	return no_of_sectors;
-}
-
-#endif //__NOUSE_FUSE__
-#endif // NVFUSE_OS == NVFUSE_OS_LINUX
-
-static void nvfuse_bd_debug(struct nvfuse_io_manager *io_manager, u32 bg_size, u32 num_bgs)
-{
-	void *bd_buf;
-	s32 bg_id;
-	struct nvfuse_bg_descriptor *bd;
-
-	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
-	if (bd_buf == NULL) {
-		printf(" Malloc error \n");
-	}
-
-	for (bg_id = 0; bg_id < num_bgs; bg_id++) {
-		memset(bd_buf, 0x00, CLUSTER_SIZE);
-		nvfuse_read_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, io_manager);
-		bd = (struct nvfuse_bg_descriptor *)bd_buf;
-		if (bg_id != bd->bd_id) {
-			printf(" mismatch bgid = %d\n", bg_id);
-			assert(0);
-		}
-	}
-
-	nvfuse_free_aligned_buffer(bd_buf);
-}
-
-
-static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
+s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 		struct nvfuse_superblock *sb_disk, u32 bg_id, u32 bg_size)
 {
 	struct nvfuse_bg_descriptor *bd;
@@ -109,7 +40,6 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 	void *bd_buf;
 	void *buf;
 	u32 ino = 0;
-	u32 blkno = 0;
 
 	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
@@ -196,8 +126,7 @@ static s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 	return 0;
 }
 
-void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 bg_start,
-				 u32 bg_size)
+void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 bg_start, u32 bg_size)
 {
 	u32 bits_per_bitmap;
 
@@ -231,17 +160,15 @@ void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 b
 	bd->bd_dtable_start	+= bg_start;
 }
 
-static s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
+s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
 		struct nvfuse_superblock *sb_disk, u32 num_bgs, u32 bg_size)
 {
+	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 	struct nvfuse_bg_descriptor *bd;
 	void *bd_buf;
 	void *buf;
 	u32 bg_id;
 	u32 bg_start;
-	u32 bits_per_bitmap;
-	u32 clu;
-	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 
 	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
@@ -300,19 +227,20 @@ static s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
 
 }
 
-static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
+s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 		struct nvfuse_superblock *sb_disk, u32 num_bgs, u32 bg_size)
 {
 	struct nvfuse_bg_descriptor *bd;
 	void *bd_buf;
 	void *buf;
 
+#ifdef NVFUSE_USE_MKFS_INODE_ZEROING
 	void *zeroing_buf;
 	u32 zeroing_blocks;
+#endif
 
 	u32 bg_id;
 	u32 bg_start;
-	u32 bits_per_bitmap;
 	u32 clu;
 	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
 
@@ -385,7 +313,7 @@ static s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 	return 0;
 }
 
-static s32 nvfuse_format_bg(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk,
+s32 nvfuse_format_bg(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_disk,
 				 u32 num_bgs, u32 bg_size)
 {
 	s32 res;
@@ -416,40 +344,19 @@ void nvfuse_type_check()
 #endif
 }
 
-
 s32 nvfuse_format(struct nvfuse_handle *nvh)
 {
-	s32 i, j, clu = 0, add_clu = 0;
+	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
+	struct nvfuse_superblock *nvfuse_sb_disk;
+
+	struct timeval format_tv;
 
 	u32 bg_size_bits;
 	s32 bg_p_clu = 0;
 	u32 bg_size = 0;
 
-	s32 su_blocks = 0, su_bgs = 0;
-	u32 su_start = 0;
-
-	u32 dir_hash = 0;
 	u64 num_clu, num_sectors, num_bg;
-	s8 *buf, *su_p;
-
-	struct nvfuse_superblock	*nvfuse_sb_disk;
-	struct nvfuse_bg_descriptor	bg_sum;
-
-	struct nvfuse_dir_entry d_entry[3];
-	struct nvfuse_inode inode[5]; // root_inode, inode table
-
-	struct nvfuse_inode *root_inode, *ifile_inode, *su_inode;
-	struct nvfuse_inode *bp_tree_inode, *ss_inode;
-	struct nvfuse_inode *ip;
-	master_node_t *bp_master;
-
-	struct timeval tv;
-	struct timeval format_tv;
-
-	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
-	key_pair_t *pair;
-	s32 pair_count = 0;
-	s32 pair_size = 0;
+	s8 *buf;
 
 	s32 ret;
 
@@ -479,13 +386,6 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	// initialize super block
 	memset(buf, 0x00, CLUSTER_SIZE);
 	nvfuse_sb_disk = (struct nvfuse_superblock *) buf;
-
-	memset(inode, 0x00, INODE_ENTRY_SIZE * 5);
-	root_inode = &inode[0];
-	ifile_inode = &inode[1];
-	su_inode = &inode[2];
-	bp_tree_inode = &inode[3];
-	ss_inode = &inode[4];
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 	num_sectors = NO_OF_SECTORS;
@@ -533,7 +433,9 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 		return NVFUSE_ERROR;
 	}
 
-	//nvfuse_bd_debug(&nvh->nvh_iom, bg_p_clu, num_bg);
+#ifdef NVFUSE_BD_DEBUG
+	nvfuse_bd_debug(&nvh->nvh_iom, bg_p_clu, num_bg);
+#endif
 
 	ret = nvfuse_alloc_root_inode_direct(&nvh->nvh_iom, nvfuse_sb_disk, 0, bg_p_clu);
 	if (ret) {
@@ -581,3 +483,78 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 
 	return NVFUSE_SUCCESS;
 }
+
+#ifdef NVFUSE_BD_DEBUG
+void nvfuse_bd_debug(struct nvfuse_io_manager *io_manager, u32 bg_size, u32 num_bgs)
+{
+	void *bd_buf;
+	s32 bg_id;
+	struct nvfuse_bg_descriptor *bd;
+
+	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
+	if (bd_buf == NULL) {
+		printf(" Malloc error \n");
+	}
+
+	for (bg_id = 0; bg_id < num_bgs; bg_id++) {
+		memset(bd_buf, 0x00, CLUSTER_SIZE);
+		nvfuse_read_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, io_manager);
+		bd = (struct nvfuse_bg_descriptor *)bd_buf;
+		if (bg_id != bd->bd_id) {
+			printf(" mismatch bgid = %d\n", bg_id);
+			assert(0);
+		}
+	}
+
+	nvfuse_free_aligned_buffer(bd_buf);
+}
+#endif
+
+
+
+#if NVFUSE_OS == NVFUSE_OS_LINUX
+
+#ifndef __NOUSE_FUSE__
+
+u32 get_part_size(s32 fd)
+{
+	u32 size, blksize;
+
+#ifndef BLKSSZGET
+	blksize = 512;
+#else
+	ioctl(fd, BLKSSZGET, &blksize);
+#endif
+
+	ioctl(fd, BLKGETSIZE, &size);
+
+	return size * blksize;
+}
+
+u32 get_sector_size(s32 fd)
+{
+	u32 sector_size;
+
+#ifndef BLKSSZGET
+	sector_size = 512;
+#else
+	ioctl(fd, BLKSSZGET, &sector_size);
+#endif
+	return sector_size;
+}
+
+u64 get_no_of_sectors(s32 fd)
+{
+	u64 no_of_sectors;
+
+#if USE_BLKDEVIO == 1
+	ioctl(fd, BLKGETSIZE, &no_of_sectors);
+#endif
+
+	printf(" no of sectors = %llu\n", no_of_sectors);
+	return no_of_sectors;
+}
+
+#endif //__NOUSE_FUSE__
+#endif // NVFUSE_OS == NVFUSE_OS_LINUX
+
