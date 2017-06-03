@@ -38,6 +38,7 @@
 #include "nvfuse_api.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
+#include "nvfuse_aio.h"
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #define EXAM_USE_RAMDISK	0
@@ -53,47 +54,48 @@
 
 /* nvfuse handle */
 struct nvfuse_handle *nvh;
-s8 *gdevname;
+struct nvfuse_io_manager io_manager;
+struct nvfuse_ipc_context ipc_ctx;
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
 /* Declarations */
-int nvfuse_init(int format, s8 *devname);
+int nvfuse_init(void);
 int nvfuse_deinit(void);
 void *xmp_init(struct fuse_conn_info *conn);
 void xmp_destroy(void *data);
 
 /* initialization of NVFUSE library */
-int nvfuse_init(int format, s8 *devname)
+int nvfuse_init(void)
 {
-	int ret = 0;
-#if 0
+	struct nvfuse_params params;
+	int ret;
 	char *argv[] = 	{
 		"fuse_example",
-#ifdef SPDK_ENABLED
-		"-t spdk",
-		"-d 01:00",  /* PCIe Slot Number */
-#else
-		"-t block",
-		"-d /dev/nvme0n1",
-#endif
+		"-c 2", /* core mask */
 		"-f", /* format */
 		"-m", /* mount */
+		"-a fuse_example"
 	};
-	int argc = 2;
-#endif
+	int argc = 5;
 
-	/*FIXME: */
+	printf(" %s:%d \n", __FUNCTION__, __LINE__);
+
+	ret = nvfuse_parse_args(argc, argv, &params);
+	if (ret < 0)
+		return -1;
+
+	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	if (ret < 0)
+		return -1;
+
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(NULL, NULL, NULL);
+	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
 	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
 	}
-
-	if (nvh == NULL)
-		ret = -1;
 
 	return ret;
 }
@@ -102,7 +104,10 @@ int nvfuse_init(int format, s8 *devname)
 int nvfuse_deinit(void)
 {
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-	printf(" Finalizing ... \n");
+
+	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);
+
+	printf(" %s:%d \n", __FUNCTION__, __LINE__);
 	return 0;
 }
 
@@ -609,9 +614,8 @@ static int xmp_flock(const char *path, struct fuse_file_info *fi, int op)
 void *xmp_init(struct fuse_conn_info *conn)
 {
 	int ret;
-	int format = 1;
 
-	ret = nvfuse_init(format, gdevname);
+	ret = nvfuse_init();
 	if (ret < 0) {
 		printf(" Error: nvfuse_init()\n");
 		return NULL;
@@ -680,22 +684,6 @@ static struct fuse_operations xmp_oper = {
 int main(int argc, char *argv[])
 {
 	int ret;
-
-	printf(" fuse_example is currently not supported.\n");
-
-	return -1;
-
-	if (argc < 3) {
-		printf("\n");
-		printf("Usage: \n");
-		printf("	#./fuse_example /dev/nvme0n1 /mnt_point\n");
-		printf("\n");
-		return -1;
-	}
-
-	gdevname = argv[1];
-	printf(" device name = %s \n", gdevname);
-	printf(" mount point = %s \n", argv[2]);
 
 	printf(" FUSE_USE_VERSION = %d \n", FUSE_USE_VERSION);
 
