@@ -20,15 +20,26 @@ In order to build NVFUSE, some relevant libraries must be configured.
     2) DPDK and SPDK must be installed based on their install guide explained in README.
 
 Ubuntu/Debian:
-
+	
     # sudo apt-get install -y gcc make libaio-dev libfuse-dev
+	# sudo apt-get install -y gcc g++ libcunit1-dev libaio-dev libssl-dev
+
+SPDK compile:
+
+	# git clone https://github.com/spdk/spdk.git
+	# cd ~/spdk
+	# git submodule update --init
+	# ./configure
+	# make
+
+
 
 Building
 ========
 
 Once the prerequisites are installed, run 'make' within the NVFUSE directory to build the NVFUSE library and examples.
 
-    # make SPDK_ROOT_DIR=/home/spdk DPDK_DIR=/home/spdk/dpdk-17.02/x86_64-native-linuxapp-gcc
+    # make SPDK_ROOT_DIR=/home/ysoh/spdk DPDK_DIR=/home/ysoh/spdk/dpdk/build
 
 Before conducting an NVFUSE application, the kernel NVMe driver must be unloaded and some hugepages must be allocated. It can be done with the automation script like the below command line.
 
@@ -41,7 +52,7 @@ Disabling ASLR (Address Space Layout Randomization) is also required like this.
 File system format is required.
 
 	# cd examples/mkfs
-	# ./mkfs.nvfuse -f
+	# sudo ./mkfs.nvfuse -f
 
 Move to examples directory and execute helloworld. 
 

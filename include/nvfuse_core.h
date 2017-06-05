@@ -528,7 +528,9 @@ s32 nvfuse_path_open2(struct nvfuse_handle *nvh, s8 *path, s8 *filename, struct 
 s32 nvfuse_lseek(struct nvfuse_handle *nvh, s32 fd, u32 offset, s32 position);
 s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 offset, s32 position);
 s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 ino);
+s32 nvfuse_find_empty_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, struct nvfuse_inode *dir_inode);
 s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, u32 *ino);
+s32 nvfuse_find_existing_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, struct nvfuse_inode *dir_inode, s8 *filename);
 u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t offset);
 s32  nvfuse_mkfile(struct nvfuse_handle *nvh, s8 *str, s8 *ssize);
 s32 nvfuse_cd(struct nvfuse_handle *nvh, s8 *str);

@@ -2416,14 +2416,9 @@ s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 
 	struct nvfuse_dir_entry *dir;
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode;
-
 	struct nvfuse_buffer_head *dir_bh = NULL;
-
-	s32 i = 0;
-	s32 new_entry = 0, flag = 0;
 	s32 search_lblock = 0, search_entry = 0;
-	s32 dir_num;
-	s32 num_block;
+	u32 empty_dentry;
 
 	if (strlen(new_filename) < 1 || strlen(new_filename) >= FNAME_SIZE)
 		return error_msg("mkdir [dir name]\n");
@@ -2436,65 +2431,27 @@ s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 
 	dir_ictx = nvfuse_read_inode(sb, NULL, newino);
 	dir_inode = dir_ictx->ictx_inode;
 
-	search_lblock = dir_inode->i_ptr / DIR_ENTRY_NUM;
-	search_entry = dir_inode->i_ptr % DIR_ENTRY_NUM;
-
 	if (dir_inode->i_links_count == MAX_FILES_PER_DIR) {
 		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
 		return -1;
 	}
 
-retry:
-
-	dir_num = (dir_inode->i_size / DIR_ENTRY_SIZE);	
-	if (dir_num == dir_inode->i_links_count) {
-		search_entry = -1;
-		num_block = 0;
-	} else {
-		if (search_entry == DIR_ENTRY_NUM - 1)
-			search_entry = 0;
-		num_block = dir_num / DIR_ENTRY_NUM;
+	/* find an empty directory */
+	empty_dentry = nvfuse_find_empty_dentry(sb, dir_ictx, dir_inode);
+	if (empty_dentry < 0) {
+		return -1;
 	}
+	search_lblock = dir_inode->i_ptr / DIR_ENTRY_NUM;
+	search_entry = dir_inode->i_ptr % DIR_ENTRY_NUM;
 
-	for (i = 0; i < num_block; i++) {
-		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ, NVFUSE_TYPE_META);
-		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
-
-		for (new_entry = 0; new_entry < DIR_ENTRY_NUM; new_entry++) {
-			search_entry++;
-			if (search_entry == DIR_ENTRY_NUM)
-				search_entry = 0;
-			if (nvfuse_dir_is_invalid(dir + search_entry)) {
-				flag = 1;
-				dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
-				dir_inode->i_links_count++;
-				goto find;
-			}
-		}
-
-		search_entry = 0;
-		search_lblock++;
-		if (search_lblock == NVFUSE_SIZE_TO_BLK(dir_inode->i_size))
-			search_lblock = 0;
-	}
-
-	dir_num = (dir_inode->i_size / DIR_ENTRY_SIZE);
-	num_block =  dir_num / DIR_ENTRY_NUM;
-	search_lblock = num_block;
-
-	/* allocate new direcct block */
-	if (!flag) {
-		nvfuse_release_bh(sb, dir_bh, 0, 0);
-		dir_inode->i_size += CLUSTER_SIZE;
-		goto retry;
-	}
-
-find:
+	dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
+	dir_inode->i_links_count++;
 
 	ictx = nvfuse_read_inode(sb, NULL, ino);
 	inode = ictx->ictx_inode;
 	inode->i_links_count++;
 
+	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ, NVFUSE_TYPE_META);
 	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 	dir[search_entry].d_flag = DIR_USED;
 	dir[search_entry].d_ino = ino;
@@ -2515,32 +2472,108 @@ find:
 	return NVFUSE_SUCCESS;
 }
 
-
-s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, u32 *ino)
+s32 nvfuse_find_empty_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, struct nvfuse_inode *dir_inode)
 {
-	struct nvfuse_inode_ctx *dir_ictx, *ictx;
-	struct nvfuse_inode *dir_inode = NULL;
-	struct nvfuse_inode *inode = NULL;
+	struct nvfuse_buffer_head *dir_bh = NULL;
+	struct nvfuse_dir_entry *dir;
+	u32 search_lblock, search_entry;
+	u32 dir_num;
+	s32 num_block;
+	u32 new_entry, flag = 0;
+	s32 i;
 
+	search_lblock = (dir_inode->i_links_count - 1) / DIR_ENTRY_NUM;
+	search_entry = (dir_inode->i_links_count - 1) % DIR_ENTRY_NUM;
+
+RETRY:
+
+	dir_num = (dir_inode->i_size / DIR_ENTRY_SIZE);
+	if (dir_num == dir_inode->i_links_count) {
+		search_entry = -1;
+		num_block = 0;
+	} else {
+		if (search_entry == DIR_ENTRY_NUM - 1) {
+			search_entry = -1;
+		}
+		num_block = dir_num / DIR_ENTRY_NUM;
+	}
+
+	// find an empty dentry
+	for (i = 0; i < num_block; i++) {
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ, NVFUSE_TYPE_META);
+		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
+
+		for (new_entry = 0; new_entry < DIR_ENTRY_NUM; new_entry++) {
+			search_entry++;
+			if (search_entry == DIR_ENTRY_NUM) {
+				search_entry = 0;
+			}
+
+			if (nvfuse_dir_is_invalid(dir + search_entry)) {
+				flag = 1;
+				goto FIND;
+			}
+		}
+		nvfuse_release_bh(sb, dir_bh, 0, 0);
+		dir_bh = NULL;
+		search_entry = -1;
+		search_lblock++;
+		if (search_lblock == NVFUSE_SIZE_TO_BLK(dir_inode->i_size))
+			search_lblock = 0;
+	}
+
+	dir_num = (dir_inode->i_size / DIR_ENTRY_SIZE);
+	num_block = dir_num / DIR_ENTRY_NUM;
+	search_lblock = num_block;
+
+	if (!flag) { // allocate new direcct block
+		s32 ret;
+		nvfuse_release_bh(sb, dir_bh, 0, 0);
+		ret = nvfuse_get_block(sb, dir_ictx, NVFUSE_SIZE_TO_BLK(dir_inode->i_size), 1/* num block */, NULL,
+				       NULL, 1);
+		if (ret) {
+			printf(" data block allocation fails.");
+			return NVFUSE_ERROR;
+		}
+
+		dir_bh = nvfuse_get_new_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(dir_inode->i_size),
+					   NVFUSE_TYPE_META);
+		nvfuse_release_bh(sb, dir_bh, INSERT_HEAD, DIRTY);
+		assert(dir_inode->i_size < MAX_FILE_SIZE);
+		dir_inode->i_size += CLUSTER_SIZE;
+		goto RETRY;
+	}
+
+FIND:
+
+	return search_lblock * DIR_ENTRY_NUM + search_entry;
+}
+
+
+s32 nvfuse_find_existing_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, struct nvfuse_inode *dir_inode, s8 *filename)
+{
 	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
+
 	s64 read_bytes = 0;
 	s64 start = 0;
 	u32 offset = 0;
 	s64 dir_size = 0;
-
-	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
-	dir_inode = dir_ictx->ictx_inode;
-	dir_size = dir_inode->i_size;
+	u32 found_entry = -1;
 
 #if NVFUSE_USE_DIR_INDEXING == 1
-	if (nvfuse_get_dir_indexing(sb, dir_inode, name, &offset) < 0) {
-		return -1;
+	if (nvfuse_get_dir_indexing(sb, dir_inode, filename, &offset) < 0) {
+		printf(" dir (%s) is not in the index.\n", filename);
+		offset = 0;
+		/* linear search */
+	} else {
+		/* quick search */
 	}
 #endif
 
+	dir_size = dir_inode->i_size;
 	start = (s64)offset * DIR_ENTRY_SIZE;
-	if (start & (CLUSTER_SIZE - 1)) {
+	if ((start & (CLUSTER_SIZE - 1))) {
 		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(start), READ,
 				       NVFUSE_TYPE_META);
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
@@ -2550,28 +2583,62 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 	for (read_bytes = start; read_bytes < dir_size; read_bytes += DIR_ENTRY_SIZE) {
 		if (!(read_bytes & (CLUSTER_SIZE - 1))) {
 			if (dir_bh)
-				nvfuse_release_bh(sb, dir_bh, 0, 0);
-
+				nvfuse_release_bh(sb, dir_bh, 0/*tail*/, 0/*dirty*/);
 			dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(read_bytes), READ,
 					       NVFUSE_TYPE_META);
 			dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 		}
 
 		if (dir->d_flag == DIR_USED) {
-			if (!strcmp(dir->d_filename, name)) {
-				ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
-				inode = ictx->ictx_inode;
-
-				if (ino)
-					*ino = dir->d_ino;
+			if (!strcmp(dir->d_filename, filename)) {
+				found_entry = read_bytes / DIR_ENTRY_SIZE;
+				nvfuse_release_bh(sb, dir_bh, 0/*tail*/, 0/*dirty*/);
 				break;
 			}
 		}
 		dir++;
 	}
 
-	if (inode->i_ino == 0)
+	return found_entry;
+}
+
+
+s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, u32 *ino)
+{
+	struct nvfuse_inode_ctx *dir_ictx, *ictx;
+	struct nvfuse_inode *dir_inode = NULL;
+	struct nvfuse_inode *inode = NULL;
+	struct nvfuse_dir_entry *dir = NULL;
+	struct nvfuse_buffer_head *dir_bh = NULL;
+	u32 found_entry;
+	u32 search_lblock, search_entry;
+
+	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
+	dir_inode = dir_ictx->ictx_inode;
+
+	/* find an existing dentry */
+	found_entry = nvfuse_find_existing_dentry(sb, dir_ictx, dir_inode, name);
+	if (found_entry < 0)
+		return 0;
+
+	search_lblock = found_entry / DIR_ENTRY_NUM;
+	search_entry = found_entry % DIR_ENTRY_NUM;
+	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ,
+						   NVFUSE_TYPE_META);
+	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
+	dir += search_entry;
+
+	ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
+	inode = ictx->ictx_inode;
+
+	if (inode == NULL || inode->i_ino == 0) {
+		printf(" file (%s) is not found this directory\n", name);
+		nvfuse_release_bh(sb, dir_bh, 0/*tail*/, CLEAN);
 		return NVFUSE_ERROR;
+	}
+
+	if (ino)
+		*ino = dir->d_ino;
 
 	/* link count decrement */
 	inode->i_links_count--;

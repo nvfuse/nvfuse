@@ -40,12 +40,6 @@
 #include <rte_ring.h>
 #include <rte_log.h>
 #include <rte_mempool.h>
-#include <cmdline_rdline.h>
-#include <cmdline_parse.h>
-#include <cmdline_socket.h>
-#include <cmdline_parse_string.h>
-#include <cmdline.h>
-//#include "mp_commands.h"
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
