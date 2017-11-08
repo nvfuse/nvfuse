@@ -180,7 +180,7 @@ int spdk_alloc_qpair(struct nvfuse_io_manager *io_manager)
 	for (i = 0; i < SPDK_QUEUE_NUM; i++) {
 		printf(" Alloc NVMe Queue = %d (%s)\n", i, spdk_qname_decode(i));
 
-		io_manager->spdk_queue[i] = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, 0);
+		io_manager->spdk_queue[i] = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, NULL, 0);
 		if (io_manager->spdk_queue[i] == NULL) {
 			printf("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
 			return -1;
@@ -239,7 +239,7 @@ static int spdk_init(struct nvfuse_io_manager *io_manager)
 		for (core = 0; core < SPDK_NUM_CORES; core++) {
 			printf(" Alloc NVMe Queue = %d (%s)\n", i, spdk_qname_decode(i));
 
-			io_manager->spdk_queue[core][i] = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, 0);
+			io_manager->spdk_queue[core][i] = spdk_nvme_ctrlr_alloc_io_qpair(ns_entry->ctrlr, NULL, 0);
 			if (io_manager->spdk_queue[core][i] == NULL) {
 				printf("ERROR: spdk_nvme_ctrlr_alloc_io_qpair() failed\n");
 				return -1;
@@ -632,7 +632,7 @@ static int spdk_open(struct nvfuse_io_manager *io_manager, int flags)
 	spdk_env_opts_init(&opts);
 	opts.name = "hello_world";
 	opts.core_mask = io_manager->cpu_core_mask_str;
-	opts.dpdk_mem_size = 8192;
+	opts.mem_size = 8192;
 	opts.shm_id = 1;
 	spdk_env_init(&opts);
 

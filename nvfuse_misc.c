@@ -338,7 +338,7 @@ s32 nvfuse_metadata_test(struct nvfuse_handle *nvh, s8 *str, s32 meta_check, s32
 	off_t offset = 0;
 
 	char buf[20] = {0,};
-	char rename_buf[20] = {0,};
+	char rename_buf[22] = {0,};
 
 	flags_create = O_WRONLY | O_CREAT | O_TRUNC;
 	flags_rdwr = O_RDWR;

@@ -633,7 +633,7 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 	{
 		u32 *direct_map;
 
-		direct_map = spdk_zmalloc(sizeof(u32) * count, 0, NULL);
+		direct_map = spdk_dma_zmalloc(sizeof(u32) * count, 0, NULL);
 		assert(direct_map != NULL);
 
 		err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, direct_map,
@@ -645,7 +645,7 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 		/* attach indirect block to inode */
 		nvfuse_splice_branch(sb, ictx, partial, direct_map, indirect_blks, count);
 
-		spdk_free(direct_map);
+		spdk_dma_free(direct_map);
 	}
 
 got_it:

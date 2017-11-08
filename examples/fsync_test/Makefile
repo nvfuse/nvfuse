@@ -22,7 +22,7 @@ include $(NVFUSE_ROOT_DIR)/nvfuse.mk
 TARGET = fsync_test
 SRCS   = fsync_test.o
 
-LDFLAGS += -lm -lpthread -laio -lrt
+LDFLAGS += -lm -lpthread -laio -lrt -luuid
 CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE
 CFLAGS += $(WARNING_OPTION)
 
