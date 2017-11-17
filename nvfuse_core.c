@@ -1426,7 +1426,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		return -1;
 	}
 
-	sb->sb_file_table = (struct nvfuse_file_table *)spdk_malloc(sizeof(struct nvfuse_file_table) *
+	sb->sb_file_table = (struct nvfuse_file_table *)spdk_dma_malloc(sizeof(struct nvfuse_file_table) *
 			    MAX_OPEN_FILE, 0, NULL);
 	if (sb->sb_file_table == NULL) {
 		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
@@ -1546,7 +1546,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		sb->sb_umount = 0;
 	}
 
-	sb->sb_bd = (struct nvfuse_bg_descriptor *)spdk_malloc(sizeof(struct nvfuse_bg_descriptor) *
+	sb->sb_bd = (struct nvfuse_bg_descriptor *)spdk_dma_malloc(sizeof(struct nvfuse_bg_descriptor) *
 			sb->sb_bg_num, 0, NULL);
 	if (sb->sb_bd == NULL) {
 		printf("nvfuse_malloc error = %d\n", __LINE__);
@@ -1751,8 +1751,8 @@ s32 nvfuse_umount(struct nvfuse_handle *nvh)
 		}
 	}
 
-	spdk_free(sb->sb_bd);
-	spdk_free(sb->sb_file_table);
+	spdk_dma_free(sb->sb_bd);
+	spdk_dma_free(sb->sb_file_table);
 
 	nvh->nvh_mounted = 0;
 

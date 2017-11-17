@@ -507,7 +507,7 @@ int nvfuse_init_buffer_cache(struct nvfuse_superblock *sb, s32 buffer_size)
 		}
 	}
 
-	bm = (struct nvfuse_buffer_manager *)spdk_malloc(sizeof(struct nvfuse_buffer_manager), 0, NULL);
+	bm = (struct nvfuse_buffer_manager *)spdk_dma_malloc(sizeof(struct nvfuse_buffer_manager), 0, NULL);
 	if (bm == NULL) {
 		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
@@ -612,7 +612,7 @@ void nvfuse_deinit_buffer_cache(struct nvfuse_superblock *sb)
 	printf(" > buffer cache hit rate = %f \n",
 	       (double)sb->sb_bm->bm_cache_hit / sb->sb_bm->bm_cache_ref);
 
-	spdk_free(sb->sb_bm);
+	spdk_dma_free(sb->sb_bm);
 }
 
 void nvfuse_mark_dirty_bh(struct nvfuse_superblock *sb, struct nvfuse_buffer_head *bh)
@@ -1195,7 +1195,7 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 	struct nvfuse_ictx_manager *ictxc;
 	s32 i;
 
-	ictxc = (struct nvfuse_ictx_manager *)spdk_malloc(sizeof(struct nvfuse_ictx_manager), 0, NULL);
+	ictxc = (struct nvfuse_ictx_manager *)spdk_dma_malloc(sizeof(struct nvfuse_ictx_manager), 0, NULL);
 	if (ictxc == NULL) {
 		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
@@ -1213,7 +1213,7 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 		ictxc->ictxc_hash_count[i] = 0;
 	}
 
-	ictxc->ictx_buf = spdk_malloc(sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE, 0, NULL);
+	ictxc->ictx_buf = spdk_dma_malloc(sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE, 0, NULL);
 
 	printf(" ictx cache size = %d \n", (int)sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE);
 
@@ -1251,8 +1251,8 @@ void nvfuse_deinit_ictx_cache(struct nvfuse_superblock *sb)
 		}
 	}
 	/* deallocate whole ictx buffer */
-	spdk_free(sb->sb_ictxc->ictx_buf);
+	spdk_dma_free(sb->sb_ictxc->ictx_buf);
 	assert(removed_count == NVFUSE_ICTXC_SIZE);
-	spdk_free(sb->sb_ictxc);
+	spdk_dma_free(sb->sb_ictxc);
 }
 
