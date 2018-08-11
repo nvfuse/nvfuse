@@ -71,8 +71,8 @@ After finalizing an NVFUSE application, the kernel NVMe driver and hugepages can
 To do
 =====
 
- - FS consistency management via light-weight journaling
- - Integration with scalable fiel system such as Ceph and GlusterFS
+ - File system consistency management via light-weight journaling
+ - Integration with scalable file system such as Ceph and GlusterFS
 
 Contact
 =======
