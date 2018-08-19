@@ -15,41 +15,35 @@
 
 #include <stdio.h>
 #include <fcntl.h>
+#include "spdk/env.h"
 #include "nvfuse_core.h"
 #include "nvfuse_config.h"
 #include "nvfuse_api.h"
-#include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_aio.h"
+#include "nvfuse_debug.h"
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
-int main(int argc, char *argv[])
+static struct nvfuse_ipc_context ipc_ctx;
+static struct nvfuse_params params;
+static struct nvfuse_handle *nvh;
+
+static void helloworld_run(void *arg1, void *arg2)
 {
-	struct nvfuse_io_manager io_manager;
-	struct nvfuse_ipc_context ipc_ctx;
-	struct nvfuse_params params;
-	struct nvfuse_handle *nvh;
-	int ret;
 	int fd;
 	int count;
 	char *buf;
-
-	ret = nvfuse_parse_args(argc, argv, &params);
-	if (ret < 0)
-		return -1;
-
-	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
-	if (ret < 0)
-		return -1;
+	int ret;
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
+	nvh = nvfuse_create_handle(&ipc_ctx, &params);
 	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
-		return -1;
+		return;
 	}
+
 
 	/* file open and create */
 	fd = nvfuse_openfile_path(nvh, "helloworld.file", O_RDWR | O_CREAT, 0);
@@ -100,6 +94,45 @@ RET:
 	;
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);
+
+	spdk_app_stop(0);
+}
+
+static void reactor_run(void *arg1, void *arg2)
+{
+	struct spdk_event *event;
+	u32 i;
+
+	/* Send events to start all I/O */
+	SPDK_ENV_FOREACH_CORE(i) {
+		printf(" allocate event on lcore = %d \n", i);
+		if (i == 1) {
+			event = spdk_event_allocate(i, helloworld_run,
+						    NULL, NULL);
+			spdk_event_call(event);
+		}
+	}
+}
+
+int main(int argc, char *argv[])
+{
+	s32 ret;
+
+	ret = nvfuse_parse_args(argc, argv, &params);
+	if (ret < 0)
+		return -1;
+
+	ret = nvfuse_configure_spdk(&ipc_ctx, &params, NVFUSE_MAX_AIO_DEPTH);
+	if (ret < 0)
+		return -1;
+
+#ifndef NVFUSE_USE_CEPH_SPDK
+	spdk_app_start(&params.opts, reactor_run, NULL, NULL);
+#else
+	spdk_app_start(reactor_run, NULL, NULL);
+#endif
+
+	spdk_app_fini();
+
 	return 0;
 }

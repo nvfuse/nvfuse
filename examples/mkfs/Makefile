@@ -16,8 +16,8 @@
 NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
-include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 include $(NVFUSE_ROOT_DIR)/nvfuse.mk
+include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 
 TARGET_NVFUSE = mkfs.nvfuse 
 

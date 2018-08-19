@@ -16,8 +16,8 @@
 NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
-include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 include $(NVFUSE_ROOT_DIR)/nvfuse.mk
+include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 
 TARGET = helloworld
 SRCS   = helloworld.o
@@ -37,7 +37,7 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) $(CEPH_COMPILE) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 $(TARGET)	:	$(OBJS)
 	$(CC) -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)

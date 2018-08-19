@@ -30,11 +30,11 @@
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
-#include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
 #include "nvfuse_misc.h"
+#include "nvfuse_debug.h"
 
 #define DEINIT_IOM	1
 #define UMOUNT		1
@@ -44,9 +44,8 @@
 #define RANDOM		1
 #define SEQUENTIAL	0
 
-/* global io_manager */
-static struct nvfuse_io_manager _g_io_manager;
-static struct nvfuse_io_manager *g_io_manager = &_g_io_manager;
+#define MAX_AIO_CTX	256
+
 /* global ipc_context */
 struct nvfuse_ipc_context _g_ipc_ctx;
 struct nvfuse_ipc_context *g_ipc_ctx = &_g_ipc_ctx;
@@ -58,6 +57,144 @@ int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_ra
 	     s32 direct, s32 qdepth, s32 runtime);
 void perf_usage(char *cmd);
 void _print_stats(struct perf_stat_aio *cur_stat, char *name);
+
+static s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size,
+		       u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand, s32 runtime)
+{
+	struct nvfuse_aio_queue aioq;
+	struct nvfuse_aio_req *list[MAX_AIO_CTX];
+	s32 cur_depth = 0;
+	s32 cnt, idx;
+	s32 ret;
+
+	s32 last_progress = 0;
+	s32 curr_progress = 0;
+	s32 flags;
+	s64 file_allocated_size;
+	struct stat stat_buf;
+	struct timeval tv;
+	struct user_context user_ctx;
+
+	user_ctx.file_size = file_size;
+	user_ctx.io_size = io_size;
+	user_ctx.qdepth = qdepth;
+	user_ctx.is_read = is_read;
+	user_ctx.is_rand = is_rand;
+
+	dprintf_info(AIO, " aiotest %s filesize = %0.3fMB io_size = %d qdpeth = %d (%c) direct (%d)\n", str,
+	       (double)file_size / (1024 * 1024), io_size, qdepth, is_read ? 'R' : 'W', is_direct);
+
+	flags = O_RDWR | O_CREAT;
+	if (is_direct)
+		flags |= O_DIRECT;
+
+	user_ctx.fd = nvfuse_openfile_path(nvh, str, flags, 0);
+	if (user_ctx.fd < 0) {
+		dprintf_info(AIO, " Error: file open or create \n");
+		return -1;
+	}
+
+	dprintf_info(AIO, " start fallocate %s size %lu \n", str, (long)file_size);
+	/* pre-allocation of data blocks*/
+	nvfuse_fallocate(nvh, str, 0, file_size);
+
+	/* temp test */
+	//nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
+
+	dprintf_info(AIO, " finish fallocate %s size %lu \n", str, (long)file_size);
+
+	ret = nvfuse_getattr(nvh, str, &stat_buf);
+	if (ret) {
+		dprintf_error(AIO, " No such file %s\n", str);
+		return -1;
+	}
+	/* NOTE: Allocated size may differ from requested size. */
+	file_allocated_size = stat_buf.st_size;
+
+	dprintf_info(AIO, " requested size %ldMB.\n", (long)file_size / NVFUSE_MEGA_BYTES);
+	dprintf_info(AIO, " allocated size %ldMB.\n", (long)file_allocated_size / NVFUSE_MEGA_BYTES);
+
+#if (NVFUSE_OS == NVFUSE_OS_LINUX)
+	file_size = file_allocated_size;
+#endif
+	/* initialization of aio queue */
+	ret = nvfuse_aio_queue_init(nvh->nvh_target, &aioq, qdepth);
+	if (ret) {
+		dprintf_error(AIO, " Error: aio queue init () with ret = %d\n ", ret);
+		return -1;
+	}
+
+	user_ctx.io_curr = 0;
+	user_ctx.io_remaining = file_size;
+
+	/* user data buffer allocation */
+	user_ctx.user_buf = nvfuse_alloc_aligned_buffer(io_size * qdepth);
+	if (user_ctx.user_buf == NULL) {
+		dprintf_error(AIO, " Error: malloc()\n");
+		return -1;
+	}
+	user_ctx.buf_ptr = 0;
+
+	gettimeofday(&tv, NULL);
+	while (user_ctx.io_remaining > 0 || cur_depth) {
+		//dprintf_info(AIO, " total depth = %d arq depth = %d\n", cur_depth, aioq.arq_cur_depth);
+        for (idx = 0; idx < MAX_AIO_CTX; idx++) {
+            if (cur_depth >= (s32)qdepth || user_ctx.io_remaining == 0)
+                break;
+
+            list[idx] = nvfuse_aio_test_alloc_req(nvh, &user_ctx);
+            if (list[idx] == NULL) 
+                break;
+
+            cur_depth++;
+        }
+
+		/* progress bar */
+		curr_progress = (user_ctx.io_curr * 100 / file_size);
+		if (curr_progress != last_progress) {
+			printf(".");
+			if (curr_progress % 10 == 0) {
+				printf("%d%% %.3fMB/s\n", curr_progress,
+				       (double)user_ctx.io_curr / NVFUSE_MEGA_BYTES / nvfuse_time_since_now(&tv));
+			}
+			fflush(stdout);
+			last_progress = curr_progress;
+		}
+
+        /* aio submission */
+        ret = nvfuse_io_submit(nvh, &aioq, idx, list);
+        if (ret) {
+            dprintf_error(AIO, " Error: queue submision \n");
+            goto CLOSE_FD;
+        }
+
+RETRY_WAIT_COMPLETION:
+		//dprintf_info(AIO, " Submission depth = %d\n", cur_depth);
+		/* aio completion */
+		cnt = nvfuse_io_getevents(&nvh->nvh_sb, &aioq, 1, MAX_AIO_CTX, list);
+        for (idx = 0; idx < cnt; idx++) {
+			cur_depth--;
+            nvfuse_aio_test_callback(list[idx]);
+        }
+
+		if (runtime && nvfuse_time_since_now(&tv) >= (double)runtime) {
+			if (cur_depth) {
+				goto RETRY_WAIT_COMPLETION;
+			}
+			break;
+		}
+	}
+
+	assert(cur_depth == 0);
+
+CLOSE_FD:
+	nvfuse_aio_queue_deinit(nvh, &aioq);
+	nvfuse_free_aligned_buffer(user_ctx.user_buf);
+	nvfuse_fsync(nvh, user_ctx.fd);
+	nvfuse_closefile(nvh, user_ctx.fd);
+
+	return 0;
+}
 
 int perf_aio(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 is_read,
 	     s32 direct, s32 qdepth, s32 runtime)
@@ -99,7 +236,7 @@ void perf_usage(char *cmd)
 	printf("\t-W: write workload (e.g., write or read)\n");
 }
 
-#define AIO 1
+#define USE_AIO 1
 static int core_argc = 0;
 static char *core_argv[128];
 static int app_argc = 0;
@@ -113,34 +250,6 @@ static int is_rand = 0; /* sequential set to as default */
 static int direct_io = 0; /* buffered I/O set to as default */
 static int is_write = 0; /* write workload set to as default */
 static int runtime = 0; /* runtime in seconds */
-
-static int perf_main(void *arg)
-{
-	struct nvfuse_handle *nvh;
-	s32 ret = 0;
-
-	printf(" start perf (lcore = %d)...\n", rte_lcore_id());
-
-	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(g_io_manager, g_ipc_ctx, g_params);
-	if (nvh == NULL) {
-		fprintf(stderr, "Error: nvfuse_create_handle()\n");
-		return -1;
-	}
-
-	printf("\n");
-
-	if (ioengine == AIO) {
-		ret = perf_aio(nvh, ((s64)file_size * MB), block_size, is_rand, is_write ? WRITE : READ, direct_io,
-			       qdepth, runtime);
-	} else {
-		printf(" sync io is not supported \n");;
-	}
-
-	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
-
-	return ret;
-}
 
 void _print_stats(struct perf_stat_aio *cur_stat, char *name)
 {
@@ -235,6 +344,50 @@ static void print_stats(s32 num_cores)
 	free(per_core_stat);
 }
 
+static void perf_run(void *arg1, void *arg2)
+{
+	struct nvfuse_handle *nvh;
+
+	printf(" start perf (lcore = %d)...\n", rte_lcore_id());
+
+	/* create nvfuse_handle with user spcified parameters */
+	nvh = nvfuse_create_handle(g_ipc_ctx, g_params);
+	if (nvh == NULL) {
+		fprintf(stderr, "Error: nvfuse_create_handle()\n");
+		return;
+	}
+
+	printf("\n");
+
+	if (ioengine == AIO) {
+		perf_aio(nvh, ((s64)file_size * MB), block_size, is_rand, is_write ? WRITE : READ, direct_io,
+			       qdepth, runtime);
+	} else {
+		printf(" sync io is not supported \n");;
+	}
+
+	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
+
+	spdk_app_stop(0);
+	exit(0);
+}
+
+static void reactor_run(void *arg1, void *arg2)
+{
+	struct spdk_event *event;
+	u32 i;
+
+	/* Send events to start all I/O */
+	SPDK_ENV_FOREACH_CORE(i) {
+		printf(" allocate event on lcore = %d \n", i);
+		if (i == 1) {
+			event = spdk_event_allocate(i, perf_run,
+						    NULL, NULL);
+			spdk_event_call(event);
+		}
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int ret = 0;
@@ -308,61 +461,21 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	{
-		unsigned lcore_id;
-		unsigned num_cores = 0;
+	ret = nvfuse_configure_spdk(g_ipc_ctx, g_params, NVFUSE_MAX_AIO_DEPTH);
+	if (ret < 0)
+		return -1;
 
-		ret = nvfuse_configure_spdk(g_io_manager, g_ipc_ctx, g_params->cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
-		if (ret < 0)
-			return -1;
-#if 1
-		/* call lcore_recv() on every slave lcore */
-		RTE_LCORE_FOREACH_SLAVE(lcore_id) {
-			printf(" launch secondary lcore = %d \n", lcore_id);
-			rte_eal_remote_launch(perf_main, NULL, lcore_id);
-			num_cores++;
-		}
-
-		printf(" launch primary lcore = %d \n", rte_lcore_id());
-
-		num_cores++;
-		ret = perf_main(NULL);
-		if (ret < 0)
-			return -1;
-
-		//rte_eal_mp_wait_lcore();
-		RTE_LCORE_FOREACH(lcore_id) {
-			printf(" wait lcore = %d \n", lcore_id);
-			if (rte_eal_wait_lcore(lcore_id) < 0) {
-				ret = -1;
-			}
-		}
-
-		print_stats(num_cores);
-
+#ifndef NVFUSE_USE_CEPH_SPDK
+	spdk_app_start(&g_params->opts, reactor_run, NULL, NULL);
 #else
-		{
-			pthread_t thread_t[4];
-			int status;
-			int i;
-
-			for (i = 0; i < 1; i++) {
-				if (pthread_create(&thread_t[i], NULL, perf_main, NULL) < 0) {
-					perror("thread create error:");
-					exit(0);
-				}
-			}
-
-			for (i = 0; i < 1; i++) {
-				pthread_join(thread_t[i], (void **)&status);
-			}
-		}
+	spdk_app_start(reactor_run, NULL, NULL);
 #endif
 
-		nvfuse_deinit_spdk(g_io_manager, g_ipc_ctx);
-	}
+	spdk_app_fini();
 
-	return ret;
+	print_stats(1);
+
+	return 0;
 
 INVALID_ARGS:
 	;

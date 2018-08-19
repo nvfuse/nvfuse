@@ -20,7 +20,6 @@
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
-#include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
@@ -31,9 +30,6 @@
 #define DEINIT_IOM	1
 #define UMOUNT		1
 
-/* global io_manager */
-static struct nvfuse_io_manager _g_io_manager;
-static struct nvfuse_io_manager *g_io_manager = &_g_io_manager;
 /* global ipc_context */
 static struct nvfuse_ipc_context _g_ipc_ctx;
 static struct nvfuse_ipc_context *g_ipc_ctx = &_g_ipc_ctx;
@@ -154,7 +150,7 @@ int ft_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 		ft_progress_report((s32)(io_size / block_size), (s32)(file_allocated_size / block_size));
 	}
 	printf(" write with fsync throughput %.3fMB/s\n",
-	       (double)file_allocated_size / MB / time_since_now(&tv));
+	       (double)file_allocated_size / MB / nvfuse_time_since_now(&tv));
 
 	nvfuse_closefile(nvh, fid);
 
@@ -166,7 +162,7 @@ int ft_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 		return -1;
 	}
 	printf(" nvfuse rmfile throughput %.3fMB/s\n",
-	       (double)file_allocated_size / MB / time_since_now(&tv));
+	       (double)file_allocated_size / MB / nvfuse_time_since_now(&tv));
 
 RET:
 	nvfuse_free_aligned_buffer(user_buffer);
@@ -201,7 +197,7 @@ static int ft_main(void *arg)
 	s32 ret;
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(g_io_manager, g_ipc_ctx, g_params);
+	nvh = nvfuse_create_handle(g_ipc_ctx, g_params);
 	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
@@ -221,7 +217,7 @@ static int ft_main(void *arg)
 	/* main execution */
 	ret = ft_create_max_sized_file(nvh, 0);
 
-	execution_time = time_since_now(&tv);
+	execution_time = nvfuse_time_since_now(&tv);
 
 	memset(&perf_stat, 0x00, sizeof(union perf_stat));
 
@@ -459,7 +455,7 @@ int main(int argc, char *argv[])
 	}
 
 
-	ret = nvfuse_configure_spdk(g_io_manager, g_ipc_ctx, g_params->cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	ret = nvfuse_configure_spdk(g_ipc_ctx, g_params, NVFUSE_MAX_AIO_DEPTH);
 	if (ret < 0)
 		return -1;
 
@@ -521,7 +517,7 @@ int main(int argc, char *argv[])
 
 	print_stats(num_cores, 1);
 
-	nvfuse_deinit_spdk(g_io_manager, g_ipc_ctx);
+	nvfuse_deinit_spdk(g_ipc_ctx);
 
 	return ret;
 

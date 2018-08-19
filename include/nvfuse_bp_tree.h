@@ -238,7 +238,9 @@ typedef struct {
 #define B_GET_PAIR(m,d, k) m->get_pair(d, k)
 #define B_iALLOC(m, o, n) m->alloc(m, 0, o, n)
 #define B_dALLOC(m, o, n) m->alloc(m, 1, o, n)
+/* release (free) memory node */
 #define B_RELEASE(m, p) m->release(m, p)
+/* release buffer head (bh) */
 #define B_RELEASE_BH(m, p) m->release_bh(p)
 
 #define B_DEALLOC(m, p) m->dealloc(m, p)
@@ -412,7 +414,7 @@ void bp_copy_raw_to_node(index_node_t *node, char *raw);
 void bp_print_node(index_node_t *node);
 void bubble_sort(master_node_t *master, key_pair_t *pair, int num, int(*compare)(void *src1,
 		 void *src2));
-int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master);
+int bp_alloc_inode_and_master(struct nvfuse_superblock *sb, master_node_t *master);
 void bp_deinit_master(master_node_t *master);
 offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx);
 

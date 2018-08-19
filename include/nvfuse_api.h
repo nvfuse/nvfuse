@@ -22,16 +22,15 @@
 #ifndef _NVFUSE_API_H
 #define _NVFUSE_API_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 //#define VERIFY_BEFORE_RM_FILE
 
-s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count,
-				  nvfuse_off_t woffset);
 s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count,
 		     nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count);
 
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
-		struct nvfuse_ipc_context *ipc_ctx,
-		struct nvfuse_params *params);
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_ipc_context *ipc_ctx, struct nvfuse_params *params);
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount);
 
 void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
@@ -41,6 +40,14 @@ void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
 s32 nvfuse_lookup(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx **file_ictx,
 		  struct nvfuse_dir_entry *file_entry,
 		  const s8 *filename, const s32 cur_dir_ino);
+
+struct nvfuse_dir_entry * nvfuse_lookup_linear(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, 
+												struct nvfuse_inode *dir_inode, const s8 *filename, 
+												struct nvfuse_buffer_head **dir_bh_return);
+
+struct nvfuse_dir_entry * nvfuse_lookup_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+												struct nvfuse_inode *dir_inode, const s8 *filename, 
+												struct nvfuse_buffer_head **dir_bh_return);
 
 s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags, int mode);
 s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, s32 flags,
@@ -143,8 +150,11 @@ s8 *nvfuse_get_core_options(void);
 s32 nvfuse_is_core_option(s8 option);
 s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params);
 
-s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx,
-						  s32 cpu_core_mask, s32 qdepth);
-void nvfuse_deinit_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx);
+s32 nvfuse_configure_spdk(struct nvfuse_ipc_context *ipc_ctx, struct nvfuse_params *params, s32 qdepth);
+void nvfuse_deinit_spdk(struct nvfuse_ipc_context *ipc_ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

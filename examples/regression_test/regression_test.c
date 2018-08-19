@@ -20,11 +20,12 @@
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
-#include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
 #include "nvfuse_misc.h"
+#include "nvfuse_buffer_cache.h"
+#include "nvfuse_debug.h"
 #include "spdk/env.h"
 #include <rte_lcore.h>
 
@@ -47,9 +48,8 @@
 /* 1 million create/delete test */
 #define MILL_TEST   3
 
-/* global io_manager */
-static struct nvfuse_io_manager _g_io_manager;
-static struct nvfuse_io_manager *g_io_manager = &_g_io_manager;
+#define MAX_AIO_CTX	256
+
 /* global ipc_context */
 static struct nvfuse_ipc_context _g_ipc_ctx;
 static struct nvfuse_ipc_context *g_ipc_ctx = &_g_ipc_ctx;
@@ -74,6 +74,8 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg);
 void rt_usage(char *cmd);
 static int rt_main(void *arg);
 static void print_stats(s32 num_cores, s32 num_tc);
+void regression_run(void *arg1, void *arg2);
+void reactor_run(void *arg1, void *arg2);
 int main(int argc, char *argv[]);
 
 void rt_progress_reset(void)
@@ -86,17 +88,17 @@ void rt_progress_report(s32 curr, s32 max)
 	int curr_percent;
 
 	/* FIXME: */
-	if (rte_lcore_id() == 1) {
-		curr_percent = (curr + 1) * 100 / max;
+	//if (rte_lcore_id() == 1) {
+	curr_percent = (curr + 1) * 100 / max;
 
-		if	(curr_percent != last_percent) {
-			last_percent = curr_percent;
-			printf(".");
-			if (curr_percent % 10 == 0)
-				printf("%d%%\n", curr_percent);
-			fflush(stdout);
-		}
+	if	(curr_percent != last_percent) {
+		last_percent = curr_percent;
+		printf(".");
+		if (curr_percent % 10 == 0)
+			printf("%d%%\n", curr_percent);
+		fflush(stdout);
 	}
+	//}
 }
 
 char *rt_decode_test_type(s32 type)
@@ -170,7 +172,7 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
 	printf(" Finish: creating null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 	printf(" bp tree cpu = %f sec\n",
 	       (double)nvh->nvh_sb.bp_set_index_tsc / (double)spdk_get_ticks_hz());
 	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc / (double)spdk_get_ticks_hz());
@@ -196,7 +198,7 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 	}
 	printf(" Finish: looking up null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -216,9 +218,14 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 	}
 	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 
 	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
+
+#if 0
+	nvfuse_print_ictx_list_count(&nvh->nvh_sb, BUFFER_TYPE_DIRTY);
+	nvfuse_print_ictx_list(&nvh->nvh_sb, BUFFER_TYPE_DIRTY);
+#endif
 
 	return 0;
 }
@@ -272,7 +279,7 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
 	printf(" Finish: creating null directories (0x%x) %.3f OPS (%.f sec). \n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 	printf(" bp tree cpu = %f sec\n",
 	       (double)nvh->nvh_sb.bp_set_index_tsc / (double)spdk_get_ticks_hz());
 	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc / (double)spdk_get_ticks_hz());
@@ -297,7 +304,7 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 	}
 	printf(" Finish: looking up null directories (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -319,7 +326,12 @@ int rt_create_dirs(struct nvfuse_handle *nvh, u32 arg)
 	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
 	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
+
+#if 0
+	nvfuse_print_ictx_list_count(&nvh->nvh_sb, BUFFER_TYPE_DIRTY);
+	nvfuse_print_ictx_list(&nvh->nvh_sb, BUFFER_TYPE_DIRTY);
+#endif
 
 	return 0;
 }
@@ -385,7 +397,7 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 	printf(" allocated size %ldMB.\n", (long)file_allocated_size / MB);
 
 	printf(" nvfuse fallocate throughput %.3fMB/s (%0.3fs).\n",
-	       (double)file_allocated_size / MB / time_since_now(&tv), time_since_now(&tv));
+	       (double)file_allocated_size / MB / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 
 	gettimeofday(&tv, NULL);
 	printf(" Start: rmfile %s size %luMB \n", str, (long)file_allocated_size / MB);
@@ -395,11 +407,149 @@ int rt_create_max_sized_file(struct nvfuse_handle *nvh, u32 arg)
 		return -1;
 	}
 	printf(" nvfuse rmfile throughput %.3fMB/s\n",
-	       (double)file_allocated_size / MB / time_since_now(&tv));
+	       (double)file_allocated_size / MB / nvfuse_time_since_now(&tv));
 
 	printf("\n Finish: Fallocate and Deallocate.\n");
 
 	return NVFUSE_SUCCESS;
+}
+
+static s32 nvfuse_aio_test_rw(struct nvfuse_handle *nvh, s8 *str, s64 file_size, u32 io_size,
+		       u32 qdepth, u32 is_read, u32 is_direct, u32 is_rand, s32 runtime)
+{
+	struct nvfuse_aio_queue aioq;
+	struct nvfuse_aio_req *list[MAX_AIO_CTX];
+	s32 cur_depth = 0;
+	s32 cnt, idx;
+	s32 ret;
+
+	s32 last_progress = 0;
+	s32 curr_progress = 0;
+	s32 flags;
+	s64 file_allocated_size;
+	struct stat stat_buf;
+	struct timeval tv;
+	struct user_context user_ctx;
+
+	user_ctx.file_size = file_size;
+	user_ctx.io_size = io_size;
+	user_ctx.qdepth = qdepth;
+	user_ctx.is_read = is_read;
+	user_ctx.is_rand = is_rand;
+
+	dprintf_info(AIO, " aiotest %s filesize = %0.3fMB io_size = %d qdpeth = %d (%c) direct (%d)\n", str,
+	       (double)file_size / (1024 * 1024), io_size, qdepth, is_read ? 'R' : 'W', is_direct);
+
+	flags = O_RDWR | O_CREAT;
+	if (is_direct)
+		flags |= O_DIRECT;
+
+	user_ctx.fd = nvfuse_openfile_path(nvh, str, flags, 0);
+	if (user_ctx.fd < 0) {
+		dprintf_info(AIO, " Error: file open or create \n");
+		return -1;
+	}
+
+	dprintf_info(AIO, " start fallocate %s size %lu \n", str, (long)file_size);
+	/* pre-allocation of data blocks*/
+	nvfuse_fallocate(nvh, str, 0, file_size);
+
+	/* temp test */
+	//nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
+
+	dprintf_info(AIO, " finish fallocate %s size %lu \n", str, (long)file_size);
+
+	ret = nvfuse_getattr(nvh, str, &stat_buf);
+	if (ret) {
+		dprintf_error(AIO, " No such file %s\n", str);
+		return -1;
+	}
+	/* NOTE: Allocated size may differ from requested size. */
+	file_allocated_size = stat_buf.st_size;
+
+	dprintf_info(AIO, " requested size %ldMB.\n", (long)file_size / NVFUSE_MEGA_BYTES);
+	dprintf_info(AIO, " allocated size %ldMB.\n", (long)file_allocated_size / NVFUSE_MEGA_BYTES);
+
+#if (NVFUSE_OS == NVFUSE_OS_LINUX)
+	file_size = file_allocated_size;
+#endif
+	/* initialization of aio queue */
+	ret = nvfuse_aio_queue_init(nvh->nvh_target, &aioq, qdepth);
+	if (ret) {
+		dprintf_error(AIO, " Error: aio queue init () with ret = %d\n ", ret);
+		return -1;
+	}
+
+	user_ctx.io_curr = 0;
+	user_ctx.io_remaining = file_size;
+
+	/* user data buffer allocation */
+	user_ctx.user_buf = nvfuse_alloc_aligned_buffer(io_size * qdepth);
+	if (user_ctx.user_buf == NULL) {
+		dprintf_error(AIO, " Error: malloc()\n");
+		return -1;
+	}
+	user_ctx.buf_ptr = 0;
+
+	gettimeofday(&tv, NULL);
+	while (user_ctx.io_remaining > 0 || cur_depth) {
+		//dprintf_info(AIO, " total depth = %d arq depth = %d\n", cur_depth, aioq.arq_cur_depth);
+		for (idx = 0; idx < MAX_AIO_CTX; idx++) {
+			if (cur_depth >= (s32)qdepth || user_ctx.io_remaining == 0)
+				break;
+
+			list[idx] = nvfuse_aio_test_alloc_req(nvh, &user_ctx);
+			if (list[idx] == NULL) 
+				break;
+
+			cur_depth++;
+		}
+
+		/* progress bar */
+		curr_progress = (user_ctx.io_curr * 100 / file_size);
+		if (curr_progress != last_progress) {
+			printf(".");
+			if (curr_progress % 10 == 0) {
+				printf("%d%% %.3fMB avg req\n", curr_progress,
+				       (double)user_ctx.io_curr / NVFUSE_MEGA_BYTES / nvfuse_time_since_now(&tv));
+			}
+			fflush(stdout);
+			last_progress = curr_progress;
+		}
+
+		/* aio submission */
+		ret = nvfuse_io_submit(nvh, &aioq, idx, list);
+		if (ret) {
+			dprintf_error(AIO, " Error: queue submision \n");
+			goto CLOSE_FD;
+		}
+
+RETRY_WAIT_COMPLETION:
+		//dprintf_info(AIO, " Submission depth = %d\n", cur_depth);
+		/* aio completion */
+		cnt = nvfuse_io_getevents(&nvh->nvh_sb, &aioq, 1, MAX_AIO_CTX, list);
+		for (idx = 0; idx < cnt; idx++) {
+			cur_depth--;
+			nvfuse_aio_test_callback(list[idx]);
+		}
+
+		if (runtime && nvfuse_time_since_now(&tv) >= (double)runtime) {
+			if (cur_depth) {
+				goto RETRY_WAIT_COMPLETION;
+			}
+			break;
+		}
+	}
+
+	assert(cur_depth == 0);
+
+CLOSE_FD:
+	nvfuse_aio_queue_deinit(nvh, &aioq);
+	nvfuse_free_aligned_buffer(user_ctx.user_buf);
+	nvfuse_fsync(nvh, user_ctx.fd);
+	nvfuse_closefile(nvh, user_ctx.fd);
+
+	return 0;
 }
 
 int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 is_rand, s32 direct,
@@ -420,7 +570,7 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 			printf(" Error: aio write test \n");
 			goto AIO_ERROR;
 		}
-		printf(" nvfuse aio write through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
+		printf(" nvfuse aio write through %.3f MB/s\n", (double)file_size / MB / nvfuse_time_since_now(&tv));
 
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0) {
@@ -437,7 +587,7 @@ int rt_gen_aio_rw(struct nvfuse_handle *nvh, s64 file_size, s32 block_size, s32 
 			printf(" Error: aio read test \n");
 			goto AIO_ERROR;
 		}
-		printf(" nvfuse aio read through %.3f MB/s\n", (double)file_size / MB / time_since_now(&tv));
+		printf(" nvfuse aio read through %.3f MB/s\n", (double)file_size / MB / nvfuse_time_since_now(&tv));
 
 		res = nvfuse_rmfile_path(nvh, str);
 		if (res < 0) {
@@ -595,8 +745,8 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, nr);
 	}
-	printf(" Finish: creating 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv),
-	       time_since_now(&tv));
+	printf(" Finish: creating 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / nvfuse_time_since_now(&tv),
+	       nvfuse_time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -617,8 +767,8 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, nr);
 	}
-	printf(" Finish: looking up 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv),
-	       time_since_now(&tv));
+	printf(" Finish: looking up 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / nvfuse_time_since_now(&tv),
+	       nvfuse_time_since_now(&tv));
 
 	/* reset progress percent */
 	rt_progress_reset();
@@ -636,8 +786,8 @@ int rt_create_4KB_files(struct nvfuse_handle *nvh, u32 arg)
 		/* update progress percent */
 		rt_progress_report(i, nr);
 	}
-	printf(" Finish: deleting 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / time_since_now(&tv),
-	       time_since_now(&tv));
+	printf(" Finish: deleting 4KB files (0x%x) %.3f OPS (%0.3fs).\n", nr, nr / nvfuse_time_since_now(&tv),
+	       nvfuse_time_since_now(&tv));
 
 	return NVFUSE_SUCCESS;
 
@@ -689,7 +839,7 @@ static int rt_main(void *arg)
 	rusage_stat = (struct perf_stat_rusage *) &_perf_stat_rusage;
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(g_io_manager, g_ipc_ctx, g_params);
+	nvh = nvfuse_create_handle(g_ipc_ctx, g_params);
 	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
@@ -718,7 +868,7 @@ static int rt_main(void *arg)
 			goto RET;
 		}
 
-		execution_time = time_since_now(&tv);
+		execution_time = nvfuse_time_since_now(&tv);
 
 		memset(&perf_stat, 0x00, sizeof(union perf_stat));
 
@@ -955,6 +1105,28 @@ static void print_stats(s32 num_cores, s32 num_tc)
 	}
 }
 
+void regression_run(void *arg1, void *arg2)
+{
+	rt_main((void *)1);
+	spdk_app_stop(0);
+}
+
+void reactor_run(void *arg1, void *arg2)
+{
+	struct spdk_event *event;
+	u32 i;
+
+	/* Send events to start all I/O */
+	SPDK_ENV_FOREACH_CORE(i) {
+		printf(" allocate event on lcore = %d \n", i);
+		if (i == 1) {
+			event = spdk_event_allocate(i, regression_run,
+						    NULL, NULL);
+			spdk_event_call(event);
+		}
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int core_argc = 0;
@@ -964,7 +1136,10 @@ int main(int argc, char *argv[])
 	char op;
 	int ret = 0;
 	int num_cores = 0;
+//#define USE_LCORE_ID
+#ifdef USE_LCORE_ID
 	int lcore_id;
+#endif
 
 	/* distinguish cmd line into core args and app args */
 	nvfuse_distinguish_core_and_app_options(argc, argv,
@@ -975,15 +1150,7 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		return -1;
 
-#if 0
-	if (__builtin_popcount((u32)g_params->cpu_core_mask) > 1) {
-		printf(" This example is only executed on single core.\n");
-		printf(" Given cpu core mask = %x \n", g_params->cpu_core_mask);
-		return -1;
-	}
-#endif
-
-	ret = nvfuse_configure_spdk(g_io_manager, g_ipc_ctx, g_params->cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	ret = nvfuse_configure_spdk(g_ipc_ctx, g_params, NVFUSE_MAX_AIO_DEPTH);
 	if (ret < 0)
 		return -1;
 
@@ -1003,32 +1170,21 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	/* call lcore_recv() on every slave lcore */
-	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
-		printf(" launch secondary lcore = %d \n", lcore_id);
-		rte_eal_remote_launch(rt_main, (void *)num_cores, lcore_id);
-		num_cores++;
-	}
-
 	printf(" launch primary lcore = %d \n", rte_lcore_id());
 
-	ret = rt_main((void *)num_cores);
-	if (ret < 0)
-		return -1;
+#ifndef NVFUSE_USE_CEPH_SPDK
+	spdk_app_start(&g_params->opts, reactor_run, NULL, NULL);
+#else
+	spdk_app_start(reactor_run, NULL, NULL);
+#endif
+
+	spdk_app_fini();
 
 	num_cores++;
 
-	//rte_eal_mp_wait_lcore();
-	RTE_LCORE_FOREACH(lcore_id) {
-		printf(" wait lcore = %d \n", lcore_id);
-		if (rte_eal_wait_lcore(lcore_id) < 0) {
-			ret = -1;
-		}
-	}
-
 	print_stats(num_cores, NUM_ELEMENTS(rt_ctx));
 
-	nvfuse_deinit_spdk(g_io_manager, g_ipc_ctx);
+	nvfuse_deinit_spdk(g_ipc_ctx);
 
 	return ret;
 

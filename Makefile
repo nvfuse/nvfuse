@@ -13,24 +13,24 @@
 # more details.
 #
 
-include spdk_config.mk
 include nvfuse.mk
+include spdk_config.mk
 
 LIB_NVFUSE = nvfuse.a
-SRCS   = nvfuse_buffer_cache.o \
+SRCS   = nvfuse_buffer_cache.o nvfuse_inode_cache.o \
 nvfuse_core.o nvfuse_gettimeofday.o \
 nvfuse_bp_tree.o nvfuse_dirhash.o \
 nvfuse_misc.o nvfuse_mkfs.o nvfuse_malloc.o nvfuse_indirect.o \
-nvfuse_spdk.o nvfuse_blkdev_io.o nvfuse_file_io.o nvfuse_ramdisk_io.o \
 nvfuse_api.o nvfuse_aio.o \
 rbtree.o \
 nvfuse_ipc_ring.o nvfuse_control_plane.o \
-nvfuse_dep.o
+nvfuse_dep.o nvfuse_flushwork.o \
+nvfuse_reactor.o nvfuse_xattr.o
 
-LDFLAGS += -lm -lpthread -laio -lrt
+LDFLAGS += -lm -lpthread -laio -lrt -luuid
 CFLAGS = $(SPDK_CFLAGS) -Iinclude -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 CFLAGS += -march=native -m64
-CFLAGS += $(WARNING_OPTION)
+CFLAGS += $(WARNING_OPTION) -fPIC
 
 
 OBJS=$(SRCS:.c=.o)
@@ -44,12 +44,18 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) $(OPTIMIZATION) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) $(OPTIMIZATION) $(CEPH_COMPILE) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ -ldl $<
 
-all:  $(LIB_NVFUSE) helloworld libfuse regression_test perf control_plane_proc fsync_test create_1m_files mkfs
+all:  $(LIB_NVFUSE) xattr_test reactor helloworld libfuse regression_test perf control_plane_proc fsync_test create_1m_files mkfs #fio_plugin 
 
 $(LIB_NVFUSE)	:	$(OBJS)
 	$(AR) rcv $@ $(OBJS)
+
+fio_plugin:
+	make -C examples/fio_plugin
+
+reactor:
+	make -C examples/reactor
 
 helloworld:
 	make -C examples/helloworld
@@ -66,6 +72,9 @@ fsync_test:
 mkfs:
 	make -C examples/mkfs
 
+xattr_test:
+	make -C examples/xattr_test
+
 create_1m_files:
 	make -C examples/create_1m_files
 
@@ -77,6 +86,8 @@ control_plane_proc:
 
 clean:
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
+	make -C examples/fio_plugin/ clean
+	make -C examples/reactor/ clean
 	make -C examples/helloworld/ clean
 	make -C examples/libfuse/ clean
 	make -C examples/regression_test/ clean
@@ -85,6 +96,7 @@ clean:
 	make -C examples/perf/ clean
 	make -C examples/control_plane_proc/ clean
 	make -C examples/mkfs/ clean
+	make -C examples/xattr_test/ clean	
 
 distclean:
 	rm -f Makefile.bak *.o *.a *~ .depend $(LIB_NVFUSE)

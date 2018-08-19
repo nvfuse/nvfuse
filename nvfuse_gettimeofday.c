@@ -92,7 +92,7 @@ double time_since(struct timeval *start_tv, struct timeval *stop_tv)
 /*
  * return seconds between start_tv and now in double precision
  */
-double time_since_now(struct timeval *start_tv)
+double nvfuse_time_since_now(struct timeval *start_tv)
 {
 	struct timeval stop_time;
 	gettimeofday(&stop_time, NULL);

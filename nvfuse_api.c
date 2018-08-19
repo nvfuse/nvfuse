@@ -31,6 +31,8 @@
 #ifdef SPDK_ENABLED
 #include "spdk/nvme.h"
 #include "spdk/env.h"
+#include "spdk/bdev.h"
+#include "spdk/event.h"
 #include <rte_lcore.h>
 #include <rte_memcpy.h>
 #endif
@@ -39,6 +41,7 @@
 #include "nvfuse_dep.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_buffer_cache.h"
+#include "nvfuse_inode_cache.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_indirect.h"
 #include "nvfuse_bp_tree.h"
@@ -46,6 +49,8 @@
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_ipc_ring.h"
+#include "nvfuse_debug.h"
+#include "nvfuse_reactor.h"
 
 void nvfuse_core_usage(char *cmd)
 {
@@ -57,9 +62,10 @@ void nvfuse_core_usage(char *cmd)
 	printf("\t-m: nvfuse mount for primary process \n");
 	printf("\t-q: driver qdepth \n");
 	printf("\t-b: buffer size (in MB) for primary process\n");
-	printf("\t-c: CPU core mask (e.g., 0x1 (default), 0x2, 0x4\n");
-	printf("\t-a: application name (e.g., rocksdb, fiebenc, redis\n");
+	printf("\t-c: CPU core mask (e.g., 0x1 (default), 0x2, 0x4)\n");
+	printf("\t-a: application name (e.g., rocksdb, fiebenc, redis)\n");
 	printf("\t-p: pre-allocation of buffers and containers\n");
+	printf("\t-o: configuration file (e.g., TransportID PCIe 01:00.0) \n");
 }
 
 void nvfuse_core_usage_example(char *cmd)
@@ -70,7 +76,7 @@ void nvfuse_core_usage_example(char *cmd)
 
 s8 *nvfuse_get_core_options()
 {
-	return "a:c:fmq:s:b:p";
+	return "a:c:fmq:s:b:p:o:";
 }
 
 s32 nvfuse_is_core_option(s8 option)
@@ -141,33 +147,56 @@ void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
 	}*/
 }
 
-s32 nvfuse_configure_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx,
-						  s32 cpu_core_mask, s32 qdepth)
+s32 nvfuse_configure_spdk(struct nvfuse_ipc_context *ipc_ctx, struct nvfuse_params *params, s32 qdepth)
 {
-	s32 ret;
+	sprintf(params->cpu_core_mask_str, "%d", params->cpu_core_mask);
 
-	/* Initialize IO Manager */
-	io_manager->type = IO_MANAGER_SPDK;
-	io_manager->cpu_core_mask = cpu_core_mask;
-	sprintf(io_manager->cpu_core_mask_str, "%d", cpu_core_mask);
+	reactor_get_opts(params->config_file, params->cpu_core_mask_str, &params->opts);
 
-	nvfuse_init_spdk(io_manager, "SPDK", "SPDK", qdepth);
+#ifdef NVFUSE_USE_CEPH_SPDK
+	spdk_app_init(&params->opts);
+#endif
 
 	/* open I/O manager */
-	io_manager->io_open(io_manager, 0);
+	//nvfuse_open(target, 0);
 
-	printf(" total blks = %ld \n", (long)io_manager->total_blkcount);
+	//dprintf_info(SPDK, " total blks = %ld \n", (long)io_manager->total_blkcount);
 
-	ret = nvfuse_ipc_init(ipc_ctx);
-	if (ret < 0) {
-		printf(" Error: ipc_init()\n");
-		return -1;
-	}
 	return 0;
+}
+
+static char *ltrim(char *str)
+{
+	char buf[128];
+	char *ptr;
+	char *dst;
+
+	memset(buf, 0x0, 128);
+
+	dst = buf;
+	ptr = (char *)str;
+
+	while (ptr < str + strlen(str)) {
+		if (!isspace(*ptr)) {
+			break;
+		}
+		ptr++;
+	}
+
+	while (ptr < str + strlen(str)) {
+		*dst = *ptr;
+		dst++;
+		ptr++;
+	}
+
+	strcpy(str, buf);
+
+	return (char *)str;
 }
 
 s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 {
+	char *config_file = NULL;
 	s32 cpu_core_mask = 0x1; /* 1 core set to as default */
 	s8 *appname = NULL; /* e.g., rocksdb */
 	s32 need_format = 0;
@@ -182,7 +211,7 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	cmd = argv[0];
 
 	if (argc == 1) {
-		fprintf(stderr, " Invalid argc = %d \n", argc);
+		dprintf_error(API, " Invalid argc = %d \n", argc);
 		goto PRINT_USAGE;
 	}
 
@@ -206,57 +235,38 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 		case 'a':
 			appname = optarg;
 			break;
-
-#if 0
-		case 't':
-			//printf(" type = %s\n", optarg);
-			if (!strcmp("spdk", optarg)) {
-#ifdef SPDK_ENABLED
-				io_manager_type = IO_MANAGER_SPDK;
-#else
-				fprintf(stderr, "Please, rebuild with both DPDK_DIR and SPDK_ROOT_DIR paths.\n");
-				return NULL;
-#endif
-			} else if (!strcmp("block", optarg)) {
-				io_manager_type = IO_MANAGER_BLKDEVIO;
-			} else if (!strcmp("file", optarg)) {
-				io_manager_type = IO_MANAGER_FILEDISK;
-			} else if (!strcmp("ramdisk", optarg)) {
-				io_manager_type = IO_MANAGER_RAMDISK;
-			} else {
-				goto PRINT_USAGE;
-			}
+		case 'o':
+			config_file = optarg;
 			break;
-#endif
 		case 'q':
 			qdepth = atoi(optarg);
 			if (qdepth == 0 || qdepth > AIO_MAX_QDEPTH) {
-				fprintf(stderr, "Invalid qdepth value = %d (max qdepth = %d)\n", qdepth, AIO_MAX_QDEPTH);
+				dprintf_error(API, "Invalid qdepth value = %d (max qdepth = %d)\n", qdepth, AIO_MAX_QDEPTH);
 			}
 			break;
 		case 's':
 			dev_size = atoi(optarg);
 			if (dev_size == 0) {
-				fprintf(stderr, "Invalid dev size = %d MB)\n", dev_size);
+				dprintf_error(API, "Invalid dev size = %d MB)\n", dev_size);
 			}
 			break;
 		case 'b':
 			buffer_size = atoi(optarg);
 			if (buffer_size == 0) {
-				fprintf(stderr, "Invalid buffer size = %d MB)\n", buffer_size);
+				dprintf_error(API, "Invalid buffer size = %d MB)\n", buffer_size);
 			}
 			break;
 		case 'p':
 			preallocation = 1;
 			break;
 		default:
-			fprintf(stderr, " Invalid op code %c in getopt()\n", op);
+			dprintf_error(API, " Invalid op code %c in getopt()\n", op);
 			goto PRINT_USAGE;
 		}
 	}
 
 	if (!spdk_process_is_primary() && appname == NULL) {
-		fprintf(stderr, "\n Application name with -a option is required.\n");
+		dprintf_error(API, "\n Application name with -a option is required.\n");
 		goto PRINT_USAGE;
 	}
 
@@ -266,6 +276,12 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	else
 		strcpy(params->appname, "primary");
 
+	config_file = ltrim(config_file);
+	if (config_file)
+		strcpy(params->config_file, config_file);
+	else
+		goto PRINT_USAGE;
+
 	params->cpu_core_mask	= cpu_core_mask;
 	params->buffer_size		= buffer_size;
 	params->qdepth			= qdepth;
@@ -273,13 +289,14 @@ s32 nvfuse_parse_args(int argc, char **argv, struct nvfuse_params *params)
 	params->need_mount		= need_mount;
 	params->preallocation	= preallocation;
 #if 1
-	printf(" appname = %s\n", appname);
-	printf(" cpu core mask = %x\n", cpu_core_mask);
-	printf(" qdepth = %d \n", qdepth);
-	printf(" buffer size = %d MB\n", buffer_size);
-	printf(" need format = %d \n", need_format);
-	printf(" need mount = %d \n", need_mount);
-	printf(" preallocation = %d \n", preallocation);
+	dprintf_info(API, " appname = %s\n", params->appname);
+	dprintf_info(API, " cpu core mask = %x\n", params->cpu_core_mask);
+	dprintf_info(API, " qdepth = %d \n", params->qdepth);
+	dprintf_info(API, " buffer size = %d MB\n", params->buffer_size);
+	dprintf_info(API, " need format = %d \n", params->need_format);
+	dprintf_info(API, " need mount = %d \n", params->need_mount);
+	dprintf_info(API, " preallocation = %d \n", params->preallocation);
+	dprintf_info(API, " config file = %s \n", params->config_file);
 #endif
 
 	return 0;
@@ -290,40 +307,51 @@ PRINT_USAGE:
 	return -1;
 }
 
-struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
-		struct nvfuse_ipc_context *ipc_ctx,
-		struct nvfuse_params *params)
+#ifdef NVFUSE_USE_CEPH_SPDK
+static inline u32 spdk_bdev_get_block_size(struct spdk_bdev *bdev)
+{
+	return bdev->blocklen;
+}
+
+static inline u64 spdk_bdev_get_num_blocks(struct spdk_bdev *bdev)
+{
+	return bdev->blockcnt;
+}
+
+static inline s8 * spdk_bdev_get_name(struct spdk_bdev *bdev)
+{
+	return bdev->name;
+}
+#endif
+
+struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_ipc_context *ipc_ctx, struct nvfuse_params *params)
 {
 	struct nvfuse_handle *nvh;
+	struct spdk_bdev *bdev;
 	s32 ret;
 
 	/* allocation of nvfuse handle */
 	nvh = spdk_dma_zmalloc(sizeof(struct nvfuse_handle), 0, NULL);
 	if (nvh == NULL) {
-		printf(" Error: nvfuse_create_handle due to lack of free memory \n");
+		dprintf_error(MEMALLOC, " Error: nvfuse_create_handle due to lack of free memory \n");
 		return NULL;
 	}
-	memset(nvh, 0x00, sizeof(struct nvfuse_handle));
 
-	/* copy instance of io_manager */
-	memcpy(&nvh->nvh_iom, io_manager, sizeof(struct nvfuse_io_manager));
+	nvh->nvh_target = reactor_construct_targets();
+	bdev = nvh->nvh_target->bdev;
+	printf(" blocklen = %ub blockcnt = %lu\n", spdk_bdev_get_block_size(bdev), spdk_bdev_get_num_blocks(bdev));
 
-	/* Initialization of Perf Stat for Dev */
-	memset(&nvh->nvh_iom.perf_stat_dev, 0x00, sizeof(union perf_stat));
+	nvh->blk_size = spdk_bdev_get_block_size(bdev);
+	nvh->total_blkcount = (spdk_bdev_get_num_blocks(bdev) >> 3) << 3; 
+	dprintf_info(SPDK, " NVMe: sector size = %d, number of sectors = %ld\n", nvh->blk_size, nvh->total_blkcount);
+	dprintf_info(SPDK, " NVMe: total capacity = %0.3fTB\n",
+		   (double)nvh->total_blkcount * nvh->blk_size / 1024 / 1024 / 1024 / 1024);
 
-	/* copy instance of ipc_ctx */
-	memcpy(&nvh->nvh_ipc_ctx, ipc_ctx, sizeof(struct nvfuse_ipc_context));
+    /* copy instance of ipc_ctx */
+    memcpy(&nvh->nvh_ipc_ctx, ipc_ctx, sizeof(struct nvfuse_ipc_context));
 
-	/* copy instance of ipc_ctx */
-	memcpy(&nvh->nvh_params, params, sizeof(struct nvfuse_params));
-
-	nvh->nvh_iom.ipc_ctx = &nvh->nvh_ipc_ctx;
-
-	ret = spdk_alloc_qpair(&nvh->nvh_iom);
-	if (ret < 0) {
-		fprintf(stderr, " Error: alloc qpair \n");
-		return NULL;
-	}
+    /* copy instance of params */
+    memcpy(&nvh->nvh_params, params, sizeof(struct nvfuse_params));
 
 	crc32c_intel_probe();
 
@@ -332,11 +360,11 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 		if (spdk_process_is_primary()) {
 			ret = nvfuse_format(nvh);
 			if (ret < 0) {
-				printf(" Error: format() \n");
+				dprintf_error(FORMAT, "format() \n");
 				return NULL;
 			}
 		} else {
-			fprintf(stdout, " format skipped due to secondary process!\n");
+			dprintf_info(IPC, "format skipped due to secondary process!\n");
 		}
 	}
 
@@ -346,9 +374,16 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 		nvh->nvh_sb.sb_nvh = nvh; /* temporary */
 		ret = nvfuse_mount(nvh);
 		if (ret < 0) {
-			printf(" Error: mount() \n");
+			dprintf_error(MOUNT, "mount() \n");
 			return NULL;
 		}
+	}
+
+	/* ipc init */
+	ret = nvfuse_ipc_init(ipc_ctx);
+	if (ret < 0) {
+		dprintf_error(IPC, " ipc_init()\n");
+		return NULL;
 	}
 
 	nvh->nvh_sb.sb_control_plane_buffer_size = nvh->nvh_params.buffer_size *
@@ -358,36 +393,123 @@ struct nvfuse_handle *nvfuse_create_handle(struct nvfuse_io_manager *io_manager,
 	return nvh;
 }
 
-void nvfuse_deinit_spdk(struct nvfuse_io_manager *io_manager, struct nvfuse_ipc_context *ipc_ctx)
+void nvfuse_deinit_spdk(struct nvfuse_ipc_context *ipc_ctx)
 {
-	io_manager->io_close(io_manager);
-
-	nvfuse_ipc_exit(ipc_ctx);
+//	nvfuse_close(target);
 }
 
 void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_umount)
 {
-	struct nvfuse_io_manager *io_manager;
 	int ret;
-
-	io_manager = &nvh->nvh_iom;
 
 	/* umount file system */
 	if (need_umount) {
 		ret = nvfuse_umount(nvh);
 		if (ret < 0) {
-			printf(" Error: umount() \n");
+			dprintf_error(MOUNT, "umount() \n");
 		}
 	}
 
-	nvfuse_stat_ring_put(io_manager->ipc_ctx->stat_ring[IPC_STAT],
-			     io_manager->ipc_ctx->stat_pool[IPC_STAT],
-			     &nvh->nvh_sb.perf_stat_ipc);
-
-	spdk_release_qpair(io_manager);
-
 	spdk_dma_free(nvh);
+
+	nvfuse_ipc_exit(&nvh->nvh_ipc_ctx);
 }
+
+struct nvfuse_dir_entry * nvfuse_lookup_linear(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, 
+						struct nvfuse_inode *dir_inode, const s8 *filename, struct nvfuse_buffer_head **dir_bh_return)
+{
+	struct nvfuse_buffer_head *dir_bh = NULL;
+	struct nvfuse_dir_entry *dir = NULL;
+	struct nvfuse_dir_entry *dir_last;
+	u32 dentry_blk;
+	u32 dentry_num;
+
+	for (dentry_blk = 0; dentry_blk < NVFUSE_SIZE_TO_BLK(dir_inode->i_size); dentry_blk++) {
+		/* get dir block buffer */
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, dentry_blk, READ,
+					   NVFUSE_TYPE_META);
+		if (dir_bh == NULL) {
+			dprintf_error(BUFFER, "nvfuse_get_bh() \n");
+			break;
+		}
+
+		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
+
+		if (dentry_blk < NVFUSE_SIZE_TO_BLK(dir_inode->i_size) - 1) {
+			dentry_num = DIR_ENTRY_NUM;
+		} else {
+			dentry_num = dir_inode->i_links_count % DIR_ENTRY_NUM;
+			if (dentry_num == 0)
+				dentry_num = DIR_ENTRY_NUM;
+		}
+
+		dir_last = dir + dentry_num;
+
+		while (dir < dir_last) {
+			/* directory entry is found */
+			if (dir->d_flag == DIR_USED && !strcmp(dir->d_filename, filename))
+				goto FOUND;
+		}
+
+		nvfuse_release_bh(sb, dir_bh, HEAD, NVF_CLEAN);
+	}
+
+	/* not found */
+	dir = NULL;
+
+FOUND:
+
+	*dir_bh_return = dir_bh;
+
+	return dir;
+}
+
+struct nvfuse_dir_entry * nvfuse_lookup_bptree(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx,
+												struct nvfuse_inode *dir_inode, const s8 *filename, 
+												struct nvfuse_buffer_head **dir_bh_return)
+{
+	struct nvfuse_buffer_head *dir_bh = NULL;
+	struct nvfuse_dir_entry *dir = NULL;
+	u32 dentry_idx = 0;
+	s32 res;
+	
+	res = nvfuse_get_dir_indexing(sb, dir_inode, (char *)filename, &dentry_idx);
+	if (res < 0) {
+		goto NOT_FOUND;
+	}
+
+	/* dir entry found */
+	if (dentry_idx) {
+		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, 
+								NVFUSE_DENTRY_TO_BLK(dentry_idx), 
+								READ, NVFUSE_TYPE_META);
+		if (dir_bh == NULL) {
+			goto NOT_FOUND;
+		}
+		dir = ((struct nvfuse_dir_entry *)dir_bh->bh_buf) + (dentry_idx % DIR_ENTRY_NUM);
+
+		/* directory entry is found */
+		if (dir->d_flag == DIR_USED && !strcmp(dir->d_filename, filename)) {
+			goto FOUND;
+		} else {
+			/* FIXME: how can we handle this exception case? */
+			dprintf_error(BPTREE, "No such file or directory = %s", filename);
+			dprintf_error(BPTREE, "B+tree has inconsistency state \n");
+			assert(0);
+		}
+	} else {
+		/* in case of collision */
+		/* TODO: how to replace tricky code? */
+		dir = (struct nvfuse_dir_entry *)1;
+	}
+
+NOT_FOUND:
+
+FOUND:
+	*dir_bh_return = dir_bh;
+	return dir;
+}
+
 /*
 * namespace lookup function with given file name and paraent inode number
 * result: found=0, not found=-1
@@ -401,11 +523,7 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 	struct nvfuse_inode_ctx *dir_ictx;
 	struct nvfuse_inode *dir_inode = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
-	struct nvfuse_dir_entry *dir;
-	s64 read_bytes = 0;
-	s64 dir_size = 0;
-	s64 start = 0;
-	u32 offset = 0;
+	struct nvfuse_dir_entry *dir = NULL;
 	s32 res = -1;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, cur_dir_ino);
@@ -414,81 +532,56 @@ s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 
 	dir_inode = dir_ictx->ictx_inode;
 
-	if (dir_inode->i_bpino) {
 #if NVFUSE_USE_DIR_INDEXING == 1
-		res = nvfuse_get_dir_indexing(sb, dir_inode, (char *)filename, &offset);
-		if (res < 0) {
+	/* b+tree based index search */
+	if (dir_inode->i_bpino) {
+		dir = nvfuse_lookup_bptree(sb, dir_ictx, dir_inode, filename, &dir_bh);
+		/* not found dentry */
+		if (!dir) {
+			res = -1;
 			goto RES;
+		/* found dentry */
+		} else {
+			if (dir_bh)
+				goto FOUND;
+			else
+				goto LINEAR_SEARCH;
 		}
-#endif
+
+		/* try linear search */
 	} else {
+		/* b+tree is not allocated? */
 		res = -1;
 		goto RES;
 	}
-	res = -1;
+#endif
 
-	dir_size = dir_inode->i_size;
-	start = (s64)offset * DIR_ENTRY_SIZE;
+LINEAR_SEARCH:
 
-	if (offset) { // dir entry found
-		dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(start), READ,
-				       NVFUSE_TYPE_META);
-		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
-		dir += (offset % DIR_ENTRY_NUM);
+	/* naiive linear search */
+	dir = nvfuse_lookup_linear(sb, dir_ictx, dir_inode, filename, &dir_bh);
+	if (dir) 
+		goto FOUND;
+	else
+		goto RES;
 
-		if (dir->d_flag == DIR_USED) {
-			if (!strcmp(dir->d_filename, filename)) {
-				if (file_ictx) {
-					*file_ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
-				}
-				if (file_entry) {
-					rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
-				}
+FOUND:
 
-				assert(dir->d_ino > 0 && dir->d_ino < sb->sb_no_of_inodes_per_bg * sb->sb_bg_num);
-
-				res = 0;
-
-				goto RES;
-			}
-		} else {
-			printf(" Warning: No such file or directory = %s", filename);
-		}
-	} else { // linear search
-		start = 0;
-		for (read_bytes = start; read_bytes < dir_size; read_bytes += DIR_ENTRY_SIZE) {
-			if (dir_bh == NULL || !(read_bytes & (CLUSTER_SIZE - 1))) {
-				if (dir_bh)
-					nvfuse_release_bh(sb, dir_bh, 0, 0);
-
-				dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, NVFUSE_SIZE_TO_BLK(read_bytes), READ,
-						       NVFUSE_TYPE_META);
-				dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
-			}
-
-			if (dir->d_flag == DIR_USED) {
-				if (!strcmp(dir->d_filename, filename)) {
-					if (file_ictx) {
-						*file_ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
-					}
-					if (file_entry) {
-						rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
-					}
-
-					res = 0;
-
-					goto RES;
-				}
-			}
-			dir++;
-		}
+	if (file_ictx) {
+		*file_ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
 	}
 
-RES:
-	;
+	if (file_entry) {
+		rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
+	}
 
-	nvfuse_release_bh(sb, dir_bh, 0, 0);
-	nvfuse_release_inode(sb, dir_ictx, CLEAN);
+	assert(dir->d_ino > 0 && dir->d_ino < sb->sb_no_of_inodes_per_bg * sb->sb_bg_num);
+	res = 0;
+
+RES:
+
+	nvfuse_release_bh(sb, dir_bh, HEAD, NVF_CLEAN);
+	nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
 
 	return res;
 }
@@ -522,9 +615,11 @@ s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filen
 	if (path[0] == '/') {
 		nvfuse_filename(path, filename);
 		nvfuse_dirname(path, dirname);
+		/* absolute directory path */
 		res = nvfuse_path_open(nvh, dirname, filename, direntry);
 	} else {
 		nvfuse_filename(path, filename);
+		/* relative directory path */
 		res = nvfuse_path_open2(nvh, (s8 *)path, (s8 *)filename, direntry);
 	}
 
@@ -594,7 +689,7 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 		else
 			dentry->d_type = DT_REG;
 
-		nvfuse_release_inode(sb, ictx, CLEAN);
+		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 
 		return_dentry = dentry;
 	}
@@ -603,7 +698,7 @@ struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct
 RES:
 	;
 
-	nvfuse_release_inode(sb, dir_ictx, CLEAN);
+	nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
 	nvfuse_release_super(sb);
 
 	return return_dentry;
@@ -620,8 +715,10 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	s32 res = 0;
 	inode_t ino = 0;
 
-	if (!strcmp(filename, ""))
-		return error_msg("open file error, invalid file name");
+	if (!strcmp(filename, "")) {
+		dprintf_error(API, "invalid file name (length = %d)\n", (int)strlen(filename));
+		return -1;
+	}
 
 	res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
 	if (res < 0) {
@@ -664,8 +761,7 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		goto RES;
 	}
 
-	ft = sb->sb_file_table + fid;
-
+	ft = nvfuse_get_file_table(sb, fid);
 	ft->used = TRUE;
 	ft->ino = inode->i_ino;
 	ft->size = inode->i_size;
@@ -690,17 +786,16 @@ RES:
 
 s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags, int mode)
 {
-	int fd;
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_superblock *sb;
 	s8 filename[FNAME_SIZE];
+	s32 fd;
 	s32 res;
 
 	memset(&dir_entry, 0x00, sizeof(struct nvfuse_dir_entry));
 
 	nvfuse_lock();
 
-	sb = nvfuse_read_super(nvh);
 	res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
 	if (res < 0)
 		return res;
@@ -709,10 +804,11 @@ s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags,
 		printf(" %s: invalid path\n", __FUNCTION__);
 		fd = -1;
 	} else {
+		sb = nvfuse_read_super(nvh);
 		fd = nvfuse_openfile(sb, dir_entry.d_ino, filename, flags, mode);
+		nvfuse_release_super(sb);
 	}
 
-	nvfuse_release_super(sb);
 	nvfuse_unlock();
 
 	return fd;
@@ -725,24 +821,23 @@ s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags)
 	struct nvfuse_file_table *ft;
 	s32 fid = -1;
 
+	ictx = nvfuse_read_inode(sb, NULL, ino);
+	inode = ictx->ictx_inode;
+
+	if (inode->i_type != NVFUSE_TYPE_FILE) {
+		dprintf_error(API, "This is not a file (type = %d).", inode->i_type);
+		return -1;
+	}
+
 	fid = nvfuse_allocate_open_file_table(sb);
 	if (fid < 0) {
 		return NVFUSE_ERROR;
 	}
 
-	ictx = nvfuse_read_inode(sb, NULL, ino);
-	inode = ictx->ictx_inode;
-
-	if (inode->i_type != NVFUSE_TYPE_FILE) {
-		return error_msg("This is not a file");
-	}
-
-	ft = sb->sb_file_table + fid;
-
+	ft = nvfuse_get_file_table(sb, fid);
 	ft->used = TRUE;
 	ft->ino = ino;
 	ft->size = inode->i_size;
-	//	ft->status = inode->i_type;
 	ft->rwoffset = 0;
 
 	if (O_APPEND & flags)
@@ -750,23 +845,17 @@ s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags)
 	else
 		nvfuse_seek(sb, ft, 0, SEEK_SET);
 
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 	return (fid);
 }
 
 s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid)
 {
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
-	struct nvfuse_file_table *ft;
 
-	ft = sb->sb_file_table + fid;
+	/* FIXME: flush bhs and bcs related to inode that fd points out */
 
-	ft->ino = 0;
-	ft->size = 0;
-	ft->used = 0;
-	ft->rwoffset = 0;
-	ft->flags = 0;
-
+	nvfuse_close_file_table(sb, fid);
 	nvfuse_release_super(sb);
 
 	return NVFUSE_SUCCESS;
@@ -782,7 +871,7 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 
 	s32 offset, remain, rcount = 0;
 
-	of = &(sb->sb_file_table[fid]);
+	of = nvfuse_get_file_table(sb, fid);
 
 	ictx = nvfuse_read_inode(sb, NULL, of->ino);
 	inode = ictx->ictx_inode;
@@ -800,7 +889,7 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(of->rwoffset), sync_read,
 				   NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
-			printf(" read error \n");
+			dprintf_error(BUFFER, " read error \n");
 			goto RES;
 		}
 
@@ -816,12 +905,12 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 		rcount += remain;
 		of->rwoffset += remain;
 		count -= remain;
-		nvfuse_release_bh(sb, bh, 0, CLEAN);
+		nvfuse_release_bh(sb, bh, 0, NVF_CLEAN);
 	}
 
 RES:
 	;
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 
 	return rcount;
 }
@@ -834,7 +923,7 @@ s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buf
 	struct nvfuse_file_table *of;
 	s32 rcount = 0;
 
-	of = &(sb->sb_file_table[fid]);
+	of = nvfuse_get_file_table(sb, fid);
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 	if (roffset) {
@@ -845,7 +934,7 @@ s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buf
 #endif
 
 	if (count % CLUSTER_SIZE) {
-		printf(" Error: count is not aligned to 4KB.");
+		dprintf_error(API, "count is not aligned to 4KB.");
 		rcount = 0;
 		goto RET;
 	}
@@ -867,7 +956,7 @@ s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buf
 
 RET:
 	if (ictx)
-		nvfuse_release_inode(sb, ictx, CLEAN);
+		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 
 	return rcount;
 }
@@ -919,7 +1008,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 	lbno_t lblock = 0;
 	int ret;
 
-	of = &(sb->sb_file_table[fid]);
+	of = nvfuse_get_file_table(sb, fid);
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 	if (woffset) {
@@ -944,7 +1033,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 			ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL,
 					       1);
 			if (ret) {
-				printf(" data block allocation fails.");
+				dprintf_error(INODE, "data block allocation fails.");
 				return NVFUSE_ERROR;
 			}
 		}
@@ -976,14 +1065,14 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		if (of->flags & __O_SYNC) {
 			ictx = nvfuse_read_inode(sb, NULL, of->ino);
 			nvfuse_fsync_ictx(sb, ictx);
-			nvfuse_release_inode(sb, ictx, CLEAN);
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 		} else { /* in case of O_DSYNC*/
 			ictx = nvfuse_read_inode(sb, NULL, of->ino);
 			nvfuse_fsync_ictx(sb, ictx);
-			nvfuse_release_inode(sb, ictx, CLEAN);
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 		}
 		/* flush cmd to nvme ssd */
-		nvfuse_dev_flush(sb->io_manager);
+		reactor_sync_flush(sb->target);
 	}
 
 	return wcount;
@@ -998,7 +1087,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 	u32 wcount = 0;
 	int ret;
 
-	of = &(sb->sb_file_table[fid]);
+	of = nvfuse_get_file_table(sb, fid);
 
 #if NVFUSE_OS == NVFUSE_OS_WINDOWS
 	if (woffset) {
@@ -1009,7 +1098,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 #endif
 
 	if (count % CLUSTER_SIZE) {
-		printf(" Error: count is not aligned to 4KB.");
+		dprintf_error(API, "count (%d) is not aligned to 4KB.", count);
 		wcount = 0;
 		goto RET;
 	}
@@ -1021,7 +1110,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 		ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), num_alloc/* num block */, NULL,
 				       NULL, 1);
 		if (ret) {
-			printf(" data block allocation fails.");
+			dprintf_error(INODE, "data block allocation fails.");
 			return NVFUSE_ERROR;
 		}
 
@@ -1029,7 +1118,7 @@ s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const 
 		inode->i_size += count;
 		nvfuse_release_inode(sb, ictx, DIRTY);
 	} else {
-		nvfuse_release_inode(sb, ictx, CLEAN);
+		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 	}
 
 	of->rwoffset += count;
@@ -1053,19 +1142,6 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
 	wcount = nvfuse_writefile_core(sb, fid, user_buf, count, woffset);
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
-
-	nvfuse_release_super(sb);
-
-	return wcount;
-}
-
-s32 nvfuse_writefile_buffered_aio(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32 count,
-				  nvfuse_off_t woffset)
-{
-	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
-	s32 wcount;
-
-	wcount = nvfuse_writefile_core(sb, fid, user_buf, count, woffset);
 
 	nvfuse_release_super(sb);
 
@@ -1097,7 +1173,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 	nvfuse_off_t curoffset;
 	lbno_t lblock = 0;
 
-	of = &(sb->sb_file_table[fid]);
+	of = nvfuse_get_file_table(sb, fid);
 
 	curoffset = woffset;
 
@@ -1114,7 +1190,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 
 		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
-			printf(" Error: get_bh()\n");
+			dprintf_error(BUFFER, "get_bh()\n");
 			return -1;
 		}
 		curoffset += remain;
@@ -1124,7 +1200,7 @@ s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, 
 		list_add(&bh->bh_aio_list, aio_bh_head);
 	}
 
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 
 	return 0;
 }
@@ -1158,7 +1234,7 @@ static inline dev_t new_decode_dev(u32 dev)
 	return makedev(major, minor);
 }
 
-s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename, inode_t *new_ino,
+s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, inode_t *new_ino,
 		      mode_t mode, dev_t dev)
 {
 	struct nvfuse_dir_entry *dir;
@@ -1170,8 +1246,8 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 	inode_t alloc_ino;
 	s32 ret;
 
-	if (strlen(fiename) < 1 || strlen(fiename) >= FNAME_SIZE) {
-		printf("create file : name  = %s, %d\n", fiename, (int)strlen(fiename));
+	if (strlen(filename) < 1 || strlen(filename) >= FNAME_SIZE) {
+		printf("create file : name  = %s, %d\n", filename, (int)strlen(filename));
 		return -1;
 	}
 
@@ -1192,7 +1268,7 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 	if (dir_inode->i_links_count == 2 && dir_inode->i_bpino == 0) {
 		ret = nvfuse_make_first_directory(sb, dir_ictx, dir_inode);
 		if (ret) {
-			fprintf(stderr, " Error: mkdir_first_directory()\n");
+			dprintf_error(DIRECTORY, "mkdir_first_directory()\n");
 			return -1;
 		}
 	}
@@ -1211,7 +1287,7 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 		/* create bptree related nodes for new directory's dentries */
 		ret = nvfuse_create_bptree(sb, dir_inode);
 		if (ret) {
-			printf(" bptree allocation fails.");
+			dprintf_error(BPTREE, " bptree allocation fails.");
 			return NVFUSE_ERROR;
 		}
 	}
@@ -1224,7 +1300,11 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 	new_ictx = nvfuse_alloc_ictx(sb);
 	if (new_ictx == NULL)
 		return -1;
-	set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
+
+	SPINLOCK_LOCK(&new_ictx->ictx_lock);
+	set_bit(&new_ictx->ictx_status, INODE_STATE_LOCK);
+	set_bit(&new_ictx->ictx_status, INODE_STATE_DIRTY);
+
 	alloc_ino = nvfuse_alloc_new_inode(sb, new_ictx);
 	if (alloc_ino == 0) {
 		printf(" It runs out of free inodes.");
@@ -1260,10 +1340,10 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *fiename
 	dir[search_entry].d_flag = DIR_USED;
 	dir[search_entry].d_ino = new_inode->i_ino;
 	dir[search_entry].d_version = new_inode->i_version;
-	strcpy(dir[search_entry].d_filename, fiename);
+	strcpy(dir[search_entry].d_filename, filename);
 
 #if NVFUSE_USE_DIR_INDEXING == 1
-	nvfuse_set_dir_indexing(sb, dir_inode, fiename, dir_inode->i_ptr);
+	nvfuse_set_dir_indexing(sb, dir_inode, filename, dir_inode->i_ptr);
 #endif
 
 	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
@@ -1284,6 +1364,7 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 	struct nvfuse_dir_entry *dir_to;
 
 	struct nvfuse_inode *inode;
+	s32 is_diff_block = 0;
 
 	if (to_entry == from_entry)
 		return -1;
@@ -1294,13 +1375,22 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 
 	dir_bh_from = nvfuse_get_bh(sb, ictx, inode->i_ino,
 				    NVFUSE_SIZE_TO_BLK((s64)from_entry * DIR_ENTRY_SIZE), READ, NVFUSE_TYPE_META);
+
 	dir_from = (struct nvfuse_dir_entry *)dir_bh_from->bh_buf;
 	dir_from += (from_entry % DIR_ENTRY_NUM);
 	assert(dir_from->d_flag != DIR_DELETED);
 
-	dir_bh_to = nvfuse_get_bh(sb, ictx, inode->i_ino,
+	is_diff_block = (NVFUSE_SIZE_TO_BLK((s64)to_entry * DIR_ENTRY_SIZE) != 
+					NVFUSE_SIZE_TO_BLK((s64)from_entry * DIR_ENTRY_SIZE)) ? 1 : 0;
+
+	if (is_diff_block) {
+		dir_bh_to = nvfuse_get_bh(sb, ictx, inode->i_ino,
 				  NVFUSE_SIZE_TO_BLK((s64)to_entry * DIR_ENTRY_SIZE), READ, NVFUSE_TYPE_META);
-	dir_to = (struct nvfuse_dir_entry *)dir_bh_to->bh_buf;
+		dir_to = (struct nvfuse_dir_entry *)dir_bh_to->bh_buf;
+	} else {
+		dir_to = (struct nvfuse_dir_entry *)dir_bh_from->bh_buf;
+	}
+
 	dir_to += (to_entry % DIR_ENTRY_NUM);
 	assert(dir_to->d_flag == DIR_DELETED);
 
@@ -1309,8 +1399,6 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 	dir_from->d_flag = DIR_DELETED; /* FIXME: zeroing ?*/
 	//printf(" shrink_dentry: deleted = %s \n", dir_from->d_filename);
 
-	nvfuse_release_bh(sb, dir_bh_from, 0, DIRTY);
-	nvfuse_release_bh(sb, dir_bh_to, 0, DIRTY);
 
 #if NVFUSE_USE_DIR_INDEXING == 1
 	nvfuse_del_dir_indexing(sb, inode, dir_to->d_filename);
@@ -1324,6 +1412,10 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 		}
 	}*/
 #endif
+
+	nvfuse_release_bh(sb, dir_bh_from, 0, DIRTY);
+	if (is_diff_block)
+		nvfuse_release_bh(sb, dir_bh_to, 0, DIRTY);
 
 	return 0;
 }
@@ -1356,13 +1448,14 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	inode = ictx->ictx_inode;
 
 	if (inode == NULL || inode->i_ino == 0) {
-		printf(" file (%s) is not found this directory\n", filename);
-		nvfuse_release_bh(sb, dir_bh, 0/*tail*/, CLEAN);
+		dprintf_error(INODE, " inode file (%s) is not found.\n", filename);
+		nvfuse_release_bh(sb, dir_bh, 0/*tail*/, NVF_CLEAN);
 		return NVFUSE_ERROR;
 	}
 
 	if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
-		return error_msg(" rmfile() is supported for a file.");
+		dprintf_error(INODE, " rmfile() is prohibited due to directory (%s)n", filename);
+		return NVFUSE_ERROR;
 	}
 
 #if NVFUSE_USE_DIR_INDEXING == 1
@@ -1384,10 +1477,10 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	dir_inode->i_ptr = dir_inode->i_links_count - 1;
 	dir->d_flag = DIR_DELETED;
 
+	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
+
 	/* Shrink directory entry that last entry is moved to delete entry. */
 	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
-
-	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
 
 	/* Free block reclaimation is necessary but test is required. */
 	if ((dir_inode->i_links_count * DIR_ENTRY_SIZE) % CLUSTER_SIZE == 0) {
@@ -1460,8 +1553,8 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
 	inode = ictx->ictx_inode;
 	if (inode == NULL || inode->i_ino == 0) {
-		printf(" dir (%s) is not found this directory\n", filename);
-		nvfuse_release_bh(sb, dir_bh, 0/*tail*/, CLEAN);
+		dprintf_error(INODE, " dir (%s) is not found this directory\n", filename);
+		nvfuse_release_bh(sb, dir_bh, 0/*tail*/, NVF_CLEAN);
 		return NVFUSE_ERROR;
 	}
 
@@ -1471,16 +1564,17 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	}
 
 	if (inode->i_type == NVFUSE_TYPE_FILE) {
-		return error_msg("rmdir is suppoted for a dir.");
+		dprintf_error(INODE, "rmdir is prohibited due to file (%s).\n", filename);
+		return NVFUSE_ERROR;
 	}
 
 	if (strcmp(dir->d_filename, filename)) {
-		printf(" filename is different\n");
+		dprintf_error(INODE, " filename is different\n");
 		return NVFUSE_ERROR;
 	}
 
 	if (inode->i_links_count > 2) {
-		printf(" rmdir error. dir has link count = %d\n", inode->i_links_count);
+		dprintf_error(INODE, " the current dir has link count = %d\n", inode->i_links_count);
 		return NVFUSE_ERROR;
 	}
 
@@ -1503,10 +1597,10 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	nvfuse_free_inode_size(sb, ictx, 0);
 	nvfuse_relocate_delete_inode(sb, ictx);
 
+	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
+
 	/* Shrink directory entry that last entry is moved to delete entry. */
 	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
-
-	nvfuse_release_bh(sb, dir_bh, 0/*tail*/, DIRTY);
 
 	/* Free block reclaimation is necessary but test is required. */
 	if ((dir_inode->i_links_count * DIR_ENTRY_SIZE) % CLUSTER_SIZE == 0) {
@@ -1562,7 +1656,7 @@ s32 nvfuse_make_first_directory(struct nvfuse_superblock *sb, struct nvfuse_inod
 	ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL,
 			       1);
 	if (ret) {
-		printf(" data block allocation fails.");
+		dprintf_error(INODE, "data block allocation fails.");
 		return NVFUSE_ERROR;
 	}
 	inode->i_size = CLUSTER_SIZE;
@@ -1599,14 +1693,15 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 
 
 	if (strlen(dirname) < 1 || strlen(dirname) >= FNAME_SIZE) {
-		printf(" mkdir : name  = %s, %d\n", dirname, (int)strlen(dirname));
+		dprintf_error(API, " the size of the dir name  = %s is %d greater than %d\n", dirname, 
+				(int)strlen(dirname), FNAME_SIZE);
 		ret = NVFUSE_ERROR;
 		goto RET;
 	}
 
 #if 1
 	if (!nvfuse_lookup(sb, NULL, NULL, dirname, par_ino)) {
-		printf(" exist file or directory\n");
+		dprintf_error(API, " exist file or directory\n");
 		ret = NVFUSE_ERROR;
 		goto RET;
 	}
@@ -1616,7 +1711,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 	dir_inode = dir_ictx->ictx_inode;
 
 	if (dir_inode->i_links_count == MAX_FILES_PER_DIR) {
-		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
+		dprintf_error(DIRECTORY, " The number of files exceeds %d\n", MAX_FILES_PER_DIR);
 		return -1;
 	}
 	assert(dir_inode->i_ptr + 1 == dir_inode->i_links_count);
@@ -1625,7 +1720,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 	if (dir_inode->i_links_count == 2 && dir_inode->i_bpino == 0) {
 		ret = nvfuse_make_first_directory(sb, dir_ictx, dir_inode);
 		if (ret) {
-			fprintf(stderr, " Error: mkdir_first_directory()\n");
+			dprintf_error(INODE, "mkdir_first_directory()\n");
 			return -1;
 		}
 	}
@@ -1644,7 +1739,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 		/* create bptree related nodes for new directory's dentries */
 		ret = nvfuse_create_bptree(sb, dir_inode);
 		if (ret) {
-			printf(" bptree allocation fails.");
+			dprintf_error(BPTREE, " bptree allocation fails.");
 			return NVFUSE_ERROR;
 		}
 	}
@@ -1657,7 +1752,11 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 	new_ictx = nvfuse_alloc_ictx(sb);
 	if (new_ictx == NULL)
 		return -1;
-	set_bit(&new_ictx->ictx_status, BUFFER_STATUS_DIRTY);
+
+	SPINLOCK_LOCK(&new_ictx->ictx_lock);
+	set_bit(&new_ictx->ictx_status, INODE_STATE_LOCK);
+	set_bit(&new_ictx->ictx_status, INODE_STATE_DIRTY);
+
 	alloc_ino = nvfuse_alloc_new_inode(sb, new_ictx);
 	if (alloc_ino == 0) {
 		printf(" It runs out of free inodes.");
@@ -1700,7 +1799,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 #ifndef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
 	ret = nvfuse_make_first_directory(sb, new_ictx, new_inode);
 	if (ret) {
-		fprintf(stderr, " Error: mkdir_first_directory()\n");
+		dprintf_error(DIR, "mkdir_first_directory()\n");
 		return -1;
 	}
 #endif
@@ -1709,7 +1808,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 	/* create bptree related nodes for new directory's dentries */
 	ret = nvfuse_create_bptree(sb, new_inode);
 	if (ret) {
-		printf(" bptree allocation fails.");
+		dprintf_error(BPTREE, " bptree allocation fails.");
 		return NVFUSE_ERROR;
 	}
 #else
@@ -1805,7 +1904,7 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 
 	res = nvfuse_link(sb, new_par_ino, newname, ino);
 	if (res) {
-		printf(" Error: link() \n");
+		dprintf_error(API, "link() \n");
 	}
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
@@ -1862,8 +1961,10 @@ s32 nvfuse_mknod(struct nvfuse_handle *nvh, const char *path, mode_t mode, dev_t
 	} else {
 		sb = nvfuse_read_super(nvh);
 
-		if (!nvfuse_lookup(sb, NULL, NULL, filename, dir_entry.d_ino))
-			return error_msg(" exist file or directory\n");
+		if (!nvfuse_lookup(sb, NULL, NULL, filename, dir_entry.d_ino)) {
+			dprintf_error(API, "exist file or directory\n");
+			return NVFUSE_ERROR;
+		}
 
 		res = nvfuse_createfile(sb, dir_entry.d_ino, filename, 0, mode, dev);
 		if (res < 0)
@@ -1940,7 +2041,7 @@ s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size)
 
 	sb = nvfuse_read_super(nvh);
 
-	ft = sb->sb_file_table + fid;
+	ft = nvfuse_get_file_table(sb, fid);
 
 	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
 	inode = ictx->ictx_inode;
@@ -1971,12 +2072,14 @@ s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, 
 
 	nvfuse_lock();
 
-	if (!nvfuse_lookup(sb, NULL, NULL, name, parent))
-		return error_msg(" exist file or directory\n");
+	if (!nvfuse_lookup(sb, NULL, NULL, name, parent)) {
+		dprintf_error(API, " exist file or directory\n");
+		return NVFUSE_ERROR;
+	}
 
 	res = nvfuse_createfile(sb, parent, (char *)name, (inode_t *)&ino, 0777 | S_IFLNK, 0);
 	if (res != NVFUSE_SUCCESS) {
-		printf(" create file error \n");
+		dprintf_error(API, "create file error \n");
 		return res;
 	}
 
@@ -1985,7 +2088,7 @@ s32 nvfuse_symlink(struct nvfuse_handle *nvh, const char *link, inode_t parent, 
 	bytes = nvfuse_writefile(nvh, fid, link, strlen(link) + 1, 0);
 
 	if (bytes != strlen(link) + 1) {
-		printf(" symlink error \n");
+		dprintf_error(API, " symlink error \n");
 		return -1;
 	}
 
@@ -2032,7 +2135,7 @@ s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_
 
 	bytes = nvfuse_readfile(nvh, fid, buf, size, 0);
 	if (bytes != size) {
-		printf(" error : read bytes = %d \n", bytes);
+		dprintf_error(API, "read bytes = %d \n", bytes);
 		return -1;
 	}
 
@@ -2094,7 +2197,7 @@ s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stb
 				stbuf->st_rdev = new_decode_dev(inode->i_blocks[1]);
 			}
 
-			nvfuse_release_inode(sb, ictx, CLEAN);
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 			nvfuse_release_super(sb);
 
 			res = 0;
@@ -2133,7 +2236,7 @@ s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *st
 		stbuf->st_mtime	= inode->i_mtime;
 		stbuf->st_ctime	= inode->i_ctime;
 
-		nvfuse_release_inode(sb, ictx, CLEAN);
+		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 		nvfuse_release_super(sb);
 
 		res = 0;
@@ -2190,7 +2293,7 @@ s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask)
 			}
 
 
-			nvfuse_release_inode(sb, ictx, CLEAN);
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 			nvfuse_release_super(sb);
 		}
 	}
@@ -2400,7 +2503,7 @@ s32 nvfuse_fdatasync(struct nvfuse_handle *nvh, int fd)
 	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
 	/* flush dirty pages associated with inode context including only data pages */
 	nvfuse_fdsync_ictx(sb, ictx);
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 	nvfuse_release_super(sb);
 
 	return 0;
@@ -2420,9 +2523,9 @@ s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd)
 	nvfuse_fsync_ictx(sb, ictx);
 
 	/* flush cmd to nvme ssd */
-	nvfuse_dev_flush(sb->io_manager);
+	reactor_sync_flush(sb->target);
 
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 	nvfuse_release_super(sb);
 
 	return 0;
@@ -2435,12 +2538,9 @@ s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 	struct nvfuse_buffer_head *bh;
 	struct nvfuse_buffer_cache *bc;
 	s32 flushing_count = 0;
-	s32 res = 0;
 
-	/* ictx doesn't keep dirty data */
-	if (!ictx->ictx_data_dirty_count &&
-	    !ictx->ictx_meta_dirty_count)
-		goto RES;
+	dprintf_error(INODE, " fsync is not supported. \n");
+	assert(0);
 
 	/* dirty list for file data */
 	dirty_head = &ictx->ictx_data_bh_head;
@@ -2479,12 +2579,9 @@ s32 _nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 
 SYNC_DIRTY:
 	;
-	res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
+	nvfuse_sync_dirty_data(sb, flushing_count);
 
-RES:
-	;
-
-	return res;
+	return 0;
 }
 
 s32 nvfuse_fsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx)
@@ -2510,7 +2607,13 @@ s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 	struct nvfuse_buffer_head *bh;
 	struct nvfuse_buffer_cache *bc;
 	s32 flushing_count = 0;
-	s32 res;
+
+	if (!ictx->ictx_data_dirty_count) {
+		return 0;
+	}
+
+	dprintf_error(INODE, " fsync is not supported. \n");
+	assert(0);
 
 	/* ictx doesn't keep dirty data */
 	while (ictx->ictx_data_dirty_count) {
@@ -2531,9 +2634,7 @@ s32 nvfuse_fdsync_ictx(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ic
 				break;
 		}
 
-		res = nvfuse_sync_dirty_data(sb, flushing_head, flushing_count);
-		if (res)
-			break;
+		nvfuse_sync_dirty_data(sb, flushing_count);
 	}
 
 	return 0;
@@ -2566,19 +2667,19 @@ s32 nvfuse_fallocate_verify(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 
 		res = nvfuse_get_block(sb, ictx, curr_block, 1, NULL, &pblock, 0 /*create*/);
 		if (res < 0) {
-			printf(" Error: nvfuse_get_block()\n");
+			dprintf_error(INODE, "nvfuse_get_block()\n");
 			res = -1;
 			goto RET;
 		}
 
 		if (!pblock) {
-			printf(" Warning: Invalid block number = %d\n", pblock);
+			dprintf_error(INODE, "invalid block number = %d\n", pblock);
 		}
 
 		if (!test_bit(bitmap, pblock)) {
 			set_bit(bitmap, pblock);
 		} else {
-			printf("collision currblock = %d, pblock = %d\n", curr_block, pblock);
+			dprintf_error(INODE, "collision currblock = %d, pblock = %d\n", curr_block, pblock);
 			collision_cnt++;
 		}
 	}
@@ -2606,16 +2707,23 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 		return res;
 
 	if (dir_entry.d_ino == 0) {
-		printf(" %s: invalid path\n", __FUNCTION__);
+		dprintf_error(DIRECTORY, " %s: invalid path\n", __FUNCTION__);
 		res = -1;
 		goto RET;
 	} else {
 		/*printf(" falloc size = %lu \n", length);*/
+
 		sb = nvfuse_read_super(nvh);
+
+		/* test */
+		//nvfuse_check_flush_dirty(sb, 1);
+
 		if (nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0) {
 			res = -1;
 			goto RET;
 		}
+
+		dprintf_info(API, " file name = %s, ino = %d \n", filename, dir_entry.d_ino);
 
 		if (ictx->ictx_inode->i_size < (start + length)) {
 			curr_block = start / CLUSTER_SIZE;
@@ -2623,7 +2731,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 			remain_block = max_block;
 
 			///*
-			printf(" free no of blocks = %ld\n", (long)sb->sb_free_blocks);
+			dprintf_info(INODE, " free no of blocks = %ld\n", (long)sb->sb_free_blocks);
 			//*/
 
 			while (remain_block) {
@@ -2631,13 +2739,13 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 
 				res = nvfuse_get_block(sb, ictx, curr_block, remain_block, &num_alloc_blks, NULL, 1 /*create*/);
 				if (res < 0) {
-					printf(" Warning: nvfuse_get_block()\n");
+					dprintf_warn(INODE, " nvfuse_get_block()\n");
 				}
 
 				curr_block += num_alloc_blks;
 				remain_block -= num_alloc_blks;
 				if (num_alloc_blks == 0) {
-					printf(" No more free block in NVFUSE \n");
+					dprintf_error(INODE, " No more free block in NVFUSE \n");
 					break;
 				}
 				nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
@@ -2654,7 +2762,7 @@ s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64
 			nvfuse_release_inode(sb, ictx, DIRTY);
 			nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 		} else {
-			nvfuse_release_inode(sb, ictx, CLEAN);
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 			nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 		}
 
@@ -2672,20 +2780,20 @@ s32 nvfuse_fgetblk(struct nvfuse_superblock *sb, s32 fid, s32 lblk, s32 max_bloc
 	s32 blk;
 	s32 ret;
 
-	of = &(sb->sb_file_table[fid]);
+	of = nvfuse_get_file_table(sb, fid);
 
 	ictx = nvfuse_read_inode(sb, NULL, of->ino);
 	if (ictx == NULL) {
-		printf(" Error: nvfuse_read_inode\n");
+		dprintf_error(INODE, "nvfuse_read_inode\n");
 		return -1;
 	}
 
 	ret = nvfuse_get_block(sb, ictx, lblk, max_blocks, num_alloc, (u32 *)&blk, 0);
 	if (ret < 0) {
-		printf(" Error: nvfuse_get_block\n");
+		dprintf_error(INODE, "nvfuse_get_block\n");
 		return -1;
 	}
 
-	nvfuse_release_inode(sb, ictx, CLEAN);
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 	return blk;
 }

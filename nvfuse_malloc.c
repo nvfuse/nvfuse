@@ -19,6 +19,7 @@
 #include <assert.h>
 #include "nvfuse_types.h"
 #include "nvfuse_malloc.h"
+#include "spdk/env.h"
 
 static u64 memalloc_allocated_size = 0;
 #if NVFUSE_OS == NVFUSE_OS_LINUX
@@ -30,6 +31,26 @@ static u64 memalloc_allocated_size = 0;
 #include <rte_malloc.h>
 
 #define USE_RTE_MEMALLOC
+#endif
+
+#ifdef NVFUSE_USE_CEPH_SPDK
+void *
+spdk_dma_malloc(size_t size, size_t align, uint64_t *phys_addr)
+{
+	return spdk_malloc(size, align, phys_addr);
+}
+
+void *
+spdk_dma_zmalloc(size_t size, size_t align, uint64_t *phys_addr)
+{
+	return spdk_zmalloc(size, align, phys_addr);
+}
+
+void
+spdk_dma_free(void *buf)
+{
+	return spdk_free(buf);
+}
 #endif
 
 /* allocate a alignment-bytes aligned buffer */
@@ -45,6 +66,7 @@ void *nvfuse_alloc_aligned_buffer(size_t size)
 	}
 #else
 	p = rte_malloc(NULL, size, 0x200);
+	//p = spdk_dma_zmalloc(size, 0x200, NULL);
 	if (p == NULL) {
 		fprintf(stderr, "rte_malloc failed\n");
 		rte_malloc_dump_stats(stdout, NULL);

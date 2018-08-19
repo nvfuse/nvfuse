@@ -58,6 +58,8 @@
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_indirect.h"
+#include "nvfuse_debug.h"
+#include "nvfuse_malloc.h"
 
 typedef struct {
 	u32 *p;
@@ -112,7 +114,7 @@ int nvfuse_block_to_path(s32 block, u32 offsets[4], u32 *boundary)
 	int org_block = block;
 
 	if (block < 0) {
-		printf(" Warning: block < 0(%d)\n", org_block);
+		dprintf_warn(INODE, " Warning: block < 0(%d)\n", org_block);
 	} else if (block < DIRECT_BLOCKS) {
 		offsets[n++] = block;
 		final = direct_blocks;
@@ -132,7 +134,7 @@ int nvfuse_block_to_path(s32 block, u32 offsets[4], u32 *boundary)
 		offsets[n++] = block & (ptrs - 1);
 		final = ptrs;
 	} else {
-		printf(" Warning: block is too big (%d)!\n", org_block);
+		dprintf_warn(INODE, " Warning: block is too big (%d)!\n", org_block);
 	}
 
 	if (boundary)
@@ -204,7 +206,7 @@ static Indirect *nvfuse_get_branch(struct nvfuse_superblock *sb, struct nvfuse_i
 	return NULL;
 
 changed:
-	nvfuse_release_bh(sb, bh, 0, CLEAN);
+	nvfuse_release_bh(sb, bh, 0, NVF_CLEAN);
 	*err = -EAGAIN;
 	goto no_block;
 failure:
@@ -222,7 +224,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	u32 cnt = 0;
 	u32 once = 1;
 
-	//printf(" current free blocks = %ld \n", sb->asb.asb_free_blocks);
+	//dprintf_info(INODE, " current free blocks = %ld \n", sb->asb.asb_free_blocks);
 
 	if (nvfuse_process_model_is_dataplane() && !nvfuse_check_free_block(sb, num_blocks)) {
 		s32 container_id;
@@ -233,7 +235,7 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 			nvfuse_add_bg(sb, container_id);
 			assert(nvfuse_check_free_block(sb, num_blocks) == 1);
 		} else {
-			printf(" No free containers in the file system\n");
+			dprintf_error(INODE, " No free containers in the file system\n");
 			assert(0);
 		}
 	}
@@ -260,25 +262,25 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 			}
 		}
 
-		//printf(" sid %d free blocks %d \n", bg_id, nvfuse_get_free_blocks(sb, bg_id));
-		//printf("1. cur bg = %d %d\n", bg_id, nvfuse_get_curr_bg_id(sb, 0 /* data */));
+		//dprintf_info(INODE, " sid %d free blocks %d \n", bg_id, nvfuse_get_free_blocks(sb, bg_id));
+		//dprintf_info(INODE, "1. cur bg = %d %d\n", bg_id, nvfuse_get_curr_bg_id(sb, 0 /* data */));
 #if 1
 		if (once && nvfuse_process_model_is_dataplane()) {
 			nvfuse_move_curr_bg_id(sb, bg_id, 0 /* data type */);
 			once--;
 		}
 #endif
-		//printf("2. cur bg = %d %d\n", bg_id, nvfuse_get_curr_bg_id(sb, 0 /* data */));
+		//dprintf_info(INODE, "2. cur bg = %d %d\n", bg_id, nvfuse_get_curr_bg_id(sb, 0 /* data */));
 		if (nvfuse_process_model_is_dataplane())
 			bg_id = nvfuse_get_next_bg_id(sb, 0 /* data type */);
 		else
 			bg_id = (bg_id + 1) % sb->sb_bg_num;
-		//printf("3. alloc block: cur bg = %d, next_bg = %d \n", bg_id, next_id);
+		//dprintf_info(INODE, "3. alloc block: cur bg = %d, next_bg = %d \n", bg_id, next_id);
 	} while (bg_id != next_id);
 
 	/* FIXME: how to handle this exception case! */
 	if (!cnt) {
-		printf(" Warning: it runs out of free blocks.\n");
+		dprintf_warn(INODE, " Warning: it runs out of free blocks.\n");
 		nvfuse_print_bg_list(sb);
 		assert(0);
 	}
@@ -308,7 +310,7 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 	if (total_blocks) {
 		new_blocks[0] = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
 		if (new_blocks[0] != total_blocks) {
-			printf(" Warning: it runs out of free blocks.\n");
+			dprintf_error(INODE, " Warning: it runs out of free blocks.\n");
 			nvfuse_print_bg_list(sb);
 			assert(0);
 			if (error) {
@@ -326,9 +328,9 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 	if (total_blocks) {
 		new_blocks[1] = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
 		if (new_blocks[1] != total_blocks) {
-			printf(" Warning: it runs out of free blocks. (requested = %d, allocated = %d)\n",
+			dprintf_warn(INODE, " Warning: it runs out of free blocks. (requested = %d, allocated = %d)\n",
 			       total_blocks, new_blocks[1]);
-			printf(" current free blocks = %ld \n", sb->asb.asb_free_blocks);
+			dprintf_warn(INODE, " current free blocks = %ld \n", sb->asb.asb_free_blocks);
 			nvfuse_print_bg_list(sb);
 			assert(0);
 			if (error) {
@@ -497,10 +499,10 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 	return err;
 
 failed:
-	printf(" need to check the following lines.");
+	dprintf_error(INODE, " need to check the following lines.");
 	assert(0);
 	for (i = 1; i < n; i++)
-		nvfuse_release_bh(sb, branch[i].bh, 0, CLEAN);
+		nvfuse_release_bh(sb, branch[i].bh, 0, NVF_CLEAN);
 	for (i = 0; i < indirect_blks; i++)
 		nvfuse_free_blocks(sb, new_blocks[i], 1);
 	nvfuse_free_blocks(sb, new_blocks[i], num);
@@ -658,7 +660,7 @@ got_it:
 
 cleanup:
 	while (partial > chain) {
-		nvfuse_release_bh(sb, partial->bh, 0, CLEAN);
+		nvfuse_release_bh(sb, partial->bh, 0, NVF_CLEAN);
 		partial--;
 	}
 
@@ -721,7 +723,8 @@ free_this:
 		nvfuse_mark_inode_dirty(ictx);
 	}
 
-	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+	/* FIXME: necessary when a large file is deleted. */
+	//nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 }
 
 /**
@@ -838,7 +841,7 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 			* (should be rare).
 			*/
 			if (!bh) {
-				printf("ext2_free_branches Read failure, inode=%ld, block=%ld",
+				dprintf_warn(INODE, "ext2_free_branches Read failure, inode=%ld, block=%ld",
 				       (unsigned long)ictx->ictx_inode->i_ino, (unsigned long)nr);
 				continue;
 			}

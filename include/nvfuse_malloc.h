@@ -21,4 +21,13 @@ void nvfuse_free(void *ptr);
 
 void *nvfuse_alloc_aligned_buffer(size_t size);
 void nvfuse_free_aligned_buffer(void *ptr);
+#ifdef NVFUSE_USE_CEPH_SPDK
+void *
+spdk_dma_malloc(size_t size, size_t align, uint64_t *phys_addr);
+void *
+spdk_dma_zmalloc(size_t size, size_t align, uint64_t *phys_addr);
+void
+spdk_dma_free(void *buf);
+#endif
+
 #endif

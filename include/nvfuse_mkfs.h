@@ -16,7 +16,7 @@
 #define __NVFUSE_MKFS__
 
 void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 bg_start, u32 bg_size);
-s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
+s32 nvfuse_alloc_root_inode_direct(struct io_target *target,
 		struct nvfuse_superblock *sb_disk, u32 bg_id, u32 bg_size);
 
 s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
@@ -32,9 +32,11 @@ void nvfuse_type_check();
 
 s32 nvfuse_format(struct nvfuse_handle *nvh);
 
+void nvfuse_print_bd(struct nvfuse_bg_descriptor *bd);
+
 //#define NVFUSE_BD_DEBUG
 #ifdef NVFUSE_BD_DEBUG
-static void nvfuse_bd_debug(struct nvfuse_io_manager *io_manager, u32 bg_size, u32 num_bgs);
+static void nvfuse_bd_debug(struct io_target *target, u32 bg_size, u32 num_bgs);
 #endif
 u32 get_part_size(s32 fd);
 u32 get_sector_size(s32 fd);

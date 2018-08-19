@@ -19,12 +19,16 @@ NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 include $(NVFUSE_ROOT_DIR)/nvfuse.mk
 include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 
-TARGET = fuse_example
-SRCS   = fuse_example.o
+TARGET = fio_plugin
+SRCS   = fio_plugin_sync.o fio_plugin_aio.o
 
-LDFLAGS += -lfuse -lm -lpthread -laio -lrt -luuid
-CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -I/usr/include/fuse
+CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE
 CFLAGS += $(WARNING_OPTION)
+CFLAGS += -fPIC
+CFLAGS += -I$(FIO_SOURCE_DIR)
+
+LDFLAGS += -lm -lpthread -laio -lrt
+LDFLAGS += -shared -rdynamic
 
 OBJS=$(SRCS:.c=.o)
 
@@ -37,11 +41,10 @@ CC=gcc
 .c.o:
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC)  -g -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
+	$(CC) $(CEPH_COMPILE) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ $<
 
 $(TARGET)	:	$(OBJS)
-	$(CC)  -g -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
-
+	$(CC) -o $(TARGET) $(OBJS) $(NVFUSE_LIBS) $(LIBS) $(LDFLAGS)
 all:  $(TARGET) 
 
 

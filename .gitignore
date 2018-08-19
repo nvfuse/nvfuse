@@ -15,3 +15,9 @@ fuse_example
 perf
 regression_test
 mkfs.nvfuse
+reactor
+nvfuse_cli
+mktags.sh
+libfuse
+mkfs
+xattr_test

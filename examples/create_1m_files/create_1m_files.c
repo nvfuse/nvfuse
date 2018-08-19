@@ -20,7 +20,6 @@
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
-#include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_aio.h"
@@ -41,9 +40,6 @@
 /* 1 million create/delete test */
 #define MILL_TEST   3
 
-/* global io_manager */
-static struct nvfuse_io_manager _g_io_manager;
-static struct nvfuse_io_manager *g_io_manager = &_g_io_manager;
 /* global ipc_context */
 static struct nvfuse_ipc_context _g_ipc_ctx;
 static struct nvfuse_ipc_context *g_ipc_ctx = &_g_ipc_ctx;
@@ -159,7 +155,7 @@ int rt_create_files(struct nvfuse_handle *nvh, u32 arg)
 	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
 	printf(" Finish: creating null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 	printf(" bp tree cpu = %f sec\n",
 	       (double)nvh->nvh_sb.bp_set_index_tsc / (double)spdk_get_ticks_hz());
 	printf(" sync meta i/o = %f sec\n", (double)nvh->nvh_sb.nvme_io_tsc / (double)spdk_get_ticks_hz());
@@ -217,7 +213,7 @@ int rt_stat_files(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 	}
 	printf(" Finish: looking up null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 
 
 	return 0;
@@ -270,7 +266,7 @@ int rt_rm_files(struct nvfuse_handle *nvh, u32 arg)
 		rt_progress_report(i, max_inodes);
 	}
 	printf(" Finish: deleting null files (0x%x) %.3f OPS (%.f sec).\n", max_inodes,
-	       max_inodes / time_since_now(&tv), time_since_now(&tv));
+	       max_inodes / nvfuse_time_since_now(&tv), nvfuse_time_since_now(&tv));
 
 	nvfuse_check_flush_dirty(&nvh->nvh_sb, 1);
 
@@ -315,7 +311,7 @@ static int rt_main(void *arg)
 	printf(" Perform test %s thread id = %d... \n", rt_decode_test_type(test_type), (s32)arg);
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(g_io_manager, g_ipc_ctx, g_params);
+	nvh = nvfuse_create_handle(g_ipc_ctx, g_params);
 	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
@@ -344,7 +340,7 @@ static int rt_main(void *arg)
 			goto RET;
 		}
 
-		execution_time = time_since_now(&tv);
+		execution_time = nvfuse_time_since_now(&tv);
 
 		memset(&perf_stat, 0x00, sizeof(union perf_stat));
 
@@ -611,7 +607,7 @@ int main(int argc, char *argv[])
 	}
 #endif
 
-	ret = nvfuse_configure_spdk(g_io_manager, g_ipc_ctx, g_params->cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	ret = nvfuse_configure_spdk(g_ipc_ctx, g_params, NVFUSE_MAX_AIO_DEPTH);
 	if (ret < 0)
 		return -1;
 
@@ -658,7 +654,7 @@ int main(int argc, char *argv[])
 
 	print_stats(num_cores, NUM_ELEMENTS(rt_ctx));
 
-	nvfuse_deinit_spdk(g_io_manager, g_ipc_ctx);
+	nvfuse_deinit_spdk(g_ipc_ctx);
 
 	return ret;
 #if 0

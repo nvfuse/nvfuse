@@ -33,12 +33,12 @@
 #define NVFUSE_PROCESS_STANDALONE	0
 #define NVFUSE_PROCESS_DATAPLANE	1
 
-inline int nvfuse_process_model_is_standalone(void)
+static inline int nvfuse_process_model_is_standalone(void)
 {
 	return NVFUSE_PROCESS_MODEL == NVFUSE_PROCESS_STANDALONE;
 }
 
-inline int nvfuse_process_model_is_dataplane(void)
+static inline int nvfuse_process_model_is_dataplane(void)
 {
 	return NVFUSE_PROCESS_MODEL == NVFUSE_PROCESS_DATAPLANE;
 }
@@ -59,6 +59,7 @@ inline int nvfuse_process_model_is_dataplane(void)
 #	define CLUSTER_SIZE_BITS 12
 #   define BITS_PER_CLUSTER 8
 #   define BITS_PER_CLUSTER_BITS 3
+#	define NV_BLOCK_SIZE CLUSTER_SIZE
 
 /* LRU Cache Size and Hash Size */
 //#define NVFUSE_HASH_SIZE 100000
@@ -171,5 +172,9 @@ enum bp_mempool_type {
 #define NVFUSE_BG_GROUP_NUM 1
 
 #define NVFUSE_USE_MINISH
+//#define NVFUSE_KEEP_DIRTY_BH_IN_ICTX
+
+/* Please use the below definition when the spdk forked in the ceph repo is deploy */
+//#define NVFUSE_USE_CEPH_SPDK
 
 #endif

@@ -30,8 +30,9 @@
 #include "nvfuse_dirhash.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_mkfs.h"
+#include "nvfuse_debug.h"
 
-s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
+s32 nvfuse_alloc_root_inode_direct(struct io_target *target,
 		struct nvfuse_superblock *sb_disk, u32 bg_id, u32 bg_size)
 {
 	struct nvfuse_bg_descriptor *bd;
@@ -43,41 +44,43 @@ s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 
 	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
-		printf(" Malloc error \n");
+		dprintf_error(MEMALLOC, "Malloc error \n");
 		return -1;
 	}
 
 	memset(bd_buf, 0x00, CLUSTER_SIZE);
-	nvfuse_read_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, io_manager);
+	nvfuse_read_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, target);
 	bd = (struct nvfuse_bg_descriptor *)bd_buf;
+	assert(bd->bd_magic == NVFUSE_BD_MAGIC);
 	assert(bd->bd_id == bg_id);
 
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL) {
-		printf(" Malloc error \n");
+		dprintf_error(MEMALLOC, "Malloc error \n");
 		return -1;
 	}
 
 	// reserved and root inode bitmap allocation
-	nvfuse_read_cluster(buf, bd->bd_ibitmap_start, io_manager);
+	nvfuse_read_cluster(buf, bd->bd_ibitmap_start, target);
 	for (ino = 0; ino < NUM_RESV_INO; ino++) {
 		ext2fs_set_bit(ino, buf);
 		bd->bd_free_inodes--;
 		sb_disk->sb_free_inodes--;
 	}
-	nvfuse_write_cluster(buf, bd->bd_ibitmap_start, io_manager);
+	nvfuse_write_cluster(buf, bd->bd_ibitmap_start, target);
 
 	// data block for root directory allocation
-	nvfuse_read_cluster(buf, bd->bd_dbitmap_start, io_manager);
+	nvfuse_read_cluster(buf, bd->bd_dbitmap_start, target);
 	//printf(" data block for root dir = %d \n", (int)bd->bd_dtable_start);
 
 	ext2fs_set_bit(bd->bd_dtable_start % bg_size, buf);
 	bd->bd_free_blocks--;
 	sb_disk->sb_free_blocks--;
-	nvfuse_write_cluster(buf, bd->bd_dbitmap_start, io_manager);
+	nvfuse_write_cluster(buf, bd->bd_dbitmap_start, target);
 
 	// root inode allocation
-	nvfuse_read_cluster(buf, bd->bd_itable_start, io_manager);
+#if (INODE_ENTRY_SIZE == 128)
+	nvfuse_read_cluster(buf, bd->bd_itable_start, target);
 	memset(buf, 0x0, CLUSTER_SIZE);
 	inode = (struct nvfuse_inode *)buf;
 	for (ino = 0; ino < NUM_RESV_INO; ino++) {
@@ -101,10 +104,41 @@ s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 		inode[ino].i_links_count = 2;
 		inode[ino].i_blocks[0] = bd->bd_dtable_start;
 	}
-	nvfuse_write_cluster(buf, bd->bd_itable_start, io_manager);
+	nvfuse_write_cluster(buf, bd->bd_itable_start, target);
+#elif (INODE_ENTRY_SIZE == 4096)
+	for (ino = 0; ino < NUM_RESV_INO; ino++) {
+		nvfuse_read_cluster(buf, bd->bd_itable_start + ino, target);
+		memset(buf, 0x0, CLUSTER_SIZE);
+
+		if (ino == ROOT_INO) {
+			inode = (struct nvfuse_inode *)buf;
+			//root inode
+			inode->i_ino = ROOT_INO;
+			inode->i_type = NVFUSE_TYPE_DIRECTORY;
+			inode->i_size = DIR_ENTRY_SIZE * DIR_ENTRY_NUM;
+			inode->i_version = 1;
+			inode->i_ptr = 1;
+			inode->i_gid = 0;
+			inode->i_uid = 0;
+			inode->i_mode = 0600 | S_IFDIR;
+			inode->i_atime = time(NULL);
+			inode->i_ctime = time(NULL);
+			inode->i_mtime = time(NULL);
+			inode->i_links_count = 2;
+			inode->i_blocks[0] = bd->bd_dtable_start;
+		}
+
+		dprintf_debug(FORMAT, " write inode = %d on %d block \n", ino, bd->bd_itable_start + ino);
+
+		nvfuse_write_cluster(buf, bd->bd_itable_start + ino, target);
+	}
+#else
+	dprintf_error(FORMAT, " Unsupported inode size = %d \n", INODE_ENTRY_SIZE);
+	assert(0);
+#endif
 
 	// root data block allocation
-	nvfuse_read_cluster(buf, bd->bd_dtable_start, io_manager);
+	nvfuse_read_cluster(buf, bd->bd_dtable_start, target);
 
 	memset(buf, 0x0, CLUSTER_SIZE);
 	d_entry = (struct nvfuse_dir_entry *)buf;
@@ -118,8 +152,8 @@ s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 	d_entry[1].d_ino = ROOT_INO;
 	d_entry[1].d_flag = DIR_USED;
 
-	nvfuse_write_cluster(buf, bd->bd_dtable_start, io_manager);
-	nvfuse_write_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, io_manager);
+	nvfuse_write_cluster(buf, bd->bd_dtable_start, target);
+	nvfuse_write_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, target);
 	nvfuse_free_aligned_buffer(buf);
 	nvfuse_free_aligned_buffer(bd_buf);
 
@@ -128,18 +162,16 @@ s32 nvfuse_alloc_root_inode_direct(struct nvfuse_io_manager *io_manager,
 
 void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 bg_start, u32 bg_size)
 {
-	u32 bits_per_bitmap;
-
-	bd->bd_owner		= 0;
+	bd->bd_magic	= NVFUSE_BD_MAGIC;
+	bd->bd_owner	= 0;
 	bd->bd_id		= bg_id;
 	bd->bd_bg_start	= 0;
 	bd->bd_bd_start	= NVFUSE_BD_OFFSET;
 	bd->bd_ibitmap_start	= NVFUSE_IBITMAP_OFFSET;
-	bd->bd_ibitmap_size	= NVFUSE_IBITMAP_SIZE;
+	bd->bd_ibitmap_size		= NVFUSE_DBITMAP_SIZE;
 
-	bits_per_bitmap		= NVFUSE_IBITMAP_SIZE * CLUSTER_SIZE * 8;
-	bd->bd_max_inodes	= bits_per_bitmap / 2;
-	bd->bd_max_blocks	= bits_per_bitmap;
+	bd->bd_max_inodes	= NVFUSE_INODE_PER_BG;
+	bd->bd_max_blocks	= NVFUSE_DATA_PER_BG;
 
 	bd->bd_dbitmap_start	= NVFUSE_DBITMAP_OFFSET;
 	bd->bd_dbitmap_size	= NVFUSE_DBITMAP_SIZE;
@@ -160,10 +192,26 @@ void nvfuse_make_bg_descriptor(struct nvfuse_bg_descriptor *bd, u32 bg_id, u32 b
 	bd->bd_dtable_start	+= bg_start;
 }
 
+void nvfuse_print_bd(struct nvfuse_bg_descriptor *bd)
+{
+	dprintf_info(FORMAT, " magic = %x bytes \n", bd->bd_magic);
+	dprintf_info(FORMAT, " inode size = %u bytes \n", INODE_ENTRY_SIZE);
+	dprintf_info(FORMAT, " bd_bg_start = %u\n", bd->bd_bd_start);
+	dprintf_info(FORMAT, " bd_ibitmap_start = %u\n", bd->bd_ibitmap_start);
+	dprintf_info(FORMAT, " bd_ibitmap_size = %u blocks \n", bd->bd_ibitmap_size);
+	dprintf_info(FORMAT, " bd_dbitmap_start = %u\n", bd->bd_dbitmap_start);
+	dprintf_info(FORMAT, " bd_dbitmap_size = %u blocks \n", bd->bd_dbitmap_size);
+	dprintf_info(FORMAT, " itable start = %u \n", bd->bd_itable_start);
+	dprintf_info(FORMAT, " itable size = %u blocks \n", bd->bd_itable_size);
+	dprintf_info(FORMAT, " dtable start = %u \n", bd->bd_dtable_start);
+	dprintf_info(FORMAT, " dtable size = %u blocks\n", bd->bd_dtable_size);
+	dprintf_info(FORMAT, " bd end = %u \n", bd->bd_dtable_start + bd->bd_dtable_size);
+}
+
 s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
 		struct nvfuse_superblock *sb_disk, u32 num_bgs, u32 bg_size)
 {
-	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
+	struct io_target *target= nvh->nvh_target;
 	struct nvfuse_bg_descriptor *bd;
 	void *bd_buf;
 	void *buf;
@@ -172,12 +220,12 @@ s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
 
 	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(MEMALLOC, " malloc error \n");
 		return -1;
 	}
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(MEMALLOC, " malloc error \n");
 		return -1;
 	}
 
@@ -195,28 +243,18 @@ s32 nvfuse_format_write_bd(struct nvfuse_handle *nvh,
 		sb_disk->sb_free_inodes += bd->bd_free_inodes;
 		sb_disk->sb_free_blocks += bd->bd_free_blocks;
 
-		nvfuse_write_cluster(bd_buf, bd->bd_bd_start, io_manager);
+		nvfuse_write_cluster(bd_buf, bd->bd_bd_start, target);
 #if 0 /* debug */
-		nvfuse_read_cluster(bd_buf, bd->bd_bd_start, io_manager);
+		nvfuse_read_cluster(bd_buf, bd->bd_bd_start, target);
 		assert(bd->bd_id == bg_id);
 #endif
 #if 1
 		if (bg_id != 0)
 			continue;
 
-		printf(" \n");
-		printf(" inode size = %u bytes \n", INODE_ENTRY_SIZE);
-		printf(" bd_bg_start = %u\n", bd->bd_bd_start);
-		printf(" bd_ibitmap_start = %u\n", bd->bd_ibitmap_start);
-		printf(" bd_ibitmap_size = %u blocks \n", bd->bd_ibitmap_size);
-		printf(" bd_dbitmap_start = %u\n", bd->bd_dbitmap_start);
-		printf(" bd_dbitmap_size = %u blocks \n", bd->bd_dbitmap_size);
-		printf(" itable start = %u \n", bd->bd_itable_start);
-		printf(" itable size = %u blocks \n", bd->bd_itable_size);
-		printf(" dtable start = %u \n", bd->bd_dtable_start);
-		printf(" dtable size = %u blocks\n", bd->bd_dtable_size);
-		printf(" bd end = %u \n", bd->bd_dtable_start + bd->bd_dtable_size);
-		printf("\n");
+		dprintf_info(FORMAT, " \n");
+		nvfuse_print_bd(bd);
+		dprintf_info(FORMAT, "\n");
 #endif
 	}
 
@@ -242,17 +280,17 @@ s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 	u32 bg_id;
 	u32 bg_start;
 	u32 clu;
-	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
+	struct io_target *target = nvh->nvh_target;
 
 	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(FORMAT, " malloc error \n");
 		return -1;
 	}
 
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(FORMAT, " malloc error \n");
 		return -1;
 	}
 
@@ -268,14 +306,14 @@ s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 
 		/* Initialize ibitmap table */
 		memset(buf, 0x00, CLUSTER_SIZE);
-		nvfuse_write_cluster(buf, bd->bd_ibitmap_start, io_manager);
+		nvfuse_write_cluster(buf, bd->bd_ibitmap_start, target);
 
 		/* reserve clusters ranging from bd to itable */
 		memset(buf, 0x00, CLUSTER_SIZE);
 		for (clu = bd->bd_bg_start; clu < bd->bd_itable_start + bd->bd_itable_size; clu++) {
 			ext2fs_set_bit(clu % bg_size, buf);
 		}
-		nvfuse_write_cluster(buf, bd->bd_dbitmap_start, io_manager);
+		nvfuse_write_cluster(buf, bd->bd_dbitmap_start, target);
 
 		/* inode can be allocated through ibitmap */
 #ifdef NVFUSE_USE_MKFS_INODE_ZEROING
@@ -283,7 +321,7 @@ s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 			zeroing_blocks = bd->bd_itable_size;
 			zeroing_buf = nvfuse_alloc_aligned_buffer(zeroing_blocks * CLUSTER_SIZE);
 			if (zeroing_buf == NULL) {
-				printf(" malloc error \n");
+				dprintf_error(FORMAT, " malloc error \n");
 				return -1;
 			}
 			memset(zeroing_buf, 0x00, zeroing_blocks * CLUSTER_SIZE);
@@ -291,7 +329,7 @@ s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 		}
 
 		/* write zero data to inode table */
-		io_manager->io_write(io_manager, bd->bd_itable_start, bd->bd_itable_size, zeroing_buf);
+		nvfuse_write_ncluster(zeroing_buf, bd->bd_itable_start, bd->bd_itable_size, target);
 
 		if (bg_id + 1 == num_bgs) {
 			nvfuse_free_aligned_buffer(zeroing_buf);
@@ -302,7 +340,7 @@ s32 nvfuse_format_metadata_zeroing(struct nvfuse_handle *nvh,
 		for (clu = bd->bd_dtable_start;
 		     clu < bd->bd_dtable_start + bd->bd_dtable_size;
 		     clu++) {
-			nvfuse_write_cluster(buf, clu, io_manager);
+			nvfuse_write_cluster(buf, clu, target);
 		}
 #endif
 	}
@@ -320,13 +358,13 @@ s32 nvfuse_format_bg(struct nvfuse_handle *nvh, struct nvfuse_superblock *sb_dis
 	/* building and writing bd for each bg */
 	res = nvfuse_format_write_bd(nvh, sb_disk, num_bgs, bg_size);
 	if (res) {
-		printf(" Error: format write bd \n");
+		dprintf_error(FORMAT, " Error: format write bd \n");
 		return res;
 	}
 	/* zeroing bitmap and inode tables */
 	res = nvfuse_format_metadata_zeroing(nvh, sb_disk, num_bgs, bg_size);
 	if (res) {
-		printf(" Error: Metadata Zeroing \n");
+		dprintf_error(FORMAT, " Error: Metadata Zeroing \n");
 		return res;
 	}
 
@@ -346,7 +384,7 @@ void nvfuse_type_check()
 
 s32 nvfuse_format(struct nvfuse_handle *nvh)
 {
-	struct nvfuse_io_manager *io_manager = &nvh->nvh_iom;
+	struct io_target *target = nvh->nvh_target;
 	struct nvfuse_superblock *nvfuse_sb_disk;
 
 	struct timeval format_tv;
@@ -360,10 +398,10 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 
 	s32 ret;
 
-	printf("-------------------------------------------------------------------\n");
-	printf(" Formatting NVFUSE ...\n");
-	printf(" Warning: your data will be removed permanently...\n");
-	printf("--------------------Option------------------------------------------\n");
+	dprintf_info(FORMAT, "-------------------------------------------------------------------\n");
+	dprintf_info(FORMAT, " Formatting NVFUSE ...\n");
+	dprintf_info(FORMAT, " Warning: your data will be removed permanently...\n");
+	dprintf_info(FORMAT, "--------------------Option------------------------------------------\n");
 
 	nvfuse_type_check();
 
@@ -371,12 +409,12 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	gettimeofday(&format_tv, NULL);
 
 	if (INODE_ENTRY_SIZE != sizeof(struct nvfuse_inode)) {
-		printf(" check inode size = %d \n", (int)sizeof(struct nvfuse_inode));
+		dprintf_error(FORMAT, " check inode size = %d \n", (int)sizeof(struct nvfuse_inode));
 		return -1;
 	}
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL) {
-		printf(" %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
+		dprintf_error(FORMAT, " %s:%d: nvfuse_malloc error \n", __FUNCTION__, __LINE__);
 		return -1;
 	}
 
@@ -387,35 +425,13 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	memset(buf, 0x00, CLUSTER_SIZE);
 	nvfuse_sb_disk = (struct nvfuse_superblock *) buf;
 
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-	num_sectors = NO_OF_SECTORS;
-	num_clu = (u32)NVFUSE_NUM_CLU;
-#else
-#	ifdef __USE_FUSE__
-	num_sectors = get_no_of_sectors(io_manager->dev);
-	num_clu = (u32)num_sectors / (u32)SECTORS_PER_CLUSTER;
-#	else
-#		if USE_RAMDISK == 1 || USE_FILEDISK == 1
-	num_sectors = NO_OF_SECTORS;
-	num_clu = (u32)NVFUSE_NUM_CLU;
-#		elif USE_BLKDEVIO == 1
-	printf(" blkdev: nvfuse_io_manager = %p\n", io_manager);
-	num_sectors = io_manager->total_blkcount;
+	dprintf_info(FORMAT, " spdk: io_target = %p\n", target);
+	num_sectors = nvh->total_blkcount;
 	num_clu = num_sectors / SECTORS_PER_CLUSTER;
-#		elif USE_SPDK == 1
-	printf(" spdk: nvfuse_io_manager = %p\n", io_manager);
-	num_sectors = io_manager->total_blkcount;
-	num_clu = num_sectors / SECTORS_PER_CLUSTER;
-#		endif
-#	endif
-	num_sectors = io_manager->total_blkcount;
-	num_clu = num_sectors / SECTORS_PER_CLUSTER;
-	/* FIXME: total_blkcount must be set to when io_manager is initialized. */
-#endif
 
-	printf(" nvfuse_io_manager = %p\n", io_manager);
+	assert(num_sectors && num_clu);
 
-	printf(" sectors = %lu, blocks = %lu\n", (unsigned long)num_sectors, (unsigned long)num_clu);
+	dprintf_info(FORMAT, " sectors = %lu, blocks = %lu\n", (unsigned long)num_sectors, (unsigned long)num_clu);
 
 	bg_size = CLUSTER_SIZE << BITS_PER_CLUSTER_BITS << CLUSTER_SIZE_BITS;
 	bg_size_bits = (s32)log2(bg_size);
@@ -423,8 +439,8 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	num_bg = NVFUSE_BG_NUM(num_clu, bg_size_bits - CLUSTER_SIZE_BITS);
 	num_clu = num_bg << (bg_size_bits - CLUSTER_SIZE_BITS);
 
-	printf(" bg size = %dMB \n", (1 << bg_size_bits) / 1024 / 1024);
-	printf(" num bgs = %ld \n", (unsigned long)num_bg);
+	dprintf_info(FORMAT, " bg size = %dMB \n", (1 << bg_size_bits) / 1024 / 1024);
+	dprintf_info(FORMAT, " num bgs = %ld \n", (unsigned long)num_bg);
 
 	bg_p_clu = 1 << (bg_size_bits - CLUSTER_SIZE_BITS);
 
@@ -437,7 +453,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	nvfuse_bd_debug(&nvh->nvh_iom, bg_p_clu, num_bg);
 #endif
 
-	ret = nvfuse_alloc_root_inode_direct(&nvh->nvh_iom, nvfuse_sb_disk, 0, bg_p_clu);
+	ret = nvfuse_alloc_root_inode_direct(nvh->nvh_target, nvfuse_sb_disk, 0, bg_p_clu);
 	if (ret) {
 		return NVFUSE_ERROR;
 	}
@@ -447,11 +463,11 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 
 	nvfuse_sb_disk->sb_signature = NVFUSE_SB_SIGNATURE;
 
-	nvfuse_sb_disk->sb_no_of_inodes_per_bg = NVFUSE_IBITMAP_SIZE * CLUSTER_SIZE * 8 / 2;
-	nvfuse_sb_disk->sb_no_of_blocks_per_bg = NVFUSE_IBITMAP_SIZE * CLUSTER_SIZE * 8;
+	nvfuse_sb_disk->sb_no_of_inodes_per_bg = NVFUSE_INODE_PER_BG;
+	nvfuse_sb_disk->sb_no_of_blocks_per_bg = NVFUSE_DATA_PER_BG;
 
-	printf(" inodes per bg = %d \n", nvfuse_sb_disk->sb_no_of_inodes_per_bg);
-	printf(" blocks per bg = %d \n", nvfuse_sb_disk->sb_no_of_blocks_per_bg);
+	dprintf_info(FORMAT, " inodes per bg = %d \n", nvfuse_sb_disk->sb_no_of_inodes_per_bg);
+	dprintf_info(FORMAT, " blocks per bg = %d \n", nvfuse_sb_disk->sb_no_of_blocks_per_bg);
 
 	nvfuse_sb_disk->sb_root_ino = ROOT_INO;
 	nvfuse_sb_disk->asb.asb_root_bg_id = 0;
@@ -463,20 +479,21 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	nvfuse_sb_disk->sb_no_of_sectors = (nvfuse_sb_disk->sb_bg_num) * bg_p_clu *
 					   (CLUSTER_SIZE / SECTOR_SIZE);
 
-	nvfuse_sb_disk->sb_umount = 1;
+	nvfuse_sb_disk->sb_state = FS_STATE_FORMATTED;
 
 	nvfuse_sb_disk->sb_max_inode_num = (u32)~0 >> (NVFUSE_MAX_BITS - NVFUSE_MAX_INODE_BITS);
 	nvfuse_sb_disk->sb_max_file_num = (u32)~0 >> (NVFUSE_MAX_BITS - NVFUSE_MAX_FILE_BITS);
 	nvfuse_sb_disk->sb_max_dir_num = (u32)~0 >> (NVFUSE_MAX_BITS - NVFUSE_MAX_DIR_BITS);
 
-	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, io_manager);
+	dprintf_info(FORMAT, " NVFUSE writes the superblock on 0 block\n");
+	nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, target);
 
-	printf("\n NVFUSE capability\n");
-	printf(" max file size = %.3fTB\n", (double)MAX_FILE_SIZE / NVFUSE_TERA_BYTES);
+	dprintf_info(FORMAT, " NVFUSE capability\n");
+	dprintf_info(FORMAT, " max file size = %.3fTB\n", (double)MAX_FILE_SIZE / NVFUSE_TERA_BYTES);
 
-	printf(" max files per directory = %08x\n", MAX_FILES_PER_DIR);
-	printf("\n NVFUSE was formatted successfully. (%.3f sec)\n", time_since_now(&format_tv));
-	printf("-------------------------------------------------------------------\n");
+	dprintf_info(FORMAT, " max files per directory = %08x\n", MAX_FILES_PER_DIR);
+	dprintf_info(FORMAT, " NVFUSE was formatted successfully. (%.3f sec)\n", nvfuse_time_since_now(&format_tv));
+	dprintf_info(FORMAT, "-------------------------------------------------------------------\n");
 	fflush(stdout);
 
 	nvfuse_free_aligned_buffer(buf);
@@ -485,7 +502,7 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 }
 
 #ifdef NVFUSE_BD_DEBUG
-void nvfuse_bd_debug(struct nvfuse_io_manager *io_manager, u32 bg_size, u32 num_bgs)
+void nvfuse_bd_debug(io_target *target, u32 bg_size, u32 num_bgs)
 {
 	void *bd_buf;
 	s32 bg_id;
@@ -493,15 +510,15 @@ void nvfuse_bd_debug(struct nvfuse_io_manager *io_manager, u32 bg_size, u32 num_
 
 	bd_buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (bd_buf == NULL) {
-		printf(" Malloc error \n");
+		dprintf_error(FORMAT, " Malloc error \n");
 	}
 
 	for (bg_id = 0; bg_id < num_bgs; bg_id++) {
 		memset(bd_buf, 0x00, CLUSTER_SIZE);
-		nvfuse_read_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, io_manager);
+		nvfuse_read_cluster(bd_buf, bg_id * bg_size + NVFUSE_BD_OFFSET, target);
 		bd = (struct nvfuse_bg_descriptor *)bd_buf;
 		if (bg_id != bd->bd_id) {
-			printf(" mismatch bgid = %d\n", bg_id);
+			dprintf_error(FORMAT, " mismatch bgid = %d\n", bg_id);
 			assert(0);
 		}
 	}
@@ -551,7 +568,7 @@ u64 get_no_of_sectors(s32 fd)
 	ioctl(fd, BLKGETSIZE, &no_of_sectors);
 #endif
 
-	printf(" no of sectors = %llu\n", no_of_sectors);
+	dprintf_info(FORMAT, " no of sectors = %llu\n", no_of_sectors);
 	return no_of_sectors;
 }
 

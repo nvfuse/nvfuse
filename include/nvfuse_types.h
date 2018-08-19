@@ -13,11 +13,12 @@
 * more details.
 */
 
-#include<sys/stat.h>
+#include <sys/stat.h>
 #include "nvfuse_config.h"
+#include <rte_spinlock.h>
 
-#ifndef _NVFUSE_TYPES_H
-#define _NVFUSE_TYPES_H
+#ifndef __NVFUSE_TYPES_H
+#define __NVFUSE_TYPES_H
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 
@@ -153,4 +154,12 @@ typedef u32 lbno_t;//logical block num
 #undef MIN
 #endif
 #define	MIN(x,y)	((x) < (y) ? (x) : (y))
-#endif
+
+/* spinlock macro */
+#define SPINLOCK_INIT(x) rte_spinlock_init(x)
+#define SPINLOCK_LOCK(x) rte_spinlock_lock(x)
+#define SPINLOCK_UNLOCK(x) rte_spinlock_unlock(x)
+#define SPINLOCK_IS_LOCKED(x) rte_spinlock_is_locked(x)
+
+#endif /* __NVFUSE_TYPES_H */
+

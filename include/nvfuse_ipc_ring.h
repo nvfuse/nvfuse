@@ -13,6 +13,7 @@
 * more details.
 */
 #include <sys/resource.h>
+#include <nvfuse_core.h>
 
 #ifndef _NVFUSE_IPC_RING_H
 #define _NVFUSE_IPC_RING_H

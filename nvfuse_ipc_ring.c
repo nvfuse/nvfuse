@@ -43,8 +43,8 @@
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
-
 #include "nvfuse_ipc_ring.h"
+#include "nvfuse_debug.h"
 
 #define MAX_STAT_MSG 5
 static s8 *_STAT_MSG_POOL[MAX_STAT_MSG] = {
@@ -155,7 +155,7 @@ void nvfuse_make_app_register_req(struct app_register_req *req)
 
 void nvfuse_make_app_register_cpl(struct app_register_cpl *req, s32 ret)
 {
-	printf(" called: %s\n", __FUNCTION__);
+	dprintf_info(IPC, " called: %s\n", __FUNCTION__);
 	req->opcode = APP_REGISTER_CPL;
 	req->chan_id = req->chan_id;
 	req->ret = ret;
@@ -172,7 +172,7 @@ void nvfuse_make_health_check_req(struct health_check_req *req)
 
 void nvfuse_make_health_check_cpl(struct health_check_cpl *req, s32 ret)
 {
-	//printf(" called: %s\n", __FUNCTION__);
+	//dprintf_info(IPC, " called: %s\n", __FUNCTION__);
 	req->opcode = HEALTH_CHECK_CPL;
 	req->chan_id = req->chan_id;
 	req->ret = ret;
@@ -182,7 +182,7 @@ void nvfuse_make_health_check_cpl(struct health_check_cpl *req, s32 ret)
 
 void nvfuse_make_unkown_cpl(struct unknown_cpl *req, s32 ret)
 {
-	printf(" called: %s\n", __FUNCTION__);
+	dprintf_info(IPC, " called: %s\n", __FUNCTION__);
 	req->opcode = UNKOWN_CPL;
 	req->chan_id = req->chan_id;
 	req->ret = ret;
@@ -340,6 +340,9 @@ int nvfuse_put_channel_id(struct nvfuse_ipc_context *ipc_ctx, int channel_id)
 {
 	char *ipc_msg;
 
+	if (!ipc_ctx->message_pool)
+		return -1;
+
 	if (rte_mempool_get(ipc_ctx->message_pool, (void **)&ipc_msg) < 0) {
 		rte_panic("Failed to get message buffer\n");
 		return -1;
@@ -434,6 +437,9 @@ int nvfuse_stat_ring_put(struct rte_ring *stat_tx_ring,
 {
 	char *ipc_msg;
 
+	if (!stat_message_pool)
+		return -1;
+
 	if (rte_mempool_get(stat_message_pool, (void **)&ipc_msg) < 0) {
 		rte_panic("Failed to get message buffer\n");
 		return -1;
@@ -482,9 +488,9 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 	int i;
 	int ret;
 
-	printf(" ipc init \n");
-	printf(" rte_socket_id() = %d \n", rte_socket_id());
-	printf(" rte_lcore_id() = %d \n", rte_lcore_id());
+	dprintf_info(IPC, " ipc init \n");
+	dprintf_info(IPC, " rte_socket_id() = %d \n", rte_socket_id());
+	dprintf_info(IPC, " rte_lcore_id() = %d \n", rte_lcore_id());
 
 	if (!spdk_process_is_primary() && !rte_lcore_id()) {
 		rte_exit(EXIT_FAILURE, " Secondary process id cannot be zero.!!!\n");
@@ -512,7 +518,7 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 				ipc_ctx->recv_ring[i] = ipc_ctx->recv_ring[0];
 			}
 
-			printf(" send ring = %p, recv ring = %p\n", ipc_ctx->send_ring[i], ipc_ctx->recv_ring[i]);
+			dprintf_info(IPC, " send ring = %p, recv ring = %p\n", ipc_ctx->send_ring[i], ipc_ctx->recv_ring[i]);
 		}
 
 		ipc_ctx->message_pool = rte_mempool_create(ipc_ctx->_MSG_POOL, pool_size,
@@ -532,7 +538,7 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 			}
 		}
 
-		printf(" IPC init in primary core\n");
+		dprintf_info(IPC, " IPC init in primary core\n");
 	} else { /* in case of secondary process */
 		for (i = 0; i < SPDK_NUM_CORES; i++) {
 			if (i == 0) {
@@ -548,7 +554,7 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 			if (ipc_ctx->recv_ring[i] == NULL)
 				rte_exit(EXIT_FAILURE, "Problem getting receiving ring\n");
 
-			printf(" send ring = %p, recv ring = %p\n", ipc_ctx->send_ring[i], ipc_ctx->recv_ring[i]);
+			dprintf_info(IPC, " send ring = %p, recv ring = %p\n", ipc_ctx->send_ring[i], ipc_ctx->recv_ring[i]);
 		}
 
 		ipc_ctx->id_gen = rte_ring_lookup(ipc_ctx->ID_GEN);
@@ -557,12 +563,8 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 
 		ipc_ctx->message_pool = rte_mempool_lookup(ipc_ctx->_MSG_POOL);
 		/* moved to nvfuse_create_handle or nvfuse_mount */
-#if 1
 		ipc_ctx->my_channel_id = nvfuse_get_channel_id(ipc_ctx);
-		printf(" Obtained Channel ID = %d \n", ipc_ctx->my_channel_id);
-#else
-		ipc_ctx->my_channel_id = 0;
-#endif
+		dprintf_info(IPC, " Obtained Channel ID = %d \n", ipc_ctx->my_channel_id);
 	}
 
 	if (ipc_ctx->message_pool == NULL)
@@ -582,7 +584,7 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 		}
 	}
 
-	printf(" IPC initialized successfully for %s\n",
+	dprintf_info(IPC, " IPC initialized successfully for %s\n",
 	       rte_eal_process_type() == RTE_PROC_PRIMARY ? "Primary Core" : "Secondary Core");
 	return 0;
 }
@@ -591,9 +593,9 @@ void nvfuse_ipc_exit(struct nvfuse_ipc_context *ipc_ctx)
 {
 	int i;
 
-	printf(" ipc deinit ...\n");
+	dprintf_info(IPC, " ipc deinit ...\n");
 	nvfuse_put_channel_id(ipc_ctx, ipc_ctx->my_channel_id);
-	printf(" Release channel = %d \n", ipc_ctx->my_channel_id);
+	dprintf_info(IPC, " Release channel = %d \n", ipc_ctx->my_channel_id);
 
 	if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		for (i = 0; i < SPDK_NUM_CORES; i++) {
@@ -659,7 +661,7 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 	case BUFFER_FREE_REQ:
 		break;
 	default:
-		printf(" %ld send req (%p:%d:%s) to primary core\n",
+		dprintf_info(IPC, " %ld send req (%p:%d:%s) to primary core\n",
 		       spdk_get_ticks(),
 		       ipc_msg, ipc_msg->opcode,
 		       nvfuse_ipc_opcode_decode(ipc_msg->opcode));
@@ -681,10 +683,9 @@ int nvfuse_send_msg_to_primary_core(struct rte_ring *send_ring, struct rte_ring 
 	case BUFFER_FREE_CPL:
 		break;
 	default:
-		printf(" %ld recv cpl (%d:%s, ret = %d) from primary core\n",
+		dprintf_info(IPC, " %ld recv cpl (%d:%s, ret = %d) from primary core\n",
 		       spdk_get_ticks(),
 		       ipc_msg->opcode, nvfuse_ipc_opcode_decode(ipc_msg->opcode), ipc_msg->ret);
-		printf("\n");
 		fflush(stdout);
 	}
 	//rte_ring_dump(stdout, recv_ring);

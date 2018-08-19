@@ -16,8 +16,8 @@
 NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
-include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 include $(NVFUSE_ROOT_DIR)/nvfuse.mk
+include $(NVFUSE_ROOT_DIR)/spdk_config.mk
 
 TARGET_NVFUSE = perf 
 
@@ -28,7 +28,7 @@ LDFLAGS += -lm -lpthread -laio -lrt -luuid
 LDFLAGS_KERNEL = -lpthread
 
 CFLAGS += $(SPDK_CFLAGS) -I$(NVFUSE_ROOT_DIR)/include -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE
-CFLAGS += $(WARNING_OPTION)
+CFLAGS += $(WARNING_OPTION) $(CEPH_COMPILE)
 
 OBJS_NVFUSE=$(SRCS:.c=.o)
 OBJS_KERNEL=$(SRCS_KERNEL:.c=.o)

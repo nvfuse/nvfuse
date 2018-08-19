@@ -30,7 +30,9 @@
 #include "nvfuse_dep.h"
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_buffer_cache.h"
+#include "nvfuse_inode_cache.h"
 #include "nvfuse_indirect.h"
+#include "nvfuse_debug.h"
 
 void *bp_malloc(struct nvfuse_superblock *sb, int mempool_type, int num)
 {
@@ -44,10 +46,10 @@ void *bp_malloc(struct nvfuse_superblock *sb, int mempool_type, int num)
 
 	ret = rte_mempool_get(mp, &ptr);
 	if (ret < 0) {
-		fprintf(stderr, "ERROR: rte_mempool_get_bulk()\n");
+		dprintf_error(BPTREE, "ERROR: rte_mempool_get_bulk()\n");
 		return NULL;
 	}
-	//printf(" bpmalloc: type = %d ptr = %p, num = %d\n", mempool_type, ptr, num);
+	//dprintf_info(BPTREE, " bpmalloc: type = %d ptr = %p, num = %d\n", mempool_type, ptr, num);
 	return ptr;
 }
 
@@ -60,7 +62,7 @@ void bp_free(struct nvfuse_superblock *sb, int mempool_type, int num, void *ptr)
 	mp = (struct rte_mempool *)sb->bp_mempool[mempool_type];
 	rte_mempool_put(mp, ptr);
 
-	//printf(" bpfree: type = %d ptr = %p, num = %d \n", mempool_type, ptr, num);
+	//dprintf_info(BPTREE, " bpfree: type = %d ptr = %p, num = %d \n", mempool_type, ptr, num);
 }
 
 master_node_t *bp_init_master(struct nvfuse_superblock *sb)
@@ -70,17 +72,17 @@ master_node_t *bp_init_master(struct nvfuse_superblock *sb)
 	// init master node
 	master = (master_node_t *)bp_malloc(sb, BP_MEMPOOL_MASTER, 1);
 	if (master == NULL) {
-		printf(" Error: malloc()\n");
+		dprintf_error(BPTREE, " Error: malloc()\n");
 	}
 
 	memset(master, 0x00, sizeof(master_node_t));
 
+	/* TODO: necessary to replace with direct function calls */
 	master->alloc = bp_alloc_node;
 	master->insert = bp_insert_key_tree;
 	master->update = bp_update_key_tree;
 	master->search = search_data_node;
 	master->range_search = rsearch_data_node;
-	//master->range_search_rb = rsearch_data_node_rb;
 	master->remove = bp_remove_key;
 	master->get_pair = get_pair_tree;
 	master->release = bp_release_node;
@@ -97,7 +99,7 @@ master_node_t *bp_init_master(struct nvfuse_superblock *sb)
 void bp_deinit_master(master_node_t *master)
 {
 	nvfuse_release_inode(master->m_sb, master->m_ictx,
-			     test_bit(&master->m_ictx->ictx_status, BUFFER_STATUS_DIRTY) ? 1 : 0);
+			     test_bit(&master->m_ictx->ictx_status, INODE_STATE_DIRTY) ? 1 : 0);
 
 	bp_free(master->m_sb, BP_MEMPOOL_MASTER, 1, master);
 }
@@ -115,7 +117,7 @@ s32 bp_read_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 mast
 		bh = nvfuse_get_bh(master->m_sb, master->m_ictx, master->m_ino, sub_master_offset, READ,
 				   NVFUSE_TYPE_META);
 		if (bh == NULL) {
-			printf(" Error: read master block = %d", sub_master_offset);
+			dprintf_error(BPTREE, " read master block = %d", sub_master_offset);
 			return -1;
 		}
 		master_ctx->master = (master_node_t *)bh->bh_buf;
@@ -130,7 +132,7 @@ s32 bp_read_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 mast
 void bp_release_master_ctx(master_node_t *master, master_ctx_t *master_ctx, s32 dirty)
 {
 	if (master_ctx->master_id) {
-		nvfuse_release_bh(master->m_sb, master_ctx->bh, INSERT_HEAD, dirty ? DIRTY : CLEAN);
+		nvfuse_release_bh(master->m_sb, master_ctx->bh, INSERT_HEAD, dirty ? DIRTY : NVF_CLEAN);
 	}
 }
 
@@ -142,7 +144,7 @@ s32 bp_set_bitmap(master_node_t *master, u32 offset)
 
 	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
 	if (res) {
-		printf(" Error: read master ctx\n");
+		dprintf_error(BPTREE, " Error: read master ctx\n");
 		return -1;
 	}
 	sub_master = master_ctx.master;
@@ -164,7 +166,7 @@ s32 bp_clear_bitmap(master_node_t *master, u32 offset)
 
 	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
 	if (res) {
-		printf(" Error: read master ctx\n");
+		dprintf_error(BPTREE, " Error: read master ctx\n");
 		return -1;
 	}
 	sub_master = master_ctx.master;
@@ -187,7 +189,7 @@ s32 bp_test_bitmap(master_node_t *master, u32 offset)
 
 	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
 	if (res) {
-		printf(" Error: read master ctx\n");
+		dprintf_error(BPTREE, " Error: read master ctx\n");
 		return -1;
 	}
 	sub_master = master_ctx.master;
@@ -207,7 +209,7 @@ s32 bp_inc_free_bitmap(master_node_t *master, u32 offset)
 
 	res = bp_read_master_ctx(master, &master_ctx, offset / BP_NODES_PER_MASTER);
 	if (res) {
-		printf(" Error: read master ctx\n");
+		dprintf_error(BPTREE, " Error: read master ctx\n");
 		return -1;
 	}
 	sub_master = master_ctx.master;
@@ -215,7 +217,7 @@ s32 bp_inc_free_bitmap(master_node_t *master, u32 offset)
 	sub_master->m_ondisk->m_bitmap_free++;
 	assert(sub_master->m_ondisk->m_bitmap_free <= BP_NODES_PER_MASTER);
 
-	bp_release_master_ctx(master, &master_ctx, CLEAN);
+	bp_release_master_ctx(master, &master_ctx, NVF_CLEAN);
 
 	return 0;
 }
@@ -264,7 +266,7 @@ s32 bp_scan_bitmap(master_node_t *master)
 
 		res = bp_read_master_ctx(master, &master_ctx, last_touched_master);
 		if (res) {
-			printf(" Error: read master ctx \n");
+			dprintf_error(BPTREE, " Error: read master ctx \n");
 			return -1;
 		}
 		sub_master = master_ctx.master;
@@ -278,7 +280,7 @@ s32 bp_scan_bitmap(master_node_t *master)
 			free_blk = 0;
 		}
 
-		bp_release_master_ctx(master, &master_ctx, CLEAN);
+		bp_release_master_ctx(master, &master_ctx, NVF_CLEAN);
 
 		if (free_blk % BP_NODES_PER_MASTER != 0) { // if not master node
 			master->m_ondisk->m_last_allocated_sub_master = last_touched_master;
@@ -293,8 +295,8 @@ s32 bp_scan_bitmap(master_node_t *master)
 	return 0;
 }
 
-
-int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
+/* this function first allocates inode and then one block for master node */
+int bp_alloc_inode_and_master(struct nvfuse_superblock *sb, master_node_t *master)
 {
 	inode_t ino;
 	struct nvfuse_inode_ctx *ictx;
@@ -306,24 +308,22 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	if (ictx == NULL)
 		return -1;
 
+	SPINLOCK_LOCK(&ictx->ictx_lock);
+	set_bit(&ictx->ictx_status, INODE_STATE_LOCK);
+
 	ino = nvfuse_alloc_new_inode(sb, ictx);
 	if (ino == 0) {
-		printf(" It runs out of free inodes.");
+		dprintf_error(BPTREE, " It runs out of free inodes.");
 		return -1;
 	}
-#if 0
-	if (spdk_process_is_primary()) {
-		printf(" allocated inode for bptree.\n");
-	}
-#endif
 
 	ictx = nvfuse_read_inode(sb, ictx, ino);
 	nvfuse_insert_ictx(sb, ictx);
-	set_bit(&ictx->ictx_status, BUFFER_STATUS_DIRTY);
+	set_bit(&ictx->ictx_status, INODE_STATE_DIRTY);
 
 	inode = ictx->ictx_inode;
 	if (!inode) {
-		printf(" inode allocation for b+tree master node failed \n");
+		dprintf_error(BPTREE, " inode allocation for b+tree master node failed \n");
 		return -1;
 	}
 
@@ -337,9 +337,10 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL,
 			       1);
 	if (ret) {
-		printf(" data block allocation fails.");
+		dprintf_error(BPTREE, " data block allocation fails.");
 		return NVFUSE_ERROR;
 	}
+
 	bh = nvfuse_get_new_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(inode->i_size), NVFUSE_TYPE_META);
 	memset(bh->bh_buf, 0x00, CLUSTER_SIZE);
 
@@ -348,18 +349,21 @@ int bp_alloc_master(struct nvfuse_superblock *sb, master_node_t *master)
 	master->m_ondisk->m_bitmap_free = 1;
 	master->m_bh = bh;
 
+	/* bh is released when master is deallocated */
+
+	/* to be removed */
 	//nvfuse_release_bh(sb, bh, INSERT_HEAD, DIRTY);
 	assert(inode->i_size < MAX_FILE_SIZE);
 	inode->i_size += CLUSTER_SIZE;
 
+	/* 0 bit is reserved for master block */
 	bp_set_bitmap(master, 0);
 
 	master->m_ictx = ictx;
 	nvfuse_mark_inode_dirty(ictx);
 
+	/* to be removed */
 	//nvfuse_release_inode(sb, ictx, DIRTY);
-
-	master->m_ictx = ictx;
 
 	return 0;
 }
@@ -469,7 +473,7 @@ index_node_t *bp_add_root_node(master_node_t *master, index_node_t *dp, bkey_t *
 	alloc_num = FANOUT * 2;
 	pair = bp_alloc_pair(master, alloc_num);
 	if (pair == NULL) {
-		printf(" alloc pair error ");
+		dprintf_error(BPTREE, " alloc pair error ");
 		return NULL;
 	}
 
@@ -644,7 +648,7 @@ int bp_split_data_node(master_node_t *master,
 	}
 
 	if (seq_detection) {
-		printf(" Need to optimize that data node contains consecutive keys \n");
+		dprintf_warn(BPTREE, " Need to optimize that data node contains consecutive keys \n");
 	}
 #endif
 
@@ -732,7 +736,7 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 	alloc_num = FANOUT + 1;
 	pair_arr = bp_alloc_pair(master, FANOUT + 1);
 	if (pair_arr == NULL) {
-		printf(" alloc pair error ");
+		dprintf_error(BPTREE, " alloc pair error ");
 		return 0;
 	}
 
@@ -820,7 +824,11 @@ int bp_split_tree(master_node_t *master, index_node_t *dp, bkey_t *key, bitem_t 
 
 		master->m_ondisk->m_root = root->i_offset;
 
-		bp_write_master(master);
+#if 0
+		//bp_write_master(master);
+#else
+		nvfuse_mark_dirty_bh(master->m_sb, master->m_bh);
+#endif
 
 		root->i_num = 1;
 
@@ -849,7 +857,7 @@ void bp_insert_value_tree(index_node_t *ip,
 	if (!B_KEY_CMP(B_KEY_PAIR(ip->i_pair, index), key))
 		B_ITEM_COPY(B_ITEM_PAIR(ip->i_pair, index), value);
 	else
-		printf(" Warning: key is mismatched\n");
+		dprintf_warn(BPTREE, " Warning: key is mismatched\n");
 }
 
 int bp_find_key(master_node_t *master, bkey_t *key, bitem_t *value)
@@ -876,7 +884,7 @@ int bp_update_key_tree(master_node_t *master, bkey_t *key, bitem_t *value)
 
 	index = B_SEARCH(master, key, NULL);
 	if (index < 0) {
-		printf("not found \n");
+		dprintf_error(BPTREE, "not found \n");
 		goto RES;
 	}
 
@@ -1029,7 +1037,7 @@ int bp_redist_data_child(master_node_t *master, index_node_t *ip, index_node_t *
 	alloc_num = FANOUT * 2;
 	pair = bp_alloc_pair(master, FANOUT * 2);
 	if (pair == NULL) {
-		printf(" bp alloc error \n");
+		dprintf_error(BPTREE, " bp alloc error \n");
 		exit(1);
 		return 0;
 	}
@@ -1239,7 +1247,11 @@ int bp_merge_key_tree(master_node_t *master, bkey_t *key, index_node_t *dp, int 
 		B_DEALLOC(master, ip);
 
 		master->m_ondisk->m_root = *B_ITEM_GET(ip, 0);
-		bp_write_master(master);
+#if 0
+		//bp_write_master(master);
+#else
+		nvfuse_mark_dirty_bh(master->m_sb, master->m_bh);
+#endif
 
 		root = B_iALLOC(master, master->m_ondisk->m_root, ALLOC_READ);
 		B_READ(master, root, root->i_offset, 1, ALLOC_READ);
@@ -1318,7 +1330,7 @@ index_node_t *traverse_empty(master_node_t *master, index_node_t *ip, bkey_t *ke
 		ip = bp_next_node(master, ip, key);
 
 		if (ip->i_offset == 0)
-			printf(" debug");
+			dprintf_error(BPTREE, " debug");
 
 		assert(ip->i_offset);
 	}
@@ -1354,7 +1366,7 @@ int rsearch_data_node(master_node_t *master, bkey_t *s_key, bkey_t *e_key)
 	}
 
 	while (1) {
-		//printf(" key item : %d,%d\n", *B_KEY_GET(ip, index), *B_ITEM_GET(ip, index));
+		//dprintf_info(BPTREE, " key item : %d,%d\n", *B_KEY_GET(ip, index), *B_ITEM_GET(ip, index));
 		index++;
 		if (index == ip->i_num) {
 			B_READ(master, ip, B_NEXT(ip), 1, 1);
@@ -1413,13 +1425,13 @@ int bp_remove_key(master_node_t *master, bkey_t *key)
 
 	i = B_SEARCH(master, key, &dp);
 	if (i < 0) {
-		printf("not found [%lu] in remove key\n", (long)*key);
+		dprintf_error(BPTREE, "not found [%lu] in remove key\n", (long)*key);
 		res = -1;
 		goto RES;
 	}
 
 	if (B_KEY_CMP(B_KEY_GET(dp, i), key)) {
-		printf(" invalid key = %lu\n", (long)*key);
+		dprintf_error(BPTREE, " invalid key = %lu\n", (long)*key);
 		res = -1;
 		goto RES;
 	}
@@ -1444,7 +1456,7 @@ int bp_remove_key(master_node_t *master, bkey_t *key)
 		B_RELEASE(master, master->m_cur);
 		master->m_cur = 0;
 	} else {
-		//printf(" key merge num = %d\n ", dp->i_num);
+		//dprintf_info(BPTREE, " key merge num = %d\n ", dp->i_num);
 		bp_merge_key_tree(master, key, dp, i);
 	}
 
@@ -1461,7 +1473,7 @@ RES:
 void bp_copy_node_to_raw(index_node_t *node, char *raw)
 {
 	if (node->i_flag != 0 && node->i_flag != 1) {
-		printf(" error copy node to raw \n");
+		dprintf_error(BPTREE, " error copy node to raw \n");
 		assert(0);
 	}
 
@@ -1471,11 +1483,11 @@ void bp_copy_node_to_raw(index_node_t *node, char *raw)
 
 void bp_print_node(index_node_t *node)
 {
-	printf(" node lbno = %d \n", node->i_offset);
-	printf(" bh load = %d \n", node->i_bh->bh_bc->bc_load);
-	printf(" bh pno = %d\n", node->i_bh->bh_bc->bc_pno);
-	printf(" bh ino = %d\n", node->i_bh->bh_bc->bc_ino);
-	printf(" bh data = %s\n", node->i_bh->bh_bc->bc_buf);
+	dprintf_info(BPTREE, " node lbno = %d \n", node->i_offset);
+	dprintf_info(BPTREE, " bh load = %d \n", node->i_bh->bh_bc->bc_load);
+	dprintf_info(BPTREE, " bh pno = %d\n", node->i_bh->bh_bc->bc_pno);
+	dprintf_info(BPTREE, " bh ino = %d\n", node->i_bh->bh_bc->bc_ino);
+	dprintf_info(BPTREE, " bh data = %s\n", node->i_bh->bh_bc->bc_buf);
 }
 
 
@@ -1519,7 +1531,7 @@ int bp_read_node(master_node_t *master, index_node_t *node, int offset, int sync
 		bp_copy_raw_to_node(node, node->i_buf);
 
 	if (node->i_flag != 0 && node->i_flag != 1) {
-		printf(" Error: Invalid or Corrupted node data \n");
+		dprintf_error(BPTREE, " Error: Invalid or Corrupted node data \n");
 		bp_print_node(node);
 		assert(0);
 	}
@@ -1533,6 +1545,8 @@ int bp_read_master(master_node_t *master)
 
 	master->m_ictx = nvfuse_read_inode(master->m_sb, NULL, master->m_ino);
 
+	dprintf_debug(BPTREE, " read bptree master\n");
+
 	bh = bp_read_block(master, 0, READ_LOCK);
 	master->m_buf = bh->bh_buf;
 	master->m_bh = bh;
@@ -1543,6 +1557,8 @@ int bp_read_master(master_node_t *master)
 
 inline void bp_write_master(master_node_t *master)
 {
+	dprintf_debug(BPTREE, " write bptree master\n");
+
 	nvfuse_mark_dirty_bh(master->m_sb, master->m_bh);
 	B_RELEASE_BH(master, master->m_bh);
 }
@@ -1570,7 +1586,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 		if (new_bno) {
 			master->m_ondisk->m_dealloc_block--;
 			master->m_bitmap_ptr = new_bno;
-			//printf(" new bno = %d \n", new_bno);
+			//dprintf_info(BPTREE, " new bno = %d \n", new_bno);
 			goto FREE_BLK_FOUND;
 		}
 	}
@@ -1588,7 +1604,7 @@ offset_t bp_alloc_bitmap(master_node_t *master, struct nvfuse_inode_ctx *ictx)
 			/* alloc data block */
 			ret = nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, NULL, 1);
 			if (ret) {
-				printf(" data block allocation fails.");
+				dprintf_error(BPTREE, " data block allocation fails.");
 				return NVFUSE_ERROR;
 			}
 
@@ -1622,7 +1638,7 @@ FREE_BLK_FOUND:
 		/* alloc data block */
 		ret = nvfuse_get_block(master->m_sb, ictx, new_bno, 1/* num block */, NULL, NULL, 1);
 		if (ret) {
-			printf(" data block allocation fails.");
+			dprintf_error(BPTREE, " data block allocation fails.");
 			return NVFUSE_ERROR;
 		}
 		bh = nvfuse_get_new_bh(master->m_sb, ictx, inode->i_ino, new_bno, NVFUSE_TYPE_META);
@@ -1642,7 +1658,13 @@ FREE_BLK_FOUND:
 	}
 
 	master->m_ondisk->m_alloc_block++;
-	bp_write_master(master);
+
+	/* bp write master will be invoked when higher level functions (e.g., del_dir_indexing, set_dir_indexing, and create_bptree) are called */
+#if 0
+	//bp_write_master(master);
+#else
+	nvfuse_mark_dirty_bh(master->m_sb, master->m_bh);
+#endif
 
 	assert(new_bno);
 
@@ -1660,7 +1682,12 @@ int bp_dealloc_bitmap(master_node_t *master, index_node_t *p)
 	/* clear bitmap */
 	bp_clear_bitmap(master, p->i_offset);
 
-	bp_write_master(master);
+	/* bp write master will be invoked when higher level functions (e.g., del_dir_indexing, set_dir_indexing, and create_bptree) are called */
+#if 0
+	//bp_write_master(master);
+#else
+	nvfuse_mark_dirty_bh(master->m_sb, master->m_bh);
+#endif
 
 	return 0;
 }
@@ -1671,7 +1698,7 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 
 	node = (index_node_t *)bp_malloc(master->m_sb, BP_MEMPOOL_INDEX, 1);
 	if (node == NULL) {
-		printf(" cannot allocate memory \n");
+		dprintf_error(BPTREE, " cannot allocate memory \n");
 		return NULL;
 	}
 	master->m_size += sizeof(index_node_t);
@@ -1690,7 +1717,7 @@ index_node_t *bp_alloc_node(master_node_t *master, int flag, int offset, int is_
 
 	node->i_pair = (key_pair_t *)bp_malloc(master->m_sb, BP_MEMPOOL_PAIR, 1);
 	if (node->i_pair == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(BPTREE, " malloc error \n");
 		return NULL;
 	}
 	master->m_size += sizeof(key_pair_t);
@@ -1738,11 +1765,11 @@ void stack_push(master_node_t *master, offset_t v)
 
 	for (i = 0; i < master->m_sp; i++) {
 		if (master->m_stack[i] == v)
-			printf(" stack debug \n");
+			dprintf_error(BPTREE, " stack debug \n");
 	}
 	master->m_stack[master->m_sp++] = v;
 	if (master->m_sp >= MAX_STACK) {
-		printf(" b+tree stack overflow \n");
+		dprintf_error(BPTREE, " b+tree stack overflow \n");
 		assert(0);
 	}
 }
@@ -1753,7 +1780,7 @@ offset_t stack_pop(master_node_t *master)
 	master->m_sp--;
 
 	if (master->m_sp < 0) {
-		printf(" stack underflow ");
+		dprintf_error(BPTREE, " stack underflow ");
 		assert(0);
 	}
 
@@ -1855,20 +1882,20 @@ key_pair_t *bp_alloc_pair(master_node_t *master, int num)
 
 	pair = (key_pair_t *)bp_malloc(master->m_sb, BP_MEMPOOL_PAIR, 1);
 	if (pair == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(BPTREE, " malloc error \n");
 		return NULL;
 	}
 
 	pair->i_key = (bkey_t *)bp_malloc(master->m_sb, BP_MEMPOOL_KEY, num);
 	if (pair->i_key == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(BPTREE, " malloc error \n");
 		return NULL;
 	}
 	memset(pair->i_key, 0x00, BP_KEY_SIZE * num);
 
 	pair->i_item = (bitem_t *)bp_malloc(master->m_sb, BP_MEMPOOL_VALUE, num);
 	if (pair->i_item == NULL) {
-		printf(" malloc error \n");
+		dprintf_error(BPTREE, " malloc error \n");
 		return NULL;
 	}
 	memset(pair->i_item, 0x00, BP_ITEM_SIZE * num);

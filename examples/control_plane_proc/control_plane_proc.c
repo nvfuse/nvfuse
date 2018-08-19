@@ -39,7 +39,6 @@
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
-#include "nvfuse_io_manager.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_control_plane.h"
@@ -272,7 +271,6 @@ void sig_handler(int signum)
 int main(int argc, char *argv[])
 {
 	struct nvfuse_handle *nvh;
-	struct nvfuse_io_manager io_manager;
 	struct nvfuse_ipc_context ipc_ctx;
 	struct nvfuse_params params;
 	struct perf_stat_rusage rusage_stat;
@@ -287,7 +285,7 @@ int main(int argc, char *argv[])
 	if (ret < 0)
 		return -1;
 
-	ret = nvfuse_configure_spdk(&io_manager, &ipc_ctx, params.cpu_core_mask, NVFUSE_MAX_AIO_DEPTH);
+	ret = nvfuse_configure_spdk(&ipc_ctx, &params, NVFUSE_MAX_AIO_DEPTH);
 	if (ret < 0)
 		return -1;
 
@@ -295,7 +293,7 @@ int main(int argc, char *argv[])
 	//rte_malloc_dump_stats(stdout, NULL);
 
 	/* create nvfuse_handle with user spcified parameters */
-	nvh = nvfuse_create_handle(&io_manager, &ipc_ctx, &params);
+	nvh = nvfuse_create_handle(&ipc_ctx, &params);
 	if (nvh == NULL) {
 		fprintf(stderr, "Error: nvfuse_create_handle()\n");
 		return -1;
@@ -311,7 +309,7 @@ int main(int argc, char *argv[])
 	}
 	getrusage(RUSAGE_THREAD, &rusage_stat.end);
 	nvfuse_rusage_diff(&rusage_stat.start, &rusage_stat.end, &rusage_stat.result);
-	execution_time = time_since_now(&tv);
+	execution_time = nvfuse_time_since_now(&tv);
 	printf(" exectime = %f \n", execution_time);
 	print_rusage(&rusage_stat.result, "control_plane", 1, execution_time);
 
@@ -319,7 +317,7 @@ int main(int argc, char *argv[])
 
 	nvfuse_destroy_handle(nvh, DEINIT_IOM, UMOUNT);
 
-	nvfuse_deinit_spdk(&io_manager, &ipc_ctx);
+	nvfuse_deinit_spdk(&ipc_ctx);
 	printf(" Primary process has been stopped \n");
 
 	return 0;
