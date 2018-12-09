@@ -283,8 +283,7 @@ int32_t reactor_submit_reqs(struct io_target *target, struct reactor_task *task,
 		req = reqs[i];
 		req->task = task;
 
-		//if (req->req_type == SPDK_BDEV_IO_TYPE_READ)
-		//	dprintf_info(REACTOR, " req = %p blkno %ld\n", req, req->offset);
+		//dprintf_info(REACTOR, " req = %p blkno %ld type %d\n", req, req->offset, req->req_type);
 
 		if (reactor_sq_put_req(task, req) < 0) {
 			dprintf_error(REACTOR, " SQ is full\n");
@@ -416,7 +415,7 @@ int reactor_sync_flush(struct io_target *target)
 	task = reactor_alloc_task(target, num_reqs);
 
 	req = reactor_make_single_req(target, 0, 
-										1, NULL, 
+										4096, NULL, 
 										SPDK_BDEV_IO_TYPE_FLUSH);
 
 	reactor_submit_reqs(target, task, &req, num_reqs);
@@ -578,8 +577,9 @@ void reactor_submit_on_core(void *arg1, void *arg2)
 #else
 		if (!bdev_io) {
 #endif
-			printf("Failed to submit request offset = %lu, byte = %u\n", req->offset, req->bytes);
+			printf("Failed to submit request offset = %lu, byte = %u (rc %d)\n", req->offset, req->bytes, rc);
 			target->is_draining = true;
+			assert(0);
 			return;
 		}
 	}

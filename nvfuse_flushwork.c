@@ -58,7 +58,7 @@
 #include "nvfuse_debug.h"
 #include "nvfuse_flushwork.h"
 
-#define USE_PTHREAD
+//#define USE_PTHREAD
 #ifdef USE_PTHREAD
 static pthread_t flush_worker_id;
 #else
@@ -144,7 +144,7 @@ s32 nvfuse_start_flushworker(struct nvfuse_superblock *sb)
 	fflush(stdout);
 	ret = rte_eal_remote_launch(nvfuse_flushworker, sb, flush_worker_id);
 	if (ret < 0) {
-		dprintf_error(FLUSHWORK, " thread cannot be lauched\n");
+		dprintf_error(FLUSHWORK, " thread cannot be lauched (ret = %d)\n", ret);
 		assert(0);
 	}
 #else

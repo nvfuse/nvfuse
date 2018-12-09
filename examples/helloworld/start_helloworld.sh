@@ -6,4 +6,4 @@
 # -a: app name
 # -f: format
 
-sudo ./helloworld -f -m -c 3 -a helloworld -o nvme.conf
+sudo ./helloworld -f -m -c 7 -a helloworld -o nvme.conf

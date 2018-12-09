@@ -32,8 +32,6 @@ SPDK compile:
 	# ./configure
 	# make
 
-
-
 Building
 ========
 
@@ -49,24 +47,34 @@ Disabling ASLR (Address Space Layout Randomization) is also required like this.
 
 	# sudo scripts/disable_aslr.sh
 
-File system format is required.
-
-	# cd examples/mkfs
-	# sudo ./mkfs.nvfuse -f
-
 Move to examples directory and execute helloworld. 
 
     # cd examples/helloworld
-    # sudo ./helloworld -m
+    # sudo ./start_helloworld.sh
 
-Regression test, which combines many test cases, is provided to verify any modifications.
-
-    # cd examples/regression_test
-    # sudo ./single_thread_script.sh
+Make use of performance benchmark.
+	# cd examples/perf
+	# sudo ./start_perf.sh
 
 After finalizing an NVFUSE application, the kernel NVMe driver and hugepages can be reverted with the automation script.
 
     # sudo scripts/setup.sh reset
+
+| Examples Not Working (To Be Enabled) |
+|--|
+|control_plane_proc|
+|dpdk_simple_mp|
+|fio_plugin|
+|libfuse|
+|multi_process|
+|raw_block_device_perf|
+|regression_test|
+|create_1m_files|
+|fio-nvfuse|
+|fsync_test|
+|kernel_filesystem|
+|mkfs|
+|reactor|
 
 To do
 =====

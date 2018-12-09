@@ -22,8 +22,8 @@
 #define FLUSHWORKER_RUNNING 2
 #define FLUSHWORKER_STOP	3
 
-//s32 nvfuse_flushworker(void *arg);
-void * nvfuse_flushworker(void *arg);
+s32 nvfuse_flushworker(void *arg);
+//void * nvfuse_flushworker(void *arg);
 s32 nvfuse_start_flushworker(struct nvfuse_superblock *sb);
 s32 nvfuse_stop_flushworker();
 void nvfuse_queuework();

@@ -1683,7 +1683,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		}
 	}
 
-#if 1
+#if 0
 	nvfuse_start_flushworker(sb);
 
 	while (nvfuse_get_flushworker_status() == FLUSHWORKER_STOP)
