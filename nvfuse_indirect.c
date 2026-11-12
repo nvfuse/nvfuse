@@ -284,6 +284,9 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 
 	/* FIXME: how to handle this exception case! */
 	if (!cnt) {
+#ifdef NVFUSE_FILE_BACKEND
+        if (sb->target->journal) return 0;
+#endif
 		dprintf_warn(INODE, " Warning: it runs out of free blocks.\n");
 		nvfuse_print_bg_list(sb);
 		assert(0);
@@ -314,6 +317,12 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 	if (total_blocks) {
 		new_blocks[0] = nvfuse_alloc_free_block(sb, inode, blocks, total_blocks);
 		if (new_blocks[0] != total_blocks) {
+#ifdef NVFUSE_FILE_BACKEND
+            if (sb->target->journal) {
+                *error = -ENOSPC;
+                goto RELEASE_FREE;
+            }
+#endif
 			dprintf_error(INODE, " Warning: it runs out of free blocks.\n");
 			nvfuse_print_bg_list(sb);
 			assert(0);
@@ -332,6 +341,12 @@ u32 nvfuse_alloc_free_blocks(struct nvfuse_superblock *sb, struct nvfuse_inode *
 	if (total_blocks) {
 		new_blocks[1] = nvfuse_alloc_free_block(sb, inode, direct_map, total_blocks);
 		if (new_blocks[1] != total_blocks) {
+#ifdef NVFUSE_FILE_BACKEND
+            if (sb->target->journal) {
+                *error = -ENOSPC;
+                goto RELEASE_FREE;
+            }
+#endif
 			dprintf_warn(INODE, " Warning: it runs out of free blocks. (requested = %d, allocated = %d)\n",
 			       total_blocks, new_blocks[1]);
 			dprintf_warn(INODE, " current free blocks = %ld \n", sb->asb.asb_free_blocks);
@@ -467,7 +482,8 @@ static int nvfuse_alloc_branch(struct nvfuse_superblock *sb, struct nvfuse_inode
 		memset(bh->bh_buf, 0, blocksize);
 		branch[n].p = (u32 *)bh->bh_buf + offsets[n];
 
-		assert(!offsets[n]);
+        /* New branches may begin at any slot (sparse or boundary allocation).
+         * branch[n].p already includes the validated path offset. */
 
 		branch[n].key = new_blocks[n];
 		*branch[n].p = branch[n].key;
@@ -645,6 +661,7 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 		err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, direct_map,
 					  offsets + (partial - chain), partial);
 		if (err) {
+            spdk_dma_free(direct_map);
 			goto cleanup;
 		}
 
@@ -903,7 +920,9 @@ static void __nvfuse_truncate_blocks(struct nvfuse_superblock *sb, struct nvfuse
 		if (partial == chain)
 			nvfuse_mark_inode_dirty(ictx);
 		else {
-			nvfuse_release_bh(sb, partial->bh, 0, DIRTY);
+            /* The shared-branch loop still uses this head and releases it.
+             * Mark it here; releasing early leaves a dangling chain pointer. */
+            nvfuse_mark_dirty_bh(sb, partial->bh);
 		}
 		nvfuse_free_branches(sb, ictx, &nr, &nr + 1, (chain + n - 1) - partial);
 	}

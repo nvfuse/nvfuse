@@ -18,7 +18,7 @@ $(LOCAL_BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 # Keep strict warnings for the new backend and its executable.
-$(LOCAL_BUILD)/nvfuse_journal.o $(LOCAL_BUILD)/nvfuse_tx.o $(LOCAL_BUILD)/nvfuse_tx_wrappers.o $(LOCAL_BUILD)/nvfuse_portable.o $(LOCAL_BUILD)/nvfuse_file.o $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/tests/framework_test.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
+$(LOCAL_BUILD)/nvfuse_journal.o $(LOCAL_BUILD)/nvfuse_tx.o $(LOCAL_BUILD)/nvfuse_tx_wrappers.o $(LOCAL_BUILD)/nvfuse_portable.o $(LOCAL_BUILD)/nvfuse_file.o $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/tests/framework_test.o $(LOCAL_BUILD)/tests/limit_test.o $(LOCAL_BUILD)/tests/metadata_check.o $(LOCAL_BUILD)/tests/indirect_adapter.o $(LOCAL_BUILD)/tests/fs_model_adapter.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
 $(LOCAL_BUILD)/nvfuse.a: $(OBJECTS)
 	$(AR) rcs $@ $^
 $(LOCAL_BUILD)/local_test: $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/nvfuse.a
@@ -31,7 +31,7 @@ framework-test: all
 	python3 tests/run_framework.py --binary $(LOCAL_BUILD)/framework_test
 clean:
 	rm -rf $(LOCAL_BUILD)
--include $(OBJECTS:.o=.d) $(LOCAL_BUILD)/tests/local_test.d $(LOCAL_BUILD)/tests/framework_test.d $(LOCAL_BUILD)/tests/transaction_test.d $(LOCAL_BUILD)/tests/journal_bench.d
+-include $(OBJECTS:.o=.d) $(LOCAL_BUILD)/tests/local_test.d $(LOCAL_BUILD)/tests/framework_test.d $(LOCAL_BUILD)/tests/transaction_test.d $(LOCAL_BUILD)/tests/journal_bench.d $(LOCAL_BUILD)/tests/limit_test.d $(LOCAL_BUILD)/tests/metadata_check.d
 
 $(LOCAL_BUILD)/journal_engine_test: tests/journal_engine_test.c nvfuse_journal.c include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
@@ -48,3 +48,64 @@ $(LOCAL_BUILD)/journal_bench: $(LOCAL_BUILD)/tests/journal_bench.o $(LOCAL_BUILD
 .PHONY: journal-bench
 journal-bench: $(LOCAL_BUILD)/journal_bench
 	python3 tests/run_journal_bench.py $(LOCAL_BUILD)/journal_bench
+
+$(LOCAL_BUILD)/limit_test: $(LOCAL_BUILD)/tests/limit_test.o $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+$(LOCAL_BUILD)/metadata_check: $(LOCAL_BUILD)/tests/metadata_check.o
+	$(CC) $(LOCAL_CFLAGS) $^ -o $@
+.PHONY: limit-test
+limit-test: $(LOCAL_BUILD)/limit_test $(LOCAL_BUILD)/metadata_check
+	python3 tests/run_limits.py --binary $(LOCAL_BUILD)/limit_test --checker $(LOCAL_BUILD)/metadata_check
+
+CXX = clang++
+$(LOCAL_BUILD)/tests/indirect_boundary_test.o: tests/indirect_boundary_test.cpp tests/indirect_adapter.h
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Itests -c $< -o $@
+$(LOCAL_BUILD)/indirect_boundary_test: $(LOCAL_BUILD)/tests/indirect_boundary_test.o $(LOCAL_BUILD)/tests/indirect_adapter.o $(LOCAL_BUILD)/nvfuse_indirect.o
+	$(CXX) $(LOCAL_CFLAGS) $^ -o $@
+.PHONY: boundary-test boundary-full-test
+boundary-test: $(LOCAL_BUILD)/indirect_boundary_test
+	$(LOCAL_BUILD)/indirect_boundary_test
+boundary-full-test: $(LOCAL_BUILD)/indirect_boundary_test
+	$(LOCAL_BUILD)/indirect_boundary_test --full 2
+
+$(LOCAL_BUILD)/journal_boundary_test: tests/journal_boundary_test.cpp $(LOCAL_BUILD)/nvfuse_journal.o include/nvfuse_journal.h
+	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< $(LOCAL_BUILD)/nvfuse_journal.o -o $@
+.PHONY: journal-boundary-test
+journal-boundary-test: $(LOCAL_BUILD)/journal_boundary_test
+	$(LOCAL_BUILD)/journal_boundary_test
+-include $(LOCAL_BUILD)/tests/indirect_adapter.d
+
+.PHONY: boundary-suite
+boundary-suite: $(LOCAL_BUILD)/indirect_boundary_test $(LOCAL_BUILD)/journal_boundary_test
+	python3 tests/run_boundaries.py --build-dir $(LOCAL_BUILD)
+
+$(LOCAL_BUILD)/tests/mixed_model_test.o: tests/mixed_model_test.cpp tests/fs_model_adapter.h
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Itests -c $< -o $@
+$(LOCAL_BUILD)/mixed_model_test: $(LOCAL_BUILD)/tests/mixed_model_test.o $(LOCAL_BUILD)/tests/fs_model_adapter.o $(LOCAL_BUILD)/nvfuse.a
+	$(CXX) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+-include $(LOCAL_BUILD)/tests/fs_model_adapter.d
+
+ifeq ($(shell uname -s),Darwin)
+BOUNDARY_GC = -Wl,-dead_strip
+else
+BOUNDARY_GC = -Wl,--gc-sections
+endif
+$(LOCAL_BUILD)/inode_core.o: nvfuse_core.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -ffunction-sections -fdata-sections -MMD -MP -c $< -o $@
+$(LOCAL_BUILD)/tests/inode_space_adapter.o: tests/inode_space_adapter.c tests/inode_space_adapter.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -ffunction-sections -fdata-sections -MMD -MP -c $< -o $@
+$(LOCAL_BUILD)/inode_space_test: tests/inode_space_test.cpp $(LOCAL_BUILD)/tests/inode_space_adapter.o $(LOCAL_BUILD)/inode_core.o $(LOCAL_BUILD)/inode_dep.o
+	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $(BOUNDARY_GC) $< $(filter %.o,$^) -o $@
+-include $(LOCAL_BUILD)/inode_core.d $(LOCAL_BUILD)/tests/inode_space_adapter.d
+
+$(LOCAL_BUILD)/inode_dep.o: nvfuse_dep.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -ffunction-sections -fdata-sections -c $< -o $@
+
+.PHONY: stress-test
+stress-test: $(LOCAL_BUILD)/mixed_model_test $(LOCAL_BUILD)/inode_space_test $(LOCAL_BUILD)/limit_test $(LOCAL_BUILD)/metadata_check
+	python3 tests/run_stress.py --build-dir $(LOCAL_BUILD)

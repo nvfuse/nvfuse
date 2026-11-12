@@ -84,7 +84,8 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
         return nvfuse_tx_leave(h,nvfuse_writefile_impl(nvh,fid,user_buf,count,woffset));
     if(fid<START_OPEN_FILE || fid>=MAX_OPEN_FILE || !h->nvh_sb.sb_file_table[fid].used)
         return nvfuse_tx_leave(h,-EBADF);
-    if(woffset<0) return nvfuse_tx_leave(h,-EINVAL);
+    if(woffset<0 || woffset>=MAX_FILE_SIZE || count>=MAX_FILE_SIZE-woffset)
+        return nvfuse_tx_leave(h,-EINVAL);
     if(woffset>h->nvh_sb.sb_file_table[fid].size)
         return nvfuse_tx_leave(h,-EOPNOTSUPP);
     /* Legacy eviction can flush while holding the cache lock. Drain between

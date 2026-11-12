@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Only for the dedicated 2 GiB QEMU NVMe in the local development VM.
 set -euo pipefail
-case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault|integration-transactions) ;; *) exit 2 ;; esac
+case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault|integration-transactions|integration-stress|integration-powercut-prepare|integration-powercut-run|integration-powercut-check|integration-final-inode) ;; *) exit 2 ;; esac
 if [[ $1 == stalled ]]; then rm -f /tmp/nvfuse-stall-go; fi
 [[ ${2:-} =~ ^[0-9]+$ ]] || exit 2
 SPDK_ROOT_DIR=${SPDK_ROOT_DIR:-$HOME/src/spdk}
@@ -43,6 +43,99 @@ sudo env PCI_ALLOWED="$BDF" DRIVER_OVERRIDE=vfio-pci HUGEMEM=512 \
 test "$(basename "$(readlink /sys/bus/pci/devices/$BDF/driver)")" = vfio-pci
 if [[ $1 == integration* ]]; then
     BIN_DIR="$HOME/src/nvfuse/tests/spdk"
+    if [[ $1 == integration-final-inode ]]; then
+        for kind in files dirs sharded; do
+            log="$LOG_DIR/final-inode-$kind.log"
+            sudo prlimit --core=0 --memlock=unlimited timeout 180 "$BIN_DIR/integration_limits" create "pcie:$BDF" "$kind" 128 > "$log" 2>&1 || { tail -n 80 "$log";exit 1; }
+            grep -q 'PASS final inode reuse before exhaustion rollback' "$log"
+            grep 'SPDK_IO reads=' "$log"
+            echo "PASS NVMe final-inode reuse $kind"
+        done
+        exit 0
+    fi
+    if [[ $1 == integration-powercut-* ]]; then
+        lim="$BIN_DIR/integration_limits"
+        case $1 in
+            integration-powercut-prepare)
+                sudo prlimit --core=0 --memlock=unlimited timeout 180 "$lim" create "pcie:$BDF" size 128 ;;
+            integration-powercut-run)
+                [[ ${3:-} =~ ^[0-9]+$ ]] || exit 2
+                case ${4:-} in payload-flush|checkpoint-write) ;; *) exit 2 ;; esac
+                sudo env NVFUSE_VM_CUT=1 prlimit --core=0 --memlock=unlimited timeout 180 "$lim" crash "pcie:$BDF" size 128 "$3" truncate "$4" 1 ;;
+            integration-powercut-check|integration-final-inode)
+                [[ ${3:-} =~ ^[0-9]+$ ]] || exit 2
+                case ${4:-} in old|new) ;; *) exit 2 ;; esac
+                sudo prlimit --core=0 --memlock=unlimited timeout 180 "$lim" check-crash "pcie:$BDF" size 128 "$3" truncate "$4" ;;
+        esac
+        exit 0
+    fi
+    if [[ $1 == integration-stress ]]; then
+        stressrun() {
+            local binary=$1 label=$2 expected=$3
+            shift 3
+            local log="$LOG_DIR/stress-$label.log"
+            set +e
+            sudo prlimit --core=0 --memlock=unlimited timeout 180 "$BIN_DIR/$binary" "$@" > "$log" 2>&1
+            local status=$?
+            set -e
+            if [[ $status != "$expected" ]]; then tail -n 80 "$log";return 1;fi
+            if [[ $expected == 0 ]]; then
+                grep -q 'PASS ' "$log"
+                grep -q 'SPDK_IO reads=' "$log"
+                grep 'SPDK_IO reads=' "$log" | tail -n 1
+            fi
+            echo "PASS stress $label"
+        }
+        for meta in 0 1; do
+            stressrun integration_mixed "mixed-$meta-seed-$2" 0 "pcie:$BDF" "$2" 3000 "$meta"
+        done
+        # Both image sizes exercise inode/block exhaustion and two full cycles.
+        for mib in 128 256; do
+            for kind in files sharded dirs size; do
+                stressrun integration_limits "limit-$mib-$kind" 0 create "pcie:$BDF" "$kind" "$mib"
+                reached=$(python3 -c 'import json,sys; print(next(json.loads(s[6:])["reached"] for s in open(sys.argv[1]) if s.startswith("LIMIT ")))' "$LOG_DIR/stress-limit-$mib-$kind.log")
+                for cycle in 0 1; do
+                    stressrun integration_limits "verify-$mib-$kind-$cycle" 0 verify "pcie:$BDF" "$kind" "$mib" "$reached"
+                    stressrun integration_limits "cleanup-$mib-$kind-$cycle" 0 cleanup "pcie:$BDF" "$kind" "$mib" "$reached"
+                    python3 - "$LOG_DIR/stress-limit-$mib-$kind.log" "$LOG_DIR/stress-cleanup-$mib-$kind-$cycle.log" <<'CHECK_COUNTS'
+import json,sys
+def row(path,tag):
+    return next(json.loads(s[len(tag):]) for s in open(path) if s.startswith(tag))
+a=row(sys.argv[1],'LIMIT '); b=row(sys.argv[2],'CLEANUP ')
+assert (a['baseline_blocks'],a['baseline_inodes'])==(b['free_blocks'],b['free_inodes']), (a,b)
+CHECK_COUNTS
+                    if [[ $cycle == 0 ]]; then
+                        stressrun integration_limits "refill-$mib-$kind" 0 refill "pcie:$BDF" "$kind" "$mib"
+                        python3 - "$LOG_DIR/stress-limit-$mib-$kind.log" "$LOG_DIR/stress-refill-$mib-$kind.log" <<'CHECK_REFILL'
+import json,sys
+def capacity(path):
+    return next(json.loads(s[6:])['reached'] for s in open(path) if s.startswith('LIMIT '))
+assert capacity(sys.argv[1])==capacity(sys.argv[2])
+CHECK_REFILL
+                    fi
+                done
+            done
+        done
+        # Representative ordinary API mutations at exhaustion, on the real
+        # NVMe/cache/journal path; the host suite covers all seven mutations.
+        for item in files:create dirs:delete size:truncate; do
+            kind=${item%:*};op=${item#*:}
+            for phase in payload-flush commit-flush checkpoint-write retire-flush; do
+                label="crash-$kind-$op-$phase"
+                stressrun integration_limits "$label-fill" 0 create "pcie:$BDF" "$kind" 128
+                reached=$(python3 -c 'import json,sys; print(next(json.loads(s[6:])["reached"] for s in open(sys.argv[1]) if s.startswith("LIMIT ")))' "$LOG_DIR/stress-$label-fill.log")
+                if [[ $op == create ]]; then stressrun integration_limits "$label-reserve" 0 reserve "pcie:$BDF" "$kind" 128 "$reached" "$op";fi
+                stressrun integration_limits "$label-kill" 86 crash "pcie:$BDF" "$kind" 128 "$reached" "$op" "$phase" 1
+                if [[ $phase == payload-flush ]]; then outcome=old;else outcome=new;fi
+                for repeat in 0 1; do
+                    stressrun integration_limits "$label-check-$repeat" 0 check-crash "pcie:$BDF" "$kind" 128 "$reached" "$op" "$outcome"
+                done
+                stressrun integration_limits "$label-reuse" 0 reuse "pcie:$BDF" "$kind" 128 "$reached" "$op"
+            done
+        done
+        echo 'PASS NVMe mixed, exhaustion, complete reclamation and boundary crash recovery'
+        exit 0
+    fi
     if [[ $1 == integration-transactions ]]; then
         tx="$BIN_DIR/integration_transactions"
         txrun() { sudo prlimit --core=0 --memlock=unlimited timeout 60 "$tx" "$1" "pcie:$BDF" "${@:2}"; }

@@ -66,13 +66,23 @@ def run(suite, args):
             "make -f Makefile.integration; make -f Makefile.integration APP=integration_framework; "
             "make -f Makefile.integration APP=integration_fault; "
             "make -f Makefile.integration APP=integration_transactions; "
+            "make -f Makefile.integration APP=integration_limits; "
+            "make -f Makefile.integration APP=integration_mixed; "
             "test -x integration_test; test -x integration_framework; "
             "git -C ~/src/spdk describe --tags --exact-match; git -C ~/src/spdk rev-parse HEAD; "
             "echo 'PASS integration built'"], input=data.getvalue(),
             marker="PASS integration built", timeout=180)
+        if args.profile == "integration-powercuts":
+            from .boundary_powercuts import run as powercuts
+            powercuts(suite, ssh, vm, guest, boot, stop)
+            return
         suite.command("integration-user-transactions", ssh + [
             "bash ~/src/nvfuse-framework/guest.sh integration-transactions 1"],
             marker="PASS NVMe transactions and original-image crash replay", timeout=180)
+        if args.profile in ("integration", "all"):
+            suite.command("integration-stress", ssh + [
+                f"bash ~/src/nvfuse-framework/guest.sh integration-stress {args.seeds[0]}"],
+                marker="PASS NVMe mixed, exhaustion, complete reclamation and boundary crash recovery", timeout=1800)
         if args.profile == "integration-faults":
             from .integration_faults import run as faults
             faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases)

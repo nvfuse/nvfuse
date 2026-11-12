@@ -1069,6 +1069,9 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 			if (ret) {
 				dprintf_error(INODE, "data block allocation fails.");
 				nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+#ifdef NVFUSE_FILE_BACKEND
+                if (sb->target->journal) return ret;
+#endif
 				return NVFUSE_ERROR;
 			}
 		}
@@ -1321,10 +1324,25 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filenam
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
+#ifdef NVFUSE_FILE_BACKEND
+    /* A first child also materializes the parent's directory-index inode.
+     * Reject exhaustion before changing directory entries or holding a new inode. */
+    if (sb->target->journal) {
+        unsigned required = 1;
+#ifdef NVFUSE_USE_DELAYED_BPTREE_CREATION
+        if (!dir_inode->i_bpino) required++;
+#endif
+        if (sb->sb_free_inodes < required) {
+            nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+            return -ENOSPC;
+        }
+    }
+#endif
 
-	if (dir_inode->i_links_count == MAX_FILES_PER_DIR) {
+	if (dir_inode->i_links_count >= MAX_FILES_PER_DIR) {
 		printf(" The number of files exceeds %d\n", MAX_FILES_PER_DIR);
-		return -1;
+		nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+		return -ENOSPC;
 	}
 
 #ifdef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
@@ -1786,10 +1804,25 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
+#ifdef NVFUSE_FILE_BACKEND
+    /* A first child also materializes the parent's directory-index inode.
+     * Reject exhaustion before changing directory entries or holding a new inode. */
+    if (sb->target->journal) {
+        unsigned required = 1;
+#ifdef NVFUSE_USE_DELAYED_BPTREE_CREATION
+        if (!dir_inode->i_bpino) required++;
+#endif
+        if (sb->sb_free_inodes < required) {
+            nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+            return -ENOSPC;
+        }
+    }
+#endif
 
-	if (dir_inode->i_links_count == MAX_FILES_PER_DIR) {
+	if (dir_inode->i_links_count >= MAX_FILES_PER_DIR) {
 		dprintf_error(DIRECTORY, " The number of files exceeds %d\n", MAX_FILES_PER_DIR);
-		return -1;
+		nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+		return -ENOSPC;
 	}
 	assert(dir_inode->i_ptr + 1 == dir_inode->i_links_count);
 

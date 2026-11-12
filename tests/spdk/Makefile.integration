@@ -6,10 +6,19 @@ APP ?= integration_test
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 C_SRCS = $(APP).c
+ifeq ($(APP),integration_mixed)
+CXX_SRCS = integration_mixed_oracle.cpp
+SYS_LIBS += -lstdc++
+CXXFLAGS += -std=c++17
+endif
 CFLAGS += -D_GNU_SOURCE -DDEBUG -DNVFUSE_FILE_BACKEND -DNVFUSE_SPDK_TRANSPORT -DNVFUSE_NVME_TEST_HOOKS -I$(NVFUSE_ROOT_DIR)/include
 LIBS += $(NVFUSE_BUILD)/nvfuse.a $(NVFUSE_BUILD)/nvfuse_nvme_transport.o -lpthread -lm
 SPDK_LIB_LIST += $(SOCK_MODULES_LIST) nvme
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
+ifeq ($(APP),integration_mixed)
+# spdk.common.mk defaults to C++11; the model requires C++17.
+CXXFLAGS += -std=c++17
+endif
 
 $(APP): nvfuse-core $(NVFUSE_BUILD)/nvfuse_nvme_transport.o
 

@@ -108,6 +108,26 @@ See [disk format, ordering, recovery diagrams and ext4/XFS comparison](docs/meta
 [the user TX API contract](docs/user-transactions-design.md), and
 [executed validation and performance results](docs/journaling-evaluation.md).
 
+Metadata boundary and reclamation tests
+---------------------------------------
+
+    make local-boundary-test
+    make local-limit-test
+    make local-stress-test
+
+The C++17 boundary oracle executes the production C indirect mapper/truncator
+at the full 1024-way geometry, including physical block `0xffffffff`, and
+reclaims/reuses the complete tree twice without storing file payload. It also
+checks journal capacity and final-slot recovery. The supplementary C image
+suite exhausts real inode/block resources, deletes the complete test directory,
+compares free counters to the initial baseline, and repeats allocation/deletion.
+The stress suite sweeps every inode bitmap slot of the maximum journal-volume
+geometry twice, compares mixed operations against an independent namespace and
+content model, and exercises 70 near-full crash windows with recovery/reuse.
+Python runners retain JSON, JUnit and logs under `build/test-results`.
+See [the boundary matrix and measured results](docs/metadata-boundary-tests.md)
+for coverage boundaries and the distinction between model and image evidence.
+
 Deterministic test framework
 ----------------------------
 

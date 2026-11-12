@@ -101,7 +101,7 @@ def local(suite, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("local", "spdk", "integration", "integration-faults", "all"), default="local")
+    parser.add_argument("--profile", choices=("local", "spdk", "integration", "integration-faults", "integration-powercuts", "all"), default="local")
     parser.add_argument("--binary", default="build/local/framework_test")
     parser.add_argument("--seeds", type=lambda s: [int(v, 0) for v in s.split(",")], default=[1, 0xc0ffee])
     parser.add_argument("--report-dir", type=Path,
@@ -124,7 +124,7 @@ def main():
         if args.profile in ("spdk", "all"):
             from spdk.vm_suite import run as spdk
             spdk(suite, args)
-        if args.profile in ("integration", "integration-faults", "all"):
+        if args.profile in ("integration", "integration-faults", "integration-powercuts", "all"):
             from spdk.integration_suite import run as integration
             integration(suite, args)
         else:

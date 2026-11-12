@@ -168,7 +168,9 @@ u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx
 	if (!spdk_process_is_primary())
 		bg_id = nvfuse_get_curr_bg_id(sb, 1 /*inode type*/);
 	else
-		bg_id = last_ino / sb->sb_no_of_inodes_per_bg;
+        /* Allocating the final inode leaves a one-past-volume hint. A later
+         * free/reallocate must wrap before reading any group descriptor. */
+        bg_id = (last_ino / sb->sb_no_of_inodes_per_bg) % sb->sb_bg_num;
 
 	last_id = bg_id;
 
