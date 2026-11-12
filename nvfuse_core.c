@@ -755,7 +755,8 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	key = (u64)dir_hash[0] | ((u64)dir_hash[1]) << 32;
 	if (B_INSERT(master, &key, &offset, &cur_offset, 0) < 0) {
 		u32 c = cur_offset >> (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
-		c++;
+		/* The all-ones count means saturated, never wrap to zero. */
+		if (c < (1u << NVFUSE_BP_COLLISION_BITS) - 1) c++;
 
 		dprintf_warn(DIRECTORY, " file name collision = %08x%08x, %d\n", dir_hash[0], dir_hash[1], c);
 
@@ -790,15 +791,15 @@ s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 
 	assert(inode->i_bpino);
 
-	master = bp_init_master(sb);
-	master->m_ino = inode->i_bpino;
-	master->m_sb = sb;
-	bp_read_master(master);
-
 	if (!strcmp(filename, ".") || !strcmp(filename, "..")) {
 		*offset = 0;
 		return 0;
 	}
+
+	master = bp_init_master(sb);
+	master->m_ino = inode->i_bpino;
+	master->m_sb = sb;
+	bp_read_master(master);
 
 	collision >>= NVFUSE_BP_COLLISION_BITS;
 	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
@@ -834,15 +835,15 @@ s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode
 
 	assert(inode->i_bpino);
 
-	master = bp_init_master(sb);
-	master->m_ino = inode->i_bpino;
-	master->m_sb = sb;
-	bp_read_master(master);
-
 	if (!strcmp(filename, ".") || !strcmp(filename, "..")) {
 		*offset = 0;
 		return 0;
 	}
+
+	master = bp_init_master(sb);
+	master->m_ino = inode->i_bpino;
+	master->m_sb = sb;
+	bp_read_master(master);
 
 	collision >>= NVFUSE_BP_COLLISION_BITS;
 	nvfuse_dir_hash(filename, dir_hash, dir_hash + 1);
@@ -865,7 +866,8 @@ RES:
 	return res;
 }
 
-s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename)
+s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
+		struct nvfuse_inode_ctx *ictx, struct nvfuse_buffer_head *held1, struct nvfuse_buffer_head *held2)
 {
 	u32 dir_hash[2];
 	bkey_t key;
@@ -895,14 +897,40 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 
 	c = offset;
 	c >>= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
-	if (c == 0)
+	if (c == (1u << NVFUSE_BP_COLLISION_BITS) - 1) {
+		/* Saturation loses the exact count. Recount surviving names on delete. */
+		u32 remaining = 0;
+		for (u32 blk = 0; blk < NVFUSE_SIZE_TO_BLK(inode->i_size); blk++) {
+			struct nvfuse_buffer_head *bh;
+			if (held1 && held1->bh_bc->bc_lbno == blk) bh = held1;
+			else if (held2 && held2->bh_bc->bc_lbno == blk) bh = held2;
+			else bh = nvfuse_get_bh(sb, ictx, inode->i_ino, blk, READ, NVFUSE_TYPE_META);
+			if (!bh) {
+				B_RELEASE_BH(master, master->m_bh);
+				bp_deinit_master(master);
+				return -EIO;
+			}
+			struct nvfuse_dir_entry *entries = (struct nvfuse_dir_entry *)bh->bh_buf;
+			for (u32 j = 0; j < DIR_ENTRY_NUM; j++) {
+				u32 hash[2];
+				if (entries[j].d_flag != DIR_USED || !strcmp(entries[j].d_filename, filename)) continue;
+				nvfuse_dir_hash(entries[j].d_filename, hash, hash + 1);
+				if (hash[0] == dir_hash[0] && hash[1] == dir_hash[1]) remaining++;
+			}
+			if (bh != held1 && bh != held2) nvfuse_release_bh(sb, bh, HEAD, NVF_CLEAN);
+		}
+		c = remaining ? remaining - 1 : 0;
+		if (c > (1u << NVFUSE_BP_COLLISION_BITS) - 1) c = (1u << NVFUSE_BP_COLLISION_BITS) - 1;
+		if (!remaining) B_REMOVE(master, &key);
+		else {
+			offset = c << (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
+			B_UPDATE(master, &key, &offset);
+		}
+	} else if (c == 0) {
 		B_REMOVE(master, &key);
-	else {
-		c--;
-		c <<= (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
-		offset &= collision;
-		offset = c | offset;
-		//collision
+	} else {
+		/* A zero offset preserves linear lookup for the final survivor. */
+		offset = (c - 1) << (NVFUSE_BP_LOW_BITS - NVFUSE_BP_COLLISION_BITS);
 		B_UPDATE(master, &key, &offset);
 	}
 
@@ -2569,6 +2597,15 @@ s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 
 		return -1;
 	}
 
+	if (!dir_inode->i_size) {
+		int rc = nvfuse_make_first_directory(sb, dir_ictx, dir_inode);
+		if (rc) { nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN); return rc; }
+	}
+	if (!dir_inode->i_bpino && (!sb->sb_free_inodes || nvfuse_create_bptree(sb, dir_inode))) {
+		nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+		return -ENOSPC;
+	}
+
 	/* find an empty directory */
 	empty_dentry = nvfuse_find_empty_dentry(sb, dir_ictx, dir_inode);
 	if (empty_dentry < 0) {
@@ -2582,6 +2619,14 @@ s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 
 
 	ictx = nvfuse_read_inode(sb, NULL, ino);
 	inode = ictx->ictx_inode;
+	if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
+		int rc = nvfuse_set_directory_parent(sb, ictx, newino);
+		if (rc) {
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+			nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+			return rc;
+		}
+	}
 	inode->i_links_count++;
 
 	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino, search_lblock, READ, NVFUSE_TYPE_META);
@@ -2780,7 +2825,7 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 	inode->i_links_count--;
 
 #if NVFUSE_USE_DIR_INDEXING == 1
-	nvfuse_del_dir_indexing(sb, dir_inode, name);
+	nvfuse_del_dir_indexing(sb, dir_inode, name, dir_ictx, dir_bh, NULL);
 #endif
 
 	dir->d_flag = DIR_DELETED;

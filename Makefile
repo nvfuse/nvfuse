@@ -120,11 +120,15 @@ endif
 
 
 # Native file-image development targets, separate from the SPDK build.
-.PHONY: local local-test local-sanitize local-framework local-journal-test local-limit-test local-boundary-test local-stress-test
+.PHONY: local local-test local-sanitize local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-chaos-test
 local:
 	$(MAKE) -f Makefile.local all
 local-test:
 	$(MAKE) -f Makefile.local test
+local-resilience-test:
+	$(MAKE) -f Makefile.local resilience-test
+local-chaos-test:
+	$(MAKE) -f Makefile.local chaos-test
 local-stress-test:
 	$(MAKE) -f Makefile.local stress-test
 local-boundary-test:
@@ -136,4 +140,4 @@ local-journal-test:
 local-framework:
 	$(MAKE) -f Makefile.local framework-test
 local-sanitize:
-	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test journal-test limit-test boundary-suite stress-test
+	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test journal-test limit-test boundary-suite stress-test resilience-test

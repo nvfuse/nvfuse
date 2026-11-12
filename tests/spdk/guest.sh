@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Only for the dedicated 2 GiB QEMU NVMe in the local development VM.
 set -euo pipefail
-case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault|integration-transactions|integration-stress|integration-powercut-prepare|integration-powercut-run|integration-powercut-check|integration-final-inode) ;; *) exit 2 ;; esac
+case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault|integration-transactions|integration-stress|integration-powercut-prepare|integration-powercut-run|integration-powercut-check|integration-final-inode|integration-resilience-setup|integration-resilience-crash|integration-resilience-check|integration-resilience-pressure) ;; *) exit 2 ;; esac
 if [[ $1 == stalled ]]; then rm -f /tmp/nvfuse-stall-go; fi
 [[ ${2:-} =~ ^[0-9]+$ ]] || exit 2
 SPDK_ROOT_DIR=${SPDK_ROOT_DIR:-$HOME/src/spdk}
@@ -43,6 +43,24 @@ sudo env PCI_ALLOWED="$BDF" DRIVER_OVERRIDE=vfio-pci HUGEMEM=512 \
 test "$(basename "$(readlink /sys/bus/pci/devices/$BDF/driver)")" = vfio-pci
 if [[ $1 == integration* ]]; then
     BIN_DIR="$HOME/src/nvfuse/tests/spdk"
+    if [[ $1 == integration-resilience-* ]]; then
+        app="$BIN_DIR/integration_resilience"
+        case $1 in
+            integration-resilience-setup)
+                sudo prlimit --core=0 --memlock=unlimited timeout 180 "$app" setup "pcie:$BDF" ;;
+            integration-resilience-pressure)
+                sudo prlimit --core=0 --memlock=unlimited timeout 180 "$app" pressure "pcie:$BDF" ;;
+            integration-resilience-crash)
+                op=${4:-append};case $op in append|move|move-empty) ;; *) exit 2 ;; esac
+                case ${3:-} in payload-flush|checkpoint-write|after-fsync) ;; *) exit 2 ;; esac
+                sudo env NVFUSE_VM_CUT=1 prlimit --core=0 --memlock=unlimited timeout 180 "$app" data-crash "pcie:$BDF" "$op" "$3" ;;
+            integration-resilience-check)
+                op=${4:-append};case $op in append|move|move-empty) ;; *) exit 2 ;; esac
+                case ${3:-} in old|new) ;; *) exit 2 ;; esac
+                sudo prlimit --core=0 --memlock=unlimited timeout 180 "$app" data-check "pcie:$BDF" "$op" "$3" ;;
+        esac
+        exit 0
+    fi
     if [[ $1 == integration-final-inode ]]; then
         for kind in files dirs sharded; do
             log="$LOG_DIR/final-inode-$kind.log"

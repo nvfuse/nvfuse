@@ -92,6 +92,7 @@ s32 nvfuse_alloc_root_inode_direct(struct io_target *target,
 		//root inode
 		inode[ino].i_ino = ROOT_INO;
 		inode[ino].i_type = NVFUSE_TYPE_DIRECTORY;
+		inode[ino].i_parent = ROOT_INO;
 		inode[ino].i_size = DIR_ENTRY_SIZE * DIR_ENTRY_NUM;
 		inode[ino].i_version = 1;
 		inode[ino].i_ptr = 1;
@@ -115,6 +116,7 @@ s32 nvfuse_alloc_root_inode_direct(struct io_target *target,
 			//root inode
 			inode->i_ino = ROOT_INO;
 			inode->i_type = NVFUSE_TYPE_DIRECTORY;
+			inode->i_parent = ROOT_INO;
 			inode->i_size = DIR_ENTRY_SIZE * DIR_ENTRY_NUM;
 			inode->i_version = 1;
 			inode->i_ptr = 1;

@@ -16,7 +16,13 @@ int model_truncate(void *, const char *, uint64_t);
 int model_write(void *, const char *, uint64_t, void *, unsigned);
 int model_read(void *, const char *, void *, unsigned);
 int model_stat(void *, const char *, uint64_t *, unsigned *);
+int model_parent(void *, const char *, const char *);
+int model_legacy_parent(void *, const char *);
+int model_legacy_dot(void *, const char *);
+int model_list(void *, const char *, char *, unsigned, unsigned *);
 int model_counts(void *, uint64_t *, uint64_t *);
+int model_set_crash(void *, const char *);
+void model_hash(const char *, uint32_t [2]);
 /* Synthetic near-limit directory: only rejection is exercised, no namespace
  * is materialized. Restore the real inode before returning. */
 int model_directory_limit(void *);

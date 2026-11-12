@@ -178,3 +178,15 @@ For authoritative format and architecture details, see the Linux kernel document
 - [Automatic/user transaction boundaries](../nvfuse_tx.c), [public API wrappers](../nvfuse_tx_wrappers.c).
 - [Independent persistence model](../tests/journal_engine_test.c), [filesystem TX oracle](../tests/transaction_test.c), [crash runner](../tests/run_transactions.py).
 - [Measurements and remaining validation gaps](journaling-evaluation.md).
+
+
+### Directory parent metadata
+
+The parent-directory fix stores `i_parent` in the formerly reserved 32-bit inode
+word at byte offset 60. The 4 KiB inode size, block offsets and journal record
+format remain unchanged. Mkdir stores the parent even when the directory has no
+data block; directory moves journal the namespace edge, parent word and any
+materialized `..` together. Legacy directory parents are backfilled when reached
+through their real parent's named entry. See [the parent and enumeration
+regressions](resilience-tests.md#parent-directory-fix-and-enumeration-verification)
+for compatibility boundaries and crash evidence.

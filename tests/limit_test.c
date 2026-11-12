@@ -5,6 +5,7 @@
 #include "nvfuse_journal.h"
 #include "nvfuse_tx.h"
 #include "test_backend.h"
+#include "tree_verify.h"
 #include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -196,7 +197,7 @@ int main(int argc,char **argv) {
             }
             REQUIRE(!create(h,kind,"/arena/probe"));
             REQUIRE(!(!strcmp(kind,"dirs")?nvfuse_rmdir_path(h,"/arena/probe"):nvfuse_rmfile_path(h,"/arena/probe")));
-        } else if(!strcmp(mode,"check-crash")) { REQUIRE(argc==8);check_crash(h,kind,reached,op,!strcmp(argv[7],"new")); }
+        } else if(!strcmp(mode,"check-crash")) { REQUIRE(argc==8);check_crash(h,kind,reached,op,!strcmp(argv[7],"new")); REQUIRE(!test_verify_tree(h)); }
         else {
             if(!strcmp(mode,"crash")) {
                 REQUIRE(argc==9);crash_phase=argv[7];crash_nth=(unsigned)strtoul(argv[8],NULL,10);

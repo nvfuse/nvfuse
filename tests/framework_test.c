@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <inttypes.h>
 #include "test_backend.h"
+#include "tree_verify.h"
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); return 1; } } while (0)
 #define DATA_SIZE (2 * 1024 * 1024 + 137)
@@ -14,8 +15,26 @@
 static uint32_t rng;
 static uint32_t next_random(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
+static int directory_payload(struct nvfuse_handle *h,uint32_t seed,int create) {
+    if(create) {
+        CHECK(!nvfuse_mkdir_path(h,"/verify",0755));
+        CHECK(!nvfuse_mkdir_path(h,"/verify/nested",0755));
+        CHECK(!nvfuse_mkdir_path(h,"/verify/empty",0755));
+    }
+    const char *paths[]={"/verify/alpha","/verify/nested/beta"};
+    for(unsigned k=0;k<2;k++) {
+        unsigned char expected[4097],actual[4097];
+        for(unsigned i=0;i<sizeof(expected);i++)expected[i]=(unsigned char)(seed+i*13+k*37);
+        int fd=nvfuse_openfile_path(h,paths[k],create?O_CREAT|O_RDWR:O_RDONLY,0644);CHECK(fd>=0);
+        if(create)CHECK(nvfuse_writefile(h,fd,(char *)expected,sizeof(expected),0)==sizeof(expected));
+        CHECK(nvfuse_readfile(h,fd,(char *)actual,sizeof(actual),0)==sizeof(actual));
+        CHECK(!memcmp(expected,actual,sizeof(actual)));CHECK(!nvfuse_closefile(h,fd));
+    }
+    return 0;
+}
 static int workload(struct nvfuse_handle *h, uint32_t seed, int create)
 {
+    if(!create)CHECK(!test_cold_parents(h,ROOT_INO,ROOT_INO,0));
     unsigned char *model = calloc(1, DATA_SIZE), *actual = malloc(DATA_SIZE);
     CHECK(model && actual);
     rng = seed;
@@ -51,6 +70,8 @@ static int workload(struct nvfuse_handle *h, uint32_t seed, int create)
     }
     CHECK(nvfuse_closefile(h, fd) == 0);
     free(model); free(actual);
+    CHECK(!directory_payload(h,seed,create));
+    CHECK(test_verify_tree(h)==0);
     return 0;
 }
 

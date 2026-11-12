@@ -9,7 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #define REQUIRE(x) do { if (!(x)) { fprintf(stderr,"CHECK FAILED %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while (0)
-struct node { uint32_t ino,type,bp,links,blocks[14]; uint64_t size; };
+struct node { uint32_t ino,type,bp,links,parent,actual_parent,dot_parent,blocks[14]; uint64_t size; };
 static int image;
 static unsigned groups,blocks,inodes;
 static unsigned char *allocated,*live;
@@ -77,19 +77,19 @@ int main(int argc,char **argv) {
             struct nvfuse_inode raw;
             read_at(&raw,sizeof(raw),(uint64_t)(bd.bd_itable_start+k)*NVJ_BLOCK);
             REQUIRE(raw.i_ino==ino && !raw.i_deleted);
-            nodes[ino]=(struct node){.ino=ino,.type=raw.i_type,.bp=raw.i_bpino,.links=raw.i_links_count,.size=raw.i_size};
+            nodes[ino]=(struct node){.ino=ino,.type=raw.i_type,.bp=raw.i_bpino,.links=raw.i_links_count,.size=raw.i_size,.parent=raw.i_parent};
             memcpy(nodes[ino].blocks,raw.i_blocks,sizeof(nodes[ino].blocks));
         }
         REQUIRE(fb==bd.bd_free_blocks && fi==bd.bd_free_inodes); free_blocks+=fb; free_inodes+=fi;
     }
     REQUIRE(free_blocks==(uint64_t)sb.sb_free_blocks && free_inodes==(uint64_t)sb.sb_free_inodes);
-    references[ROOT_INO]=1;
+    references[ROOT_INO]=1;nodes[ROOT_INO].actual_parent=ROOT_INO;
     for(unsigned ino=0;ino<inodes;ino++) {
         struct node *n=nodes+ino;
         if(!n->ino) continue;
         hash_bytes(&n->ino,sizeof(n->ino));hash_bytes(&n->type,sizeof(n->type));
         hash_bytes(&n->bp,sizeof(n->bp));hash_bytes(&n->links,sizeof(n->links));
-        hash_bytes(&n->size,sizeof(n->size));hash_bytes(n->blocks,sizeof(n->blocks));
+        hash_bytes(&n->parent,sizeof(n->parent));hash_bytes(&n->size,sizeof(n->size));hash_bytes(n->blocks,sizeof(n->blocks));
         unsigned char *dir=NULL;
         if(n->type==NVFUSE_TYPE_DIRECTORY && n->size) {
             REQUIRE(n->size%NVJ_BLOCK==0 && n->size<=(uint64_t)blocks*NVJ_BLOCK);
@@ -108,11 +108,27 @@ int main(int argc,char **argv) {
                 REQUIRE(memchr(d[k].d_filename,0,FNAME_SIZE)); sorted[used++]=d[k].d_filename;
                 hash_bytes(&d[k].d_ino,sizeof(d[k].d_ino));
                 hash_bytes(d[k].d_filename,strlen(d[k].d_filename)+1);
-                if(strcmp(d[k].d_filename,".") && strcmp(d[k].d_filename,"..")) references[d[k].d_ino]++;
+                if(!strcmp(d[k].d_filename,".")) REQUIRE(d[k].d_ino==ino);
+                else if(!strcmp(d[k].d_filename,"..")) n->dot_parent=d[k].d_ino;
+                else {
+                    references[d[k].d_ino]++;
+                    if(nodes[d[k].d_ino].type==NVFUSE_TYPE_DIRECTORY) {
+                        REQUIRE(!nodes[d[k].d_ino].actual_parent);
+                        nodes[d[k].d_ino].actual_parent=ino;
+                    }
+                }
             }
             REQUIRE(used==n->links); qsort(sorted,used,sizeof(*sorted),names);
             for(unsigned k=1;k<used;k++) REQUIRE(strcmp(sorted[k-1],sorted[k]));
             free(sorted); free(dir);
+        }
+    }
+    for(unsigned ino=0;ino<inodes;ino++) if(nodes[ino].ino && nodes[ino].type==NVFUSE_TYPE_DIRECTORY) {
+        REQUIRE(nodes[ino].actual_parent);
+        /* Zero is a legacy directory pending namespace-based parent backfill. */
+        if(nodes[ino].parent) {
+            REQUIRE(nodes[ino].parent==nodes[ino].actual_parent);
+            if(nodes[ino].size) REQUIRE(nodes[ino].dot_parent==nodes[ino].parent);
         }
     }
     for(unsigned p=0;p<blocks;p++) REQUIRE(!allocated[p] || owners[p]);

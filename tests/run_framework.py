@@ -111,6 +111,7 @@ def main():
     fault_cases = ("read-eio", "write-eio", "stall-resume", "stall-timeout", "hotremove")
     parser.add_argument("--fault-cases", nargs="+", choices=fault_cases, default=fault_cases)
     parser.add_argument("--keep-images", action="store_true")
+    parser.add_argument("--near-full-faults", action="store_true", help="fill the test filesystem to under 8 MiB free before NVMe faults")
     args = parser.parse_args()
     if not args.seeds or any(not 0 < s <= 0xffffffff for s in args.seeds):
         parser.error("seeds must be nonzero 32-bit integers")

@@ -1,8 +1,11 @@
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
+#include "nvfuse_buffer_cache.h"
 #include "test_backend.h"
 #include "fs_model_adapter.h"
 #include <fcntl.h>
+#include <unistd.h>
+#include "nvfuse_tx.h"
 /* Oracle inspection bypasses automatic TX wrappers: a negative getattr would
  * otherwise reload the entire image once for every absent model name. */
 extern s32 nvfuse_getattr_impl(struct nvfuse_handle *,const char *,struct stat *);
@@ -65,3 +68,52 @@ int model_directory_limit(void *arg) {
     }
     return valid?0:-1;
 }
+
+static const char *model_crash_phase;
+static void model_crash_hook(void *arg,const char *phase,uint64_t block) {
+    (void)arg;(void)block;
+    if(!strcmp(phase,model_crash_phase)) _exit(86);
+}
+int model_set_crash(void *h,const char *phase) {
+    model_crash_phase=phase;return nvfuse_tx_set_hook(h,model_crash_hook,NULL);
+}
+void model_hash(const char *name,uint32_t hash[2]) { nvfuse_dir_hash((s8 *)name,hash,hash+1); }
+
+int model_list(void *h,const char *path,char *names,unsigned capacity,unsigned *count) {
+    struct stat st;if(nvfuse_getattr(h,path,&st))return -1;
+    int ino=nvfuse_opendir(h,path);if(ino<0)return ino;
+    unsigned n=(unsigned)st.st_nlink;if(n<2 || n-2>capacity)return -1;
+    struct dirent entry;
+    for(unsigned k=0;k<n;k++) {
+        if(!nvfuse_readdir(h,ino,&entry,k))return -1;
+        if(k<2) {
+            if(strcmp(entry.d_name,k?"..":"."))return -1;
+        } else strcpy(names+(k-2)*FNAME_SIZE,entry.d_name);
+    }
+    if(nvfuse_readdir(h,ino,&entry,n))return -1;
+    *count=n-2;return 0;
+}
+
+int model_parent(void *h,const char *path,const char *parent) {
+    int dir=nvfuse_opendir(h,path),expected=nvfuse_opendir(h,parent);
+    if(dir<0 || expected<0)return -1;
+    struct dirent e;if(!nvfuse_readdir(h,dir,&e,1) || strcmp(e.d_name,"..") || e.d_ino!=(ino_t)expected)return -1;
+    char p[4097];if(snprintf(p,sizeof(p),"%s/..",path)>=(int)sizeof(p))return -1;
+    return nvfuse_opendir(h,p)==expected?0:-1;
+}
+static int model_corrupt_parent(void *arg,const char *path,int clear) {
+    struct nvfuse_handle *h=arg;int ino=nvfuse_opendir(h,path);if(ino<0)return ino;
+    if(nvfuse_tx_begin(h,NVFUSE_TX_METADATA,0))return -1;
+    struct nvfuse_inode_ctx *ctx=nvfuse_read_inode(&h->nvh_sb,NULL,ino);
+    if(clear)ctx->ictx_inode->i_parent=0;
+    if(ctx->ictx_inode->i_size) {
+        struct nvfuse_buffer_head *bh=nvfuse_get_bh(&h->nvh_sb,ctx,ino,0,READ,NVFUSE_TYPE_META);
+        ((struct nvfuse_dir_entry *)bh->bh_buf)[1].d_ino=ino;
+        nvfuse_release_bh(&h->nvh_sb,bh,HEAD,DIRTY);
+    }
+    nvfuse_release_inode(&h->nvh_sb,ctx,DIRTY);
+    return nvfuse_tx_commit(h);
+}
+
+int model_legacy_parent(void *h,const char *p) { return model_corrupt_parent(h,p,1); }
+int model_legacy_dot(void *h,const char *p) { return model_corrupt_parent(h,p,0); }

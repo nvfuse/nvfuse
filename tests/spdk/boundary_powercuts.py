@@ -65,3 +65,46 @@ def run(suite, ssh, vm, guest, boot, stop):
         suite.command(prefix + '-raw-metadata', [str(checker), str(vm / 'nvme.raw'), '--skip-payload'],
                       marker='CHECK ', timeout=90)
         boot()
+
+    # Stored payload exceeds the cache and crosses indirect block boundaries.
+    for op, phase, outcome in [('append','payload-flush','old'), ('append','checkpoint-write','new'), ('append','after-fsync','new'), ('move','payload-flush','old'), ('move','checkpoint-write','new'), ('move-empty','payload-flush','old'), ('move-empty','checkpoint-write','new')]:
+        prefix = 'vm-stored-' + op + '-' + phase
+        suite.command(prefix + '-setup', ssh + ['bash ~/src/nvfuse-framework/guest.sh integration-resilience-setup 1'],
+                      marker='PASS resilience setup', timeout=180)
+        if guest('sync').returncode:
+            raise RuntimeError('failed to sync guest before stored-data cut')
+        log = suite.root / (prefix + '-kill.log')
+        started = time.monotonic()
+        with log.open('wb') as stream:
+            process = subprocess.Popen(ssh + [f'bash ~/src/nvfuse-framework/guest.sh integration-resilience-crash 1 {phase} {op}'],
+                                       stdout=stream, stderr=subprocess.STDOUT)
+            try:
+                until = time.monotonic() + 60
+                while f'READY VM cut phase={phase}' not in log.read_text(errors='replace'):
+                    if process.poll() is not None or time.monotonic() > until:
+                        raise RuntimeError(f'stored-data cut barrier not reached; see {log}')
+                    time.sleep(0.05)
+                pidfile = vm / 'qemu.pid'
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                process.wait(timeout=15)
+                pidfile.unlink(missing_ok=True)
+                for name in ('monitor.sock', 'qmp.sock'):
+                    (vm / name).unlink(missing_ok=True)
+            finally:
+                if process.poll() is None:
+                    process.kill(); process.wait()
+        snapshot = suite.root / (prefix + '-original.qcow2')
+        subprocess.run([qemu_img, 'convert', '-f', 'raw', '-O', 'qcow2', str(vm / 'nvme.raw'), str(snapshot)],
+                       check=True, timeout=90)
+        suite.record(prefix + '-kill', 'pass', time.monotonic() - started,
+                     phase=phase, expected_state=outcome, snapshot=str(snapshot),
+                     persistence_model='VM SIGKILL; host kernel/page cache remains powered')
+        boot()
+        for repeat in range(2):
+            suite.command(prefix + f'-recover-{repeat}', ssh + [
+                f'bash ~/src/nvfuse-framework/guest.sh integration-resilience-check 1 {outcome} {op}'],
+                marker='PASS resilience data-check', timeout=180)
+        stop()
+        suite.command(prefix + '-raw-metadata', [str(checker), str(vm / 'nvme.raw'), '--skip-payload'],
+                      marker='CHECK ', timeout=90)
+        boot()

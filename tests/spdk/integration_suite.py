@@ -68,6 +68,7 @@ def run(suite, args):
             "make -f Makefile.integration APP=integration_transactions; "
             "make -f Makefile.integration APP=integration_limits; "
             "make -f Makefile.integration APP=integration_mixed; "
+            "make -f Makefile.integration APP=integration_resilience; "
             "test -x integration_test; test -x integration_framework; "
             "git -C ~/src/spdk describe --tags --exact-match; git -C ~/src/spdk rev-parse HEAD; "
             "echo 'PASS integration built'"], input=data.getvalue(),
@@ -85,7 +86,7 @@ def run(suite, args):
                 marker="PASS NVMe mixed, exhaustion, complete reclamation and boundary crash recovery", timeout=1800)
         if args.profile == "integration-faults":
             from .integration_faults import run as faults
-            faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases)
+            faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases, args.near_full_faults)
             return
         for seed in args.seeds:
             name = f"integration-seed-{seed}"
@@ -112,7 +113,7 @@ def run(suite, args):
                     timeout=120)
         if args.profile == "all":
             from .integration_faults import run as faults
-            faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases)
+            faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases, args.near_full_faults)
     finally:
         try:
             if (vm / "qemu.pid").exists():

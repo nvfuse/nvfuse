@@ -8,7 +8,7 @@ import time
 from .vm_suite import QMP
 
 
-def run(suite, ssh, vm, config, guest, boot, stop, cases):
+def run(suite, ssh, vm, config, guest, boot, stop, cases, near_full=False):
     def command(name, case, marker, lba=0):
         suite.command(name, ssh + [f"bash ~/src/nvfuse-framework/guest.sh integration-fault 1 {case} {lba}"],
                       marker=marker, timeout=75)
@@ -16,6 +16,9 @@ def run(suite, ssh, vm, config, guest, boot, stop, cases):
     def prepare(name):
         suite.command(name, ssh + ["bash ~/src/nvfuse-framework/guest.sh integration-data-prepare 1"],
                       marker="PASS integration data-create", timeout=120)
+        if near_full:
+            suite.command(name + "-pressure", ssh + ["bash ~/src/nvfuse-framework/guest.sh integration-resilience-pressure 1"],
+                          marker="PASS near-full pressure", timeout=180)
 
     qemu_img = shutil.which("qemu-img")
     if not qemu_img:
@@ -144,4 +147,4 @@ immediately = "on"
         "bash ~/src/nvfuse-framework/guest.sh integration-data-check 1"],
         marker="PASS integration data-verify", timeout=120)
     suite.record("integration-automatic-crash-recovery", "pass",
-                 cases=list(cases), oracle="original-image payload compared before reformatting")
+                 cases=list(cases), near_full=near_full, oracle="original-image payload compared before reformatting")

@@ -444,13 +444,8 @@ struct nvfuse_dir_entry * nvfuse_lookup_linear(struct nvfuse_superblock *sb, str
 
 		dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
 
-		if (dentry_blk < NVFUSE_SIZE_TO_BLK(dir_inode->i_size) - 1) {
-			dentry_num = DIR_ENTRY_NUM;
-		} else {
-			dentry_num = dir_inode->i_links_count % DIR_ENTRY_NUM;
-			if (dentry_num == 0)
-				dentry_num = DIR_ENTRY_NUM;
-		}
+		/* Deleted slots can leave live entries beyond the link count. */
+		dentry_num = DIR_ENTRY_NUM;
 
 		dir_last = dir + dentry_num;
 
@@ -458,9 +453,11 @@ struct nvfuse_dir_entry * nvfuse_lookup_linear(struct nvfuse_superblock *sb, str
 			/* directory entry is found */
 			if (dir->d_flag == DIR_USED && !strcmp(dir->d_filename, filename))
 				goto FOUND;
+			dir++;
 		}
 
 		nvfuse_release_bh(sb, dir_bh, HEAD, NVF_CLEAN);
+		dir_bh = NULL;
 	}
 
 	/* not found */
@@ -501,10 +498,10 @@ struct nvfuse_dir_entry * nvfuse_lookup_bptree(struct nvfuse_superblock *sb, str
 		if (dir->d_flag == DIR_USED && !strcmp(dir->d_filename, filename)) {
 			goto FOUND;
 		} else {
-			/* FIXME: how can we handle this exception case? */
-			dprintf_error(BPTREE, "No such file or directory = %s", filename);
-			dprintf_error(BPTREE, "B+tree has inconsistency state \n");
-			assert(0);
+			/* The hash is an index hint; distinct names may share it. */
+			nvfuse_release_bh(sb, dir_bh, HEAD, NVF_CLEAN);
+			dir_bh = NULL;
+			dir = (struct nvfuse_dir_entry *)1;
 		}
 	} else {
 		/* in case of collision */
@@ -523,76 +520,76 @@ FOUND:
 * namespace lookup function with given file name and paraent inode number
 * result: found=0, not found=-1
 */
+/* The incoming namespace edge is authoritative, including on legacy images. */
+s32 nvfuse_set_directory_parent(struct nvfuse_superblock *sb,
+		struct nvfuse_inode_ctx *ictx, inode_t parent)
+{
+	struct nvfuse_inode *inode = ictx->ictx_inode;
+	if (inode->i_type != NVFUSE_TYPE_DIRECTORY) return 0;
+	if (inode->i_parent != parent) {
+		inode->i_parent = parent;
+		/* The caller may release a lookup result as clean. Preserve this repair. */
+		ictx->ictx_bh->bh_bc->bc_dirty = 1;
+		nvfuse_set_bh_status(ictx->ictx_bh, BUFFER_STATUS_DIRTY);
+		set_bit(&ictx->ictx_status, INODE_STATE_DIRTY);
+	}
+	if (inode->i_size) {
+		struct nvfuse_buffer_head *bh = nvfuse_get_bh(sb, ictx, inode->i_ino, 0, READ, NVFUSE_TYPE_META);
+		if (!bh) return -EIO;
+		struct nvfuse_dir_entry *entries = (struct nvfuse_dir_entry *)bh->bh_buf;
+		int dirty = entries[1].d_ino != parent;
+		if (dirty) {
+			entries[1].d_ino = parent;
+			set_bit(&ictx->ictx_status, INODE_STATE_DIRTY);
+		}
+		nvfuse_release_bh(sb, bh, HEAD, dirty ? DIRTY : NVF_CLEAN);
+	}
+	return 0;
+}
+
 s32 nvfuse_lookup(struct nvfuse_superblock *sb,
 		  struct nvfuse_inode_ctx **file_ictx,
 		  struct nvfuse_dir_entry *file_entry,
-		  const s8 *filename,
-		  const s32 cur_dir_ino)
+		  const s8 *filename, const s32 cur_dir_ino)
 {
-	struct nvfuse_inode_ctx *dir_ictx;
-	struct nvfuse_inode *dir_inode = NULL;
+	struct nvfuse_inode_ctx *dir_ictx = nvfuse_read_inode(sb, NULL, cur_dir_ino);
 	struct nvfuse_buffer_head *dir_bh = NULL;
-	struct nvfuse_dir_entry *dir = NULL;
-	s32 res = -1;
-
-	dir_ictx = nvfuse_read_inode(sb, NULL, cur_dir_ino);
-	if (dir_ictx == NULL)
-		return res;
-
-	dir_inode = dir_ictx->ictx_inode;
-
-#if NVFUSE_USE_DIR_INDEXING == 1
-	/* b+tree based index search */
-	if (dir_inode->i_bpino) {
-		dir = nvfuse_lookup_bptree(sb, dir_ictx, dir_inode, filename, &dir_bh);
-		/* not found dentry */
-		if (!dir) {
-			res = -1;
-			goto RES;
-		/* found dentry */
-		} else {
-			if (dir_bh)
-				goto FOUND;
-			else
-				goto LINEAR_SEARCH;
-		}
-
-		/* try linear search */
+	struct nvfuse_dir_entry *dir = NULL, found;
+	if (!dir_ictx) return -EIO;
+	struct nvfuse_inode *inode = dir_ictx->ictx_inode;
+	if (inode->i_type != NVFUSE_TYPE_DIRECTORY) {
+		nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+		return -ENOTDIR;
+	}
+	int special = !strcmp(filename, ".") || !strcmp(filename, "..");
+	if (special) {
+		memset(&found, 0, sizeof(found));
+		found.d_flag = DIR_USED;
+		strcpy(found.d_filename, filename);
+		found.d_ino = !strcmp(filename, ".") || cur_dir_ino == (sb->sb_nvh ? nvfuse_get_root_ino(sb->sb_nvh) : sb->sb_root_ino) ?
+			cur_dir_ino : inode->i_parent;
 	} else {
-		/* b+tree is not allocated? */
-		res = -1;
-		goto RES;
-	}
+#if NVFUSE_USE_DIR_INDEXING == 1
+		if (inode->i_bpino) dir = nvfuse_lookup_bptree(sb, dir_ictx, inode, filename, &dir_bh);
+		if (dir && !dir_bh) dir = nvfuse_lookup_linear(sb, dir_ictx, inode, filename, &dir_bh);
+#else
+		dir = nvfuse_lookup_linear(sb, dir_ictx, inode, filename, &dir_bh);
 #endif
-
-LINEAR_SEARCH:
-
-	/* naiive linear search */
-	dir = nvfuse_lookup_linear(sb, dir_ictx, dir_inode, filename, &dir_bh);
-	if (dir) 
-		goto FOUND;
-	else
-		goto RES;
-
-FOUND:
-
-	if (file_ictx) {
-		*file_ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
+		if (dir) memcpy(&found, dir, sizeof(found));
 	}
-
-	if (file_entry) {
-		rte_memcpy(file_entry, dir, DIR_ENTRY_SIZE);
-	}
-
-	assert(dir->d_ino > 0 && dir->d_ino < sb->sb_no_of_inodes_per_bg * sb->sb_bg_num);
-	res = 0;
-
-RES:
-
+	/* Release the parent before reading a target: '.' can name this inode. */
 	nvfuse_release_bh(sb, dir_bh, HEAD, NVF_CLEAN);
 	nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
-
-	return res;
+	if (!special && !dir) return -ENOENT;
+	if (!found.d_ino || (u64)found.d_ino >= (u64)sb->sb_bg_num * sb->sb_no_of_inodes_per_bg)
+		return -EIO; /* Unknown legacy parent or corrupt inode reference. */
+	struct nvfuse_inode_ctx *target = nvfuse_read_inode(sb, NULL, found.d_ino);
+	if (!target) return -EIO;
+	int rc = special ? 0 : nvfuse_set_directory_parent(sb, target, cur_dir_ino);
+	if (rc || !file_ictx) nvfuse_release_inode(sb, target, NVF_CLEAN);
+	else *file_ictx = target;
+	if (!rc && file_entry) memcpy(file_entry, &found, sizeof(found));
+	return rc;
 }
 
 inode_t nvfuse_get_root_ino(struct nvfuse_handle *nvh)
@@ -618,21 +615,50 @@ void nvfuse_set_cwd_ino(struct nvfuse_handle *nvh, inode_t cwd_ino)
 s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filename,
 			struct nvfuse_dir_entry *direntry)
 {
-	s8 dirname[FNAME_SIZE];
-	int res;
-
-	if (path[0] == '/') {
-		nvfuse_filename(path, filename);
-		nvfuse_dirname(path, dirname);
-		/* absolute directory path */
-		res = nvfuse_path_open(nvh, dirname, filename, direntry);
-	} else {
-		nvfuse_filename(path, filename);
-		/* relative directory path */
-		res = nvfuse_path_open2(nvh, (s8 *)path, (s8 *)filename, direntry);
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	const char *p, *end;
+	char component[FNAME_SIZE];
+	inode_t parent;
+	/* Bound the complete path and every component before copying anything. */
+	if (!path || !*path)
+		return -ENOENT;
+	if (strnlen(path, 4097) > 4096)
+		return -ENAMETOOLONG;
+	for (p = path; *p; p = end) {
+		while (*p == '/') p++;
+		end = p;
+		while (*end && *end != '/') end++;
+		if (end - p >= FNAME_SIZE) return -ENAMETOOLONG;
+		if (!*end) break;
 	}
-
-	return res;
+	parent = path[0] == '/' ? nvfuse_get_root_ino(nvh) : nvfuse_get_cwd_ino(nvh);
+	memset(direntry, 0, sizeof(*direntry));
+	direntry->d_ino = parent;
+	filename[0] = 0;
+	p = path;
+	while (*p) {
+		while (*p == '/') p++;
+		if (!*p) break;
+		end = p;
+		while (*end && *end != '/') end++;
+		memcpy(component, p, end - p);
+		component[end - p] = 0;
+		if (!*end) {
+			strcpy(filename, component);
+			return 0;
+		}
+		struct nvfuse_inode_ctx *ictx = NULL;
+		if (nvfuse_lookup(sb, NULL, direntry, component, parent) < 0)
+			return -ENOENT;
+		ictx = nvfuse_read_inode(sb, NULL, direntry->d_ino);
+		if (!ictx) return -EIO;
+		int is_dir = ictx->ictx_inode->i_type == NVFUSE_TYPE_DIRECTORY;
+		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+		if (!is_dir) return -ENOTDIR;
+		parent = direntry->d_ino;
+		p = end;
+	}
+	return 0;
 }
 
 s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
@@ -659,58 +685,50 @@ s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
 	return par_ino;
 }
 
-struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino, struct dirent *dentry,
-			      off_t dir_offset)
+struct dirent *nvfuse_readdir(struct nvfuse_handle *nvh, inode_t par_ino,
+		struct dirent *dentry, off_t dir_offset)
 {
-	struct nvfuse_inode_ctx *dir_ictx, *ictx;
-	struct nvfuse_inode *dir_inode, *inode;
-	struct nvfuse_buffer_head *dir_bh;
-	struct nvfuse_dir_entry *dir;
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
-	s64 dir_size;
-	struct dirent *return_dentry = NULL;
-
-	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
-	dir_inode = dir_ictx->ictx_inode;
-	dir_size = (s64)dir_offset * DIR_ENTRY_SIZE;
-
-	if (dir_inode->i_size <= dir_size) {
-		goto RES;
-	}
-
-	dir_bh = nvfuse_get_bh(sb, dir_ictx, dir_inode->i_ino,
-			       NVFUSE_SIZE_TO_BLK((s64)dir_offset * DIR_ENTRY_SIZE), READ, NVFUSE_TYPE_META);
-	dir = (struct nvfuse_dir_entry *)dir_bh->bh_buf;
-
-	dir += (dir_offset % DIR_ENTRY_NUM);
-
-	if (nvfuse_dir_is_invalid(dir)) {
-		return_dentry = NULL;
+	if (!dentry || dir_offset < 0) return NULL;
+#ifdef NVFUSE_FILE_BACKEND
+	if (sb->target->journal && !pthread_equal(sb->target->tx_thread, pthread_self())) return NULL;
+#endif
+	struct nvfuse_inode_ctx *ctx = nvfuse_read_inode(sb, NULL, par_ino);
+	if (!ctx) return NULL;
+	struct nvfuse_inode *inode = ctx->ictx_inode;
+	struct nvfuse_dir_entry entry;
+	memset(&entry, 0, sizeof(entry));
+	if (inode->i_type != NVFUSE_TYPE_DIRECTORY) goto END;
+	/* Empty directories need no data block to expose '.' and '..'. */
+	if (dir_offset < 2) {
+		entry.d_ino = dir_offset == 0 || par_ino == nvfuse_get_root_ino(nvh) ?
+			par_ino : inode->i_parent;
+		strcpy(entry.d_filename, dir_offset == 0 ? "." : "..");
+		entry.d_flag = DIR_USED;
 	} else {
-		dentry->d_ino = dir->d_ino;
-		strcpy(dentry->d_name, dir->d_filename);
-
-		ictx = nvfuse_read_inode(sb, NULL, dir->d_ino);
-		inode = ictx->ictx_inode;
-
-		if (inode->i_type == NVFUSE_TYPE_DIRECTORY)
-			dentry->d_type = DT_DIR;
-		else
-			dentry->d_type = DT_REG;
-
-		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
-
-		return_dentry = dentry;
+		if ((uint64_t)dir_offset >= (uint64_t)inode->i_size / DIR_ENTRY_SIZE) goto END;
+		struct nvfuse_buffer_head *bh = nvfuse_get_bh(sb, ctx, par_ino,
+			NVFUSE_DENTRY_TO_BLK(dir_offset), READ, NVFUSE_TYPE_META);
+		if (!bh) goto END;
+		memcpy(&entry, ((struct nvfuse_dir_entry *)bh->bh_buf) + dir_offset % DIR_ENTRY_NUM, sizeof(entry));
+		nvfuse_release_bh(sb, bh, HEAD, NVF_CLEAN);
 	}
-
-	nvfuse_release_bh(sb, dir_bh, 0, 0);
-RES:
-	;
-
-	nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
-	nvfuse_release_super(sb);
-
-	return return_dentry;
+	if (entry.d_flag != DIR_USED || !entry.d_ino) goto END;
+	nvfuse_release_inode(sb, ctx, NVF_CLEAN);
+	memset(dentry, 0, sizeof(*dentry));
+	dentry->d_ino = entry.d_ino;
+	strcpy(dentry->d_name, entry.d_filename);
+	if (dir_offset < 2) dentry->d_type = DT_DIR;
+	else {
+		ctx = nvfuse_read_inode(sb, NULL, entry.d_ino);
+		if (!ctx) return NULL;
+		dentry->d_type = ctx->ictx_inode->i_type == NVFUSE_TYPE_DIRECTORY ? DT_DIR : DT_REG;
+		nvfuse_release_inode(sb, ctx, NVF_CLEAN);
+	}
+	return dentry;
+END:
+	nvfuse_release_inode(sb, ctx, NVF_CLEAN);
+	return NULL;
 }
 
 s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, s32 flags,
@@ -1398,7 +1416,7 @@ s32 nvfuse_createfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filenam
 	new_inode = new_ictx->ictx_inode;
 	new_inode->i_type = NVFUSE_TYPE_FILE;
 	new_inode->i_size = 0;
-	new_inode->i_mode = mode;
+	new_inode->i_mode = (mode & S_IFMT) ? mode : mode | S_IFREG;
 	new_inode->i_gid = 0;
 	new_inode->i_uid = 0;
 	new_inode->i_links_count = 1;
@@ -1482,7 +1500,7 @@ s32 nvfuse_shrink_dentry(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *
 
 
 #if NVFUSE_USE_DIR_INDEXING == 1
-	nvfuse_del_dir_indexing(sb, inode, dir_to->d_filename);
+	nvfuse_del_dir_indexing(sb, inode, dir_to->d_filename, ictx, dir_bh_from, is_diff_block ? dir_bh_to : NULL);
 	nvfuse_set_dir_indexing(sb, inode, dir_to->d_filename, to_entry);
 
 	/*{
@@ -1509,6 +1527,8 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	struct nvfuse_buffer_head *dir_bh = NULL;
 	u32 found_entry;
 	u32 search_lblock, search_entry;
+
+	if (!strcmp(filename, ".") || !strcmp(filename, "..")) return -EINVAL;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
@@ -1554,7 +1574,7 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	}
 
 #if NVFUSE_USE_DIR_INDEXING == 1
-	nvfuse_del_dir_indexing(sb, dir_inode, filename);
+	nvfuse_del_dir_indexing(sb, dir_inode, filename, dir_ictx, dir_bh, NULL);
 #endif
 
 	inode->i_links_count--;
@@ -1630,6 +1650,8 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	u32 found_entry;
 	u32 search_lblock, search_entry;
 
+	if (!strcmp(filename, ".") || !strcmp(filename, "..")) return -EINVAL;
+
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
 	dir_inode = dir_ictx->ictx_inode;
 
@@ -1678,7 +1700,7 @@ s32 nvfuse_rmdir(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	dir_inode->i_ptr = dir_inode->i_links_count - 1;
 
 #if NVFUSE_USE_DIR_INDEXING == 1
-	nvfuse_del_dir_indexing(sb, dir_inode, filename);
+	nvfuse_del_dir_indexing(sb, dir_inode, filename, dir_ictx, dir_bh, NULL);
 #endif
 	/* delete allocated b+tree inode */
 	if (inode->i_bpino) {
@@ -1747,6 +1769,7 @@ s32 nvfuse_make_first_directory(struct nvfuse_superblock *sb, struct nvfuse_inod
 	s32 ret;
 
 	assert(inode->i_size == 0);
+	if (inode->i_ino != sb->sb_root_ino && !inode->i_parent) return -EIO;
 
 	ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL,
 			       1);
@@ -1766,7 +1789,7 @@ s32 nvfuse_make_first_directory(struct nvfuse_superblock *sb, struct nvfuse_inod
 	dir[0].d_flag = DIR_USED;
 
 	strcpy(dir[1].d_filename, ".."); // parent dir
-	dir[1].d_ino = inode->i_ino;
+	dir[1].d_ino = inode->i_ino == sb->sb_root_ino ? inode->i_ino : inode->i_parent;
 	dir[1].d_flag = DIR_USED;
 
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
@@ -1878,6 +1901,7 @@ s32 nvfuse_mkdir(struct nvfuse_superblock *sb, const inode_t par_ino, const s8 *
 
 	new_inode = new_ictx->ictx_inode;
 	new_inode->i_type = NVFUSE_TYPE_DIRECTORY;
+	new_inode->i_parent = par_ino;
 #ifndef NVFUSE_USE_DELAYED_DIRECTORY_ALLOC
 	new_inode->i_size = CLUSTER_SIZE;
 #else
@@ -1950,6 +1974,36 @@ s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t 
 
 	sb = nvfuse_read_super(nvh);
 
+	if (!*name || !*newname || !strcmp(name, ".") || !strcmp(name, "..") ||
+		!strcmp(newname, ".") || !strcmp(newname, "..")) return -EINVAL;
+	if (nvfuse_lookup(sb, &ictx, NULL, name, par_ino)) return -ENOENT;
+	ino = ictx->ictx_inode->i_ino;
+	int source_dir = ictx->ictx_inode->i_type == NVFUSE_TYPE_DIRECTORY;
+	nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+	if (par_ino == new_par_ino && !strcmp(name, newname)) return 0;
+	if (source_dir) {
+		inode_t ancestor = new_par_ino;
+		u64 limit = (u64)sb->sb_bg_num * sb->sb_no_of_inodes_per_bg;
+		while (ancestor != sb->sb_root_ino && limit--) {
+			if (ancestor == ino) return -EINVAL;
+			ictx = nvfuse_read_inode(sb, NULL, ancestor);
+			if (!ictx) return -EIO;
+			inode_t parent = ictx->ictx_inode->i_parent;
+			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+			if (!parent || parent == ancestor) return -EIO;
+			ancestor = parent;
+		}
+		if (ancestor == ino) return -EINVAL;
+		if (ancestor != sb->sb_root_ino) return -ELOOP;
+	}
+	if (!nvfuse_lookup(sb, &ictx, NULL, newname, new_par_ino)) {
+		int target_dir = ictx->ictx_inode->i_type == NVFUSE_TYPE_DIRECTORY;
+		int same_inode = ictx->ictx_inode->i_ino == ino;
+		nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+		if (same_inode) return 0;
+		if (source_dir != target_dir) return source_dir ? -ENOTDIR : -EISDIR;
+	}
+
 	if (nvfuse_rm_direntry(sb, par_ino, name, &ino)) {
 		nvfuse_release_super(sb);
 		return -ENOENT;
@@ -2009,6 +2063,11 @@ s32 nvfuse_hardlink(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, ino
 		printf(" link: source inode doesn't exist\n");
 		return -1;
 	}
+
+	struct nvfuse_inode_ctx *source = nvfuse_read_inode(sb, NULL, direntry.d_ino);
+	int directory = source->ictx_inode->i_type == NVFUSE_TYPE_DIRECTORY;
+	nvfuse_release_inode(sb, source, NVF_CLEAN);
+	if (directory) return -EPERM;
 
 	ino = direntry.d_ino;
 
@@ -2272,61 +2331,32 @@ s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_
 
 s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf)
 {
-	struct nvfuse_dir_entry dir_entry;
-	struct nvfuse_inode_ctx *ictx;
-	struct nvfuse_inode *inode;
-	struct nvfuse_superblock *sb;
-	char filename[FNAME_SIZE];
-	s32 res = 0;
-
-	memset(stbuf, 0, sizeof(struct stat));
-
-	if (strcmp(path, "/") == 0) {
-		stbuf->st_mode = S_IFDIR | 0755;
-		stbuf->st_nlink = 2;
-	} else {
-
-		res = nvfuse_path_resolve(nvh, path, filename, &dir_entry);
-		if (res < 0)
-			return res;
-
-		if (dir_entry.d_ino == 0) {
-			printf(" %s: invalid path\n", __FUNCTION__);
-			res = -ENOENT;
-			goto RET;
-		} else {
-			sb = nvfuse_read_super(nvh);
-			if (nvfuse_lookup(sb, &ictx, &dir_entry, filename, dir_entry.d_ino) < 0) {
-				res = -ENOENT;
-				goto RET;
-			}
-
-			inode = ictx->ictx_inode;
-			stbuf->st_ino	= inode->i_ino;
-			stbuf->st_mode	= inode->i_mode;
-			stbuf->st_nlink	= inode->i_links_count;
-			stbuf->st_size	= inode->i_size;
-			stbuf->st_atime	= inode->i_atime;
-			stbuf->st_mtime	= inode->i_mtime;
-			stbuf->st_ctime	= inode->i_ctime;
-			stbuf->st_gid	= inode->i_gid;
-			stbuf->st_uid	= inode->i_uid;
-
-			if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode)) {
-				stbuf->st_rdev = old_decode_dev(inode->i_blocks[0]);
-			} else {
-				stbuf->st_rdev = new_decode_dev(inode->i_blocks[1]);
-			}
-
-			nvfuse_release_inode(sb, ictx, NVF_CLEAN);
-			nvfuse_release_super(sb);
-
-			res = 0;
-		}
-	}
-
-RET:
-	return res;
+	struct nvfuse_dir_entry entry;
+	struct nvfuse_inode_ctx *ctx;
+	char name[FNAME_SIZE];
+	int rc = nvfuse_path_resolve(nvh, path, name, &entry);
+	if (rc) return rc;
+	if (!name[0]) strcpy(name, ".");
+	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
+	rc = nvfuse_lookup(sb, &ctx, &entry, name, entry.d_ino);
+	if (rc) return rc;
+	struct nvfuse_inode *inode = ctx->ictx_inode;
+	memset(stbuf, 0, sizeof(*stbuf));
+	stbuf->st_ino = inode->i_ino;
+	stbuf->st_mode = inode->i_mode;
+	if (!(stbuf->st_mode & S_IFMT) && inode->i_type == NVFUSE_TYPE_FILE) stbuf->st_mode |= S_IFREG;
+	stbuf->st_nlink = inode->i_links_count;
+	stbuf->st_size = inode->i_size;
+	stbuf->st_atime = inode->i_atime;
+	stbuf->st_mtime = inode->i_mtime;
+	stbuf->st_ctime = inode->i_ctime;
+	stbuf->st_gid = inode->i_gid;
+	stbuf->st_uid = inode->i_uid;
+	if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode)) stbuf->st_rdev = old_decode_dev(inode->i_blocks[0]);
+	else stbuf->st_rdev = new_decode_dev(inode->i_blocks[1]);
+	nvfuse_release_inode(sb, ctx, NVF_CLEAN);
+	nvfuse_release_super(sb);
+	return 0;
 }
 
 s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf, s32 fd)

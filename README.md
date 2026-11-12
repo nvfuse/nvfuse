@@ -114,6 +114,8 @@ Metadata boundary and reclamation tests
     make local-boundary-test
     make local-limit-test
     make local-stress-test
+    make local-resilience-test
+    make local-chaos-test
 
 The C++17 boundary oracle executes the production C indirect mapper/truncator
 at the full 1024-way geometry, including physical block `0xffffffff`, and
@@ -127,6 +129,9 @@ content model, and exercises 70 near-full crash windows with recovery/reuse.
 Python runners retain JSON, JUnit and logs under `build/test-results`.
 See [the boundary matrix and measured results](docs/metadata-boundary-tests.md)
 for coverage boundaries and the distinction between model and image evidence.
+See [the six-area resilience campaign](docs/resilience-tests.md) for stored-data
+crashes, adversarial hash collisions, journal ENOMEM, owner isolation, QEMU VM
+power cuts, full directory enumeration/readback, and parent-directory recovery.
 
 Deterministic test framework
 ----------------------------

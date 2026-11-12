@@ -109,3 +109,20 @@ $(LOCAL_BUILD)/inode_dep.o: nvfuse_dep.c
 .PHONY: stress-test
 stress-test: $(LOCAL_BUILD)/mixed_model_test $(LOCAL_BUILD)/inode_space_test $(LOCAL_BUILD)/limit_test $(LOCAL_BUILD)/metadata_check
 	python3 tests/run_stress.py --build-dir $(LOCAL_BUILD)
+
+$(LOCAL_BUILD)/resilience_test: $(LOCAL_BUILD)/tests/resilience_test.o $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+-include $(LOCAL_BUILD)/tests/resilience_test.d
+
+$(LOCAL_BUILD)/directory_resilience_test: tests/directory_resilience_test.cpp $(LOCAL_BUILD)/tests/fs_model_adapter.o $(LOCAL_BUILD)/nvfuse.a tests/fs_model_adapter.h
+	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Itests $< $(filter %.o %.a,$^) -lpthread -lm -o $@
+
+$(LOCAL_BUILD)/journal_memory_test: tests/journal_memory_test.c nvfuse_journal.c include/nvfuse_journal.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< -o $@
+
+.PHONY: resilience-test chaos-test
+resilience-test: $(LOCAL_BUILD)/resilience_test $(LOCAL_BUILD)/directory_resilience_test $(LOCAL_BUILD)/journal_memory_test $(LOCAL_BUILD)/metadata_check
+	python3 tests/run_resilience.py --build-dir $(LOCAL_BUILD)
+chaos-test: $(LOCAL_BUILD)/mixed_model_test $(LOCAL_BUILD)/metadata_check
+	python3 tests/run_chaos.py --build-dir $(LOCAL_BUILD)

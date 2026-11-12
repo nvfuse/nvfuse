@@ -404,7 +404,7 @@ struct nvfuse_inode {
 	u16	i_uid;		/* Low 16 bits of Owner Uid */	//56
 	u16	i_mode;		/* File mode */ //58
 	u16	resv0;	//60
-	u32 resv1[1]; //64
+	inode_t i_parent; /* Directory parent; formerly reserved, zero on legacy images. */ //64
 	u32 i_blocks[TINDIRECT_BLOCKS + 1]; //120
 	u32 resv2[1]; // 124
 	u8	xattr[3972]; //4096
@@ -533,7 +533,9 @@ s32 nvfuse_inode_has_dirty(struct nvfuse_inode_ctx *ictx);
 s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, u32 offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset);
-s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename);
+s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
+		struct nvfuse_inode_ctx *ictx, struct nvfuse_buffer_head *held1, struct nvfuse_buffer_head *held2);
+s32 nvfuse_set_directory_parent(struct nvfuse_superblock *, struct nvfuse_inode_ctx *, inode_t);
 s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset);
 void nvfuse_dir_hash(s8 *filename, u32 *hash, u32 *hash2);
 
