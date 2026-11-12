@@ -64,10 +64,15 @@ def run(suite, args):
             "cp ~/src/nvfuse/tests/spdk/guest.sh ~/src/nvfuse-framework/guest.sh; "
             ". ~/.venvs/spdk/bin/activate; cd ~/src/nvfuse/tests/spdk; "
             "make -f Makefile.integration; make -f Makefile.integration APP=integration_framework; "
+            "make -f Makefile.integration APP=integration_fault; "
             "test -x integration_test; test -x integration_framework; "
             "git -C ~/src/spdk describe --tags --exact-match; git -C ~/src/spdk rev-parse HEAD; "
             "echo 'PASS integration built'"], input=data.getvalue(),
             marker="PASS integration built", timeout=180)
+        if args.profile == "integration-faults":
+            from .integration_faults import run as faults
+            faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases)
+            return
         for seed in args.seeds:
             name = f"integration-seed-{seed}"
             suite.command(name, ssh + [f"bash ~/src/nvfuse-framework/guest.sh integration {seed}"],
@@ -91,6 +96,9 @@ def run(suite, args):
                     f"bash ~/src/nvfuse-framework/guest.sh integration-{mode}-{phase} {args.seeds[-1]}"],
                     marker=f"PASS integration {mode}-{'create' if phase == 'prepare' else 'verify'}",
                     timeout=120)
+        if args.profile == "all":
+            from .integration_faults import run as faults
+            faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases)
     finally:
         try:
             if (vm / "qemu.pid").exists():

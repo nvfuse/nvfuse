@@ -6,7 +6,7 @@ APP ?= integration_test
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 C_SRCS = $(APP).c
-CFLAGS += -D_GNU_SOURCE -DDEBUG -DNVFUSE_FILE_BACKEND -DNVFUSE_SPDK_TRANSPORT -I$(NVFUSE_ROOT_DIR)/include
+CFLAGS += -D_GNU_SOURCE -DDEBUG -DNVFUSE_FILE_BACKEND -DNVFUSE_SPDK_TRANSPORT -DNVFUSE_NVME_TEST_HOOKS -I$(NVFUSE_ROOT_DIR)/include
 LIBS += $(NVFUSE_BUILD)/nvfuse.a $(NVFUSE_BUILD)/nvfuse_nvme_transport.o -lpthread -lm
 SPDK_LIB_LIST += $(SOCK_MODULES_LIST) nvme
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
@@ -19,4 +19,4 @@ nvfuse-core:
 
 $(NVFUSE_BUILD)/nvfuse_nvme_transport.o: $(NVFUSE_ROOT_DIR)/nvfuse_nvme_transport.c $(NVFUSE_ROOT_DIR)/include/nvfuse_nvme_transport.h
 	@mkdir -p $(NVFUSE_BUILD)
-	$(CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(SPDK_ROOT_DIR)/include -I$(NVFUSE_ROOT_DIR)/include -c $< -o $@
+	$(CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -DNVFUSE_NVME_TEST_HOOKS -I$(SPDK_ROOT_DIR)/include -I$(NVFUSE_ROOT_DIR)/include -c $< -o $@

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Only for the dedicated 2 GiB QEMU NVMe in the local development VM.
 set -euo pipefail
-case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check) ;; *) exit 2 ;; esac
+case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault) ;; *) exit 2 ;; esac
 if [[ $1 == stalled ]]; then rm -f /tmp/nvfuse-stall-go; fi
 [[ ${2:-} =~ ^[0-9]+$ ]] || exit 2
 SPDK_ROOT_DIR=${SPDK_ROOT_DIR:-$HOME/src/spdk}
@@ -43,6 +43,34 @@ sudo env PCI_ALLOWED="$BDF" DRIVER_OVERRIDE=vfio-pci HUGEMEM=512 \
 test "$(basename "$(readlink /sys/bus/pci/devices/$BDF/driver)")" = vfio-pci
 if [[ $1 == integration* ]]; then
     BIN_DIR="$HOME/src/nvfuse/tests/spdk"
+    if [[ $1 == integration-fault ]]; then
+        case ${3:-} in locate|unclean|read-eio|write-eio|stall-resume|stall-timeout|hotremove) ;; *) exit 2 ;; esac
+        [[ ${4:-} =~ ^[0-9]+$ ]] || exit 2
+        rm -f /tmp/nvfuse-fault-go
+        log="$LOG_DIR/fault-$3-seed-$2.log"
+        set +e
+        sudo prlimit --core=0 --memlock=unlimited timeout 45 "$BIN_DIR/integration_fault" \
+            "$3" "pcie:$BDF" "$2" "$4" 2>&1 | tee "$log"
+        status=${PIPESTATUS[0]}
+        set -e
+        case $3 in
+            locate|unclean|stall-resume)
+                test "$status" = 0
+                grep -q 'PASS ' "$log" ;;
+            *)
+                test "$status" = 134
+                grep -q "SUBMITTED fault $3" "$log"
+                case $3 in
+                    read-eio|write-eio)
+                        grep -q 'NVFUSE SPDK: block I/O failed: -5' "$log"
+                        grep -q "completion error op=${3%-eio} " "$log" ;;
+                    stall-timeout) grep -q 'NVFUSE SPDK: I/O timeout after 10 seconds' "$log" ;;
+                    hotremove) grep -Eq 'NVFUSE SPDK: (block I/O failed:|completion polling failed:|I/O timeout)' "$log" ;;
+                esac
+                echo "PASS fault $3 expected SIGABRT" ;;
+        esac
+        exit 0
+    fi
     stage=0
     run_fs() {
         local binary=$1 mode=$2

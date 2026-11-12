@@ -130,7 +130,33 @@ file contents and metadata, followed by deletion and another remount. Each
 device close reports actual NVMe read, write, and flush command counts.
 This is not a migration of the legacy multi-process bdev/event reactor.
 
-`--profile all` runs local, raw SPDK, and filesystem integration suites.
+To inject failures while NVFUSE is mounted, use:
+
+    python3 tests/run_framework.py --profile integration-faults --vm-dir build/vm/rocky9
+
+Use `--fault-cases hotremove` to repeat one case. The removal test checks
+QEMU's PCI inventory before and after unplug, rather than accepting the
+`device_del` acknowledgement alone.
+
+This suite discovers the physical LBA of an existing file's first data block,
+then injects sector-specific read/write EIO through QEMU's blkdebug layer.
+Test-only barriers coordinate actual NVMe command submission with QEMU read
+throttling and device removal. The cases cover a stalled read resumed before
+the deadline (followed by full data comparison and reboot), a read exceeding
+the 10-second transport deadline, and removal with a submitted read pending.
+The synchronous NVFUSE transport does not poll SPDK's hotplug scanner; unplug
+can therefore terminate through the I/O deadline rather than an immediate
+removal notification.
+The current filesystem aborts on block-I/O failure. Tests require SIGABRT and
+the corresponding transport error, then verify that a fresh process rejects
+the on-disk mounted state after VM restart. These are failure-detection tests;
+automatic recovery of that filesystem is explicitly reported as skipped.
+Faulted disks are retained as compact qcow2 images in the report directory
+before another test reformats the disposable disk. A final format and data
+round trip check that the device and environment can be reused.
+
+`--profile all` runs local, raw SPDK, filesystem integration, and filesystem
+fault suites.
 `tests/spdk/start_vm.sh` starts the existing
 VM images with HVF, SMMUv3, QMP, a dedicated hotpluggable PCIe port, and a
 blkdebug-backed NVMe. The SPDK suite verifies the exact QEMU vendor/device,
@@ -146,20 +172,20 @@ checkout are local prerequisites, not included in this repository.
 | Queue depth and multiple queues | Synchronous queue contract | 1/2/4 queues, depths 1/8/32/64, actual completion counts |
 | Reopen and reconnect | Fresh filesystem processes | Ten fresh SPDK processes |
 | Capacity and invalid requests | Range rejection and fail-fast short reads | First/last LBA and invalid read/write ranges |
-| I/O failures | Fail-fast block-I/O contract | One-shot EIO, stalled I/O timeout/resume, removal with outstanding I/O |
-| Recovery | Clean remount | Transient-error retry and VM restart after removal |
+| I/O failures | Fail-fast block-I/O contract | Raw NVMe failure handling; NVFUSE read/write EIO, timeout/resume, and removal (`integration-faults`) |
+| Recovery | Clean remount | Raw transient-error retry; NVFUSE clean resume or rejection of unclean images after reboot |
 | NVFUSE metadata lifecycle | Normal and metadata-only images | Both formats through NVMe; VM restart persistence (`integration`) |
 
 The QEMU ARM platform lacks interrupt remapping. Inside this isolated VM only,
 the test temporarily enables VFIO's IRQ compatibility setting while retaining
 DMA IOMMU protection; it restores the setting, hugepage reservation, and Linux
 driver on exit. A timed-out command is resumed to verify data, and an unplugged
-controller is recovered by restarting the VM. Fault injection and multiple
-queues currently exercise the raw NVMe test program, separately from the
-NVFUSE filesystem integration. Crash-consistent filesystem recovery, hot
+controller is recovered by restarting the VM. Multiple queues currently
+exercise the raw NVMe test program; the NVFUSE transport remains synchronous.
+Crash-consistent filesystem recovery, hot
 re-add without reboot, real SSD durability, and parallel NVFUSE I/O are not
 claimed. Filesystem integration is reported as skipped unless selected with
-`--profile integration` or `--profile all`.
+`--profile integration`, `--profile integration-faults`, or `--profile all`.
 
 Prerequisites
 =============

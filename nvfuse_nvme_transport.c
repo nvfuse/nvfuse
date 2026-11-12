@@ -12,12 +12,21 @@ struct device {
     unsigned char *bounce;
     uint64_t size, reads, writes, flushes;
 };
-struct result { int done, error; };
+struct result { int done, error; unsigned sct, sc; };
 static int env_ready;
+#ifdef NVFUSE_NVME_TEST_HOOKS
+static void (*io_observer)(int, int, uint64_t);
+void nvfuse_nvme_test_observer(void (*observer)(int, int, uint64_t))
+{
+    io_observer = observer;
+}
+#endif
 static void complete(void *arg, const struct spdk_nvme_cpl *cpl)
 {
     struct result *r = arg;
     r->error = spdk_nvme_cpl_is_error(cpl);
+    r->sct = cpl->status.sct;
+    r->sc = cpl->status.sc;
     r->done = 1;
 }
 static int wait_for(struct device *d, struct result *r)
@@ -28,7 +37,8 @@ static int wait_for(struct device *d, struct result *r)
         if (rc < 0 || spdk_get_ticks() > until) {
             /* Outstanding DMA cannot outlive the bounce buffer. The legacy
              * filesystem also cannot unwind partial block-I/O failures. */
-            fprintf(stderr, "NVFUSE SPDK: fatal completion failure/timeout\n");
+            if (rc < 0) fprintf(stderr, "NVFUSE SPDK: completion polling failed: %d\n", rc);
+            else fprintf(stderr, "NVFUSE SPDK: I/O timeout after 10 seconds\n");
             abort();
         }
     }
@@ -88,11 +98,20 @@ fail:
 static int io(struct device *d, uint64_t lba, uint32_t blocks, int write_op)
 {
     struct result r = {0};
+#ifdef NVFUSE_NVME_TEST_HOOKS
+    if (io_observer) io_observer(0, write_op, lba);
+#endif
     int rc = write_op ? spdk_nvme_ns_cmd_write(d->ns, d->qpair, d->bounce, lba, blocks, complete, &r, 0)
                       : spdk_nvme_ns_cmd_read(d->ns, d->qpair, d->bounce, lba, blocks, complete, &r, 0);
     if (rc) return rc;
     if (write_op) d->writes++; else d->reads++;
-    return wait_for(d, &r);
+#ifdef NVFUSE_NVME_TEST_HOOKS
+    if (io_observer) io_observer(1, write_op, lba);
+#endif
+    rc = wait_for(d, &r);
+    if (rc) fprintf(stderr, "NVFUSE SPDK: completion error op=%s lba=%" PRIu64 " sct=%u sc=%u\n",
+                    write_op ? "write" : "read", lba, r.sct, r.sc);
+    return rc;
 }
 int nvfuse_nvme_transfer(void *arg, uint64_t offset, size_t bytes, void *buffer, int write_op)
 {

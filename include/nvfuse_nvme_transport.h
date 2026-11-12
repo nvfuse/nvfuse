@@ -9,6 +9,10 @@ int nvfuse_nvme_open(const char *bdf, void **device, uint64_t *size);
 int nvfuse_nvme_transfer(void *device, uint64_t offset, size_t bytes, void *buffer, int write_op);
 int nvfuse_nvme_flush(void *device);
 int nvfuse_nvme_close(void *device);
+#ifdef NVFUSE_NVME_TEST_HOOKS
+/* Test binaries only: observe a real command immediately before/after submit. */
+void nvfuse_nvme_test_observer(void (*observer)(int submitted, int write_op, uint64_t lba));
+#endif
 struct nvfuse_handle;
 /* Experimental QEMU-only API. format=1 explicitly reformats the logical
  * filesystem area on the dedicated NVFUSEDEV0001 device. No physical SSDs. */

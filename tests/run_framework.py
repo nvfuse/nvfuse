@@ -101,27 +101,30 @@ def local(suite, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("local", "spdk", "integration", "all"), default="local")
+    parser.add_argument("--profile", choices=("local", "spdk", "integration", "integration-faults", "all"), default="local")
     parser.add_argument("--binary", default="build/local/framework_test")
     parser.add_argument("--seeds", type=lambda s: [int(v, 0) for v in s.split(",")], default=[1, 0xc0ffee])
     parser.add_argument("--report-dir", type=Path,
                         default=Path(os.environ.get("NVFUSE_TEST_REPORT_ROOT", "build/test-results")) /
                         datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
     parser.add_argument("--vm-dir", type=Path, default=Path("build/vm/rocky9"))
+    fault_cases = ("read-eio", "write-eio", "stall-resume", "stall-timeout", "hotremove")
+    parser.add_argument("--fault-cases", nargs="+", choices=fault_cases, default=fault_cases)
     parser.add_argument("--keep-images", action="store_true")
     args = parser.parse_args()
     if not args.seeds or any(not 0 < s <= 0xffffffff for s in args.seeds):
         parser.error("seeds must be nonzero 32-bit integers")
     suite = Suite(args.report_dir)
     (suite.root / "run.json").write_text(json.dumps(dict(profile=args.profile, seeds=args.seeds,
-        platform=sys.platform, python=sys.version, started=datetime.datetime.now().isoformat()), indent=2))
+        platform=sys.platform, python=sys.version, fault_cases=args.fault_cases,
+        started=datetime.datetime.now().isoformat()), indent=2))
     try:
         if args.profile in ("local", "all"):
             local(suite, args)
         if args.profile in ("spdk", "all"):
             from spdk.vm_suite import run as spdk
             spdk(suite, args)
-        if args.profile in ("integration", "all"):
+        if args.profile in ("integration", "integration-faults", "all"):
             from spdk.integration_suite import run as integration
             integration(suite, args)
         else:
