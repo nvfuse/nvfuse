@@ -2,6 +2,10 @@
 
 Date: 2026-11-12
 
+> Historical synchronous reference evaluation. The current implementation and
+> remaining limitations are recorded in [roadmap-validation.md](roadmap-validation.md).
+> In particular, the exclusions below describe the earlier reference revision.
+
 Implementation: working-tree changes based on `b5c1d85`; no release or production-readiness claim.
 
 ## Outcome

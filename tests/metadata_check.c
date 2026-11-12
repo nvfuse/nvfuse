@@ -58,6 +58,9 @@ int main(int argc,char **argv) {
     allocated=calloc(blocks,1); live=calloc(inodes,1); owners=calloc(blocks,sizeof(*owners));
     references=calloc(inodes,sizeof(*references)); nodes=calloc(inodes,sizeof(*nodes));
     REQUIRE(allocated && live && owners && references && nodes);
+    unsigned char anchor[NVJ_BLOCK];read_at(anchor,sizeof(anchor),(uint64_t)NVJ_START*NVJ_BLOCK);
+    unsigned journal_start=(unsigned)anchor[40]|(unsigned)anchor[41]<<8|(unsigned)anchor[42]<<16|(unsigned)anchor[43]<<24;
+    REQUIRE(journal_start==NVJ_START || journal_start==NVJ_GROUP_BLOCKS-8192u || journal_start==NVJ_GROUP_BLOCKS-16384u);
     uint64_t free_blocks=0,free_inodes=0;
     for(unsigned bg=0;bg<groups;bg++) {
         struct nvfuse_bg_descriptor bd; unsigned char db[NVJ_BLOCK],ib[NVJ_BLOCK];
@@ -69,7 +72,7 @@ int main(int argc,char **argv) {
         unsigned fb=0,fi=0;
         for(unsigned k=0;k<bd.bd_max_blocks;k++) {
             unsigned p=bg*NVJ_GROUP_BLOCKS+k; allocated[p]=!!(db[k/8]&(1u<<(k%8))); fb+=!allocated[p];
-            if(k<4100 || (!bg && k>=NVJ_START)) { REQUIRE(allocated[p]); owners[p]=UINT32_MAX; }
+            if(k<4100 || (!bg && k>=journal_start)) { REQUIRE(allocated[p]); owners[p]=UINT32_MAX; }
         }
         for(unsigned k=0;k<bd.bd_max_inodes;k++) {
             unsigned ino=bg*NVFUSE_INODE_PER_BG+k; live[ino]=!!(ib[k/8]&(1u<<(k%8))); fi+=!live[ino];

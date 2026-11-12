@@ -656,7 +656,7 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 		u32 *direct_map;
 
 		direct_map = spdk_dma_zmalloc(sizeof(u32) * count, 0, NULL);
-		assert(direct_map != NULL);
+		if(!direct_map) { err=-ENOMEM; goto cleanup; }
 
 		err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, direct_map,
 					  offsets + (partial - chain), partial);

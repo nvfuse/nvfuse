@@ -90,16 +90,42 @@ int main(int argc,char **argv) {
         contents(h,before?"/old":"/new",'A');
         CHECK(nvfuse_getattr(h,before?"/new":"/old",&st)<0);
     } else if(!strcmp(argv[1],"functional")) {
+        /* Expected lookup misses are observations, not transaction failures. */
+        struct stat lookup_st;
+        CHECK(nvfuse_tx_begin(h,NVFUSE_TX_DATA,64)==0);
+        CHECK(nvfuse_getattr(h,"/missing",&lookup_st)==-ENOENT);
+        CHECK(nvfuse_openfile_path(h,"/missing",O_RDONLY,0)==-ENOENT);
+        CHECK(nvfuse_opendir(h,"/missing")==-ENOENT);
+        CHECK(nvfuse_tx_status(h)==NVFUSE_TX_ACTIVE);
+        put(h,"/after-miss",'Q'); CHECK(nvfuse_tx_commit(h)==0);
+        contents(h,"/after-miss",'Q'); CHECK(!nvfuse_unlink(h,"/after-miss"));
+        /* A failed mutation still makes the transaction abort-only. */
+        CHECK(nvfuse_tx_begin(h,NVFUSE_TX_DATA,64)==0);
+        CHECK(nvfuse_unlink(h,"/missing")==-ENOENT);
+        CHECK(nvfuse_tx_status(h)==NVFUSE_TX_ABORT_ONLY);
+        CHECK(nvfuse_tx_commit(h)==-ENOENT); CHECK(nvfuse_tx_abort(h)==0);
+        /* Repeated pure lookups must not issue durability barriers. */
+        struct nvj_stats before_lookup,after_lookup;
+        CHECK(!nvfuse_tx_get_stats(h,&before_lookup));
+        for(unsigned i=0;i<100;i++) CHECK(!nvfuse_getattr(h,"/old",&lookup_st));
+        CHECK(!nvfuse_tx_get_stats(h,&after_lookup));
+        CHECK(before_lookup.flushes==after_lookup.flushes);
         pthread_t thread; CHECK(!pthread_create(&thread,NULL,wrong_thread,h)); CHECK(!pthread_join(thread,NULL));
         int busy=nvfuse_openfile_path(h,"/old",O_RDONLY,0); CHECK(busy>=0);
         CHECK(nvfuse_tx_begin(h,NVFUSE_TX_METADATA,0)==-EBUSY); CHECK(!nvfuse_closefile(h,busy));
         busy=nvfuse_openfile_path(h,"/old",O_RDWR,0); CHECK(busy>=0);
-        CHECK(nvfuse_unlink(h,"/old")==-EBUSY); CHECK(!nvfuse_closefile(h,busy));
+        CHECK(!nvfuse_unlink(h,"/old"));
+        char unlinked[8192]; CHECK(nvfuse_readfile(h,busy,unlinked,sizeof(unlinked),0)==sizeof(unlinked));
+        for(unsigned i=0;i<sizeof(unlinked);i++) CHECK(unlinked[i]=='A');
+        CHECK(nvfuse_writefile(h,busy,"Z",1,0)==1);
+        CHECK(!nvfuse_closefile(h,busy)); put(h,"/old",'A');
         put(h,"/replace",'R');
         busy=nvfuse_openfile_path(h,"/replace",O_RDWR,0); CHECK(busy>=0);
-        CHECK(nvfuse_rename_path(h,"/old","/replace")==-EBUSY);
-        CHECK(!nvfuse_closefile(h,busy)); contents(h,"/old",'A'); contents(h,"/replace",'R');
-        CHECK(!nvfuse_unlink(h,"/replace"));
+        CHECK(!nvfuse_rename_path(h,"/old","/replace"));
+        CHECK(nvfuse_readfile(h,busy,unlinked,sizeof(unlinked),0)==sizeof(unlinked));
+        for(unsigned i=0;i<sizeof(unlinked);i++) CHECK(unlinked[i]=='R');
+        contents(h,"/replace",'A'); CHECK(!nvfuse_closefile(h,busy));
+        CHECK(!nvfuse_unlink(h,"/replace")); put(h,"/old",'A');
         CHECK(nvfuse_tx_begin(h,99,0)==-EINVAL);
         CHECK(nvfuse_tx_begin(h,NVFUSE_TX_DATA,NVJ_CAPACITY+1)==-EINVAL);
         CHECK(nvfuse_tx_begin(h,NVFUSE_TX_DATA,64)==0);

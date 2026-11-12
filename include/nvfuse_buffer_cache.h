@@ -188,6 +188,7 @@ void nvfuse_move_buffer_list(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 /* move buffer cache (bc) to another list with no spinlock */
 void nvfuse_move_buffer_list_nolock(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc,
 							 s32 buffer_type, s32 tail);
+void nvfuse_invalidate_inode_suffix(struct nvfuse_superblock *, inode_t, u32);
 void nvfuse_move_bc_to_unused_list(struct nvfuse_superblock *sb, u64 key);
 /* return the number of dirty buffer caches (e.g., 4K dirty buffers) */
 s32 nvfuse_get_dirty_count(struct nvfuse_superblock *sb);

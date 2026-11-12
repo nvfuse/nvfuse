@@ -13,7 +13,7 @@ s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path) {
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_opendir_impl(nvh, path);
-    return nvfuse_tx_leave(h,result);
+    return nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_openfile_impl(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename, s32 flags,
 		    s32 mode);
@@ -22,21 +22,21 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
     struct nvfuse_handle *h=sb->sb_nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_openfile_impl(sb, par_ino, filename, flags, mode);
-    return nvfuse_tx_leave(h,result);
+    return (flags&(O_CREAT|O_TRUNC))?nvfuse_tx_leave(h,result):nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_openfile_path_impl(struct nvfuse_handle *nvh, const char *path, int flags, int mode);
 s32 nvfuse_openfile_path(struct nvfuse_handle *nvh, const char *path, int flags, int mode) {
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_openfile_path_impl(nvh, path, flags, mode);
-    return nvfuse_tx_leave(h,result);
+    return (flags&(O_CREAT|O_TRUNC))?nvfuse_tx_leave(h,result):nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_openfile_ino_impl(struct nvfuse_superblock *sb, inode_t ino, s32 flags);
 s32 nvfuse_openfile_ino(struct nvfuse_superblock *sb, inode_t ino, s32 flags) {
     struct nvfuse_handle *h=sb->sb_nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_openfile_ino_impl(sb, ino, flags);
-    return nvfuse_tx_leave(h,result);
+    return (flags&(O_CREAT|O_TRUNC))?nvfuse_tx_leave(h,result):nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_closefile_impl(struct nvfuse_handle *nvh, s32 fid);
 s32 nvfuse_closefile(struct nvfuse_handle *nvh, s32 fid) {
@@ -86,8 +86,14 @@ s32 nvfuse_writefile(struct nvfuse_handle *nvh, u32 fid, const s8 *user_buf, u32
         return nvfuse_tx_leave(h,-EBADF);
     if(woffset<0 || woffset>=MAX_FILE_SIZE || count>=MAX_FILE_SIZE-woffset)
         return nvfuse_tx_leave(h,-EINVAL);
-    if(woffset>h->nvh_sb.sb_file_table[fid].size)
+    if(nvj_version(h->nvh_target->journal)<2 && woffset>h->nvh_sb.sb_file_table[fid].size)
         return nvfuse_tx_leave(h,-EOPNOTSUPP);
+    /* Reject an impossible DATA write before mutating mappings or descriptors.
+     * Metadata shares the same budget, so even this payload lower bound may
+     * leave a smaller actual usable range. Identical-image elision is optional. */
+    if(nvj_full_data(h->nvh_target->journal) && count &&
+       ((uint64_t)(woffset&(CLUSTER_SIZE-1))+count+CLUSTER_SIZE-1)/CLUSTER_SIZE>=nvj_budget(h->nvh_target->journal))
+        return nvfuse_tx_leave(h,-E2BIG);
     /* Legacy eviction can flush while holding the cache lock. Drain between
      * bounded chunks outside that lock, keeping one outer transaction. */
     unsigned done=0;
@@ -247,14 +253,14 @@ s32 nvfuse_readlink_ino(struct nvfuse_handle *nvh, inode_t ino, char *buf, size_
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_readlink_ino_impl(nvh, ino, buf, size);
-    return nvfuse_tx_leave(h,result);
+    return nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_getattr_impl(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf);
 s32 nvfuse_getattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf) {
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_getattr_impl(nvh, path, stbuf);
-    return nvfuse_tx_leave(h,result);
+    return nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_fgetattr_impl(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf, s32 fd);
 s32 nvfuse_fgetattr(struct nvfuse_handle *nvh, const char *path, struct stat *stbuf, s32 fd) {
@@ -270,7 +276,7 @@ s32 nvfuse_access(struct nvfuse_handle *nvh, const char *path, int mask) {
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_access_impl(nvh, path, mask);
-    return nvfuse_tx_leave(h,result);
+    return nvfuse_tx_leave_lookup(h,result);
 }
 #endif
 extern s32 nvfuse_readlink_impl(struct nvfuse_handle *nvh, const char *path, char *buf, size_t size);
@@ -278,14 +284,14 @@ s32 nvfuse_readlink(struct nvfuse_handle *nvh, const char *path, char *buf, size
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_readlink_impl(nvh, path, buf, size);
-    return nvfuse_tx_leave(h,result);
+    return nvfuse_tx_leave_lookup(h,result);
 }
 extern s32 nvfuse_statvfs_impl(struct nvfuse_handle *nvh, const char *path, struct statvfs *buf);
 s32 nvfuse_statvfs(struct nvfuse_handle *nvh, const char *path, struct statvfs *buf) {
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
     int result=nvfuse_statvfs_impl(nvh, path, buf);
-    return nvfuse_tx_leave(h,result);
+    return nvfuse_tx_leave_lookup(h,result);
 }
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 extern s32 nvfuse_chmod_path_impl(struct nvfuse_handle *nvh, const char *path, mode_t mode);
@@ -349,7 +355,7 @@ extern s32 nvfuse_fallocate_impl(struct nvfuse_handle *nvh, const char *path, s6
 s32 nvfuse_fallocate(struct nvfuse_handle *nvh, const char *path, s64 start, s64 length) {
     struct nvfuse_handle *h=nvh;
     int rc=nvfuse_tx_enter(h); if(rc) return rc;
-    if(h->nvh_target->journal) return nvfuse_tx_leave(h,-EOPNOTSUPP);
+    if(h->nvh_target->journal) return nvfuse_tx_leave(h,nvfuse_allocate_range(h,path,start,length));
     int result=nvfuse_fallocate_impl(nvh, path, start, length);
     return nvfuse_tx_leave(h,result);
 }

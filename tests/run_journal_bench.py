@@ -8,13 +8,14 @@ import subprocess
 import sys
 
 binary = str(Path(sys.argv[1]).resolve())
+async_checkpoint = len(sys.argv)>2 and sys.argv[2]=='--async'
 root = Path('build/test-results') / ('journal-bench-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
 root.mkdir(parents=True)
 results = []
 for mode, batch in [(0,1),(1,1),(1,8),(1,32),(2,1),(2,8),(2,32)]:
     for repeat in range(3):
         image = root / f'{mode}-{batch}-{repeat}.img'
-        run = subprocess.run([binary,str(image),str(mode),str(batch),'1024'],capture_output=True,text=True,timeout=120)
+        run = subprocess.run([binary,str(image),str(mode),str(batch),'1024',str(int(async_checkpoint))],capture_output=True,text=True,timeout=120)
         (root / f'{image.stem}.log').write_text(run.stdout + run.stderr)
         if run.returncode:
             raise RuntimeError(f'benchmark failed; evidence: {root}')

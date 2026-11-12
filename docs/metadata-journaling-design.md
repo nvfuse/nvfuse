@@ -2,19 +2,19 @@
 
 Date: 2026-11-12
 
-Status: Synchronous reference implementation for the standalone file and SPDK/NVMe backends. See [validation and measurements](journaling-evaluation.md) for tested behavior and remaining limits.
+Status: Single-writer implementation with optional file-backend background checkpointing for the standalone file and SPDK/NVMe backends. See [validation and measurements](journaling-evaluation.md) for tested behavior and remaining limits.
 
 ## Purpose and boundaries
 
 The filesystem automatically protects its own metadata. Applications do not need a transaction API to recover a supported filesystem operation after an abrupt shutdown. The optional [user TX API](user-transactions-design.md) groups several operations and can additionally protect regular-file contents.
 
-The implementation uses full-block physical redo, one writer and one outstanding transaction, with synchronous checkpointing. Uncommitted metadata stays in an in-memory overlay. A durable commit authorizes replay; checkpointing copies protected images to their home addresses. A home address is the normal block location outside the journal.
+The implementation uses full-block physical redo, one writer and one outstanding transaction, with synchronous checkpointing by default. Optional background checkpointing retains exclusive ownership until retirement. Uncommitted metadata stays in an in-memory overlay. A durable commit authorizes replay; checkpointing copies protected images to their home addresses. A home address is the normal block location outside the journal.
 
 Ordinary buffered operations use automatic metadata transactions. Existing regular-file overwrites can survive an aborted metadata transaction. DATA mode adds those bytes to the protected set. This distinction is independent of the requirement to preserve allocation and namespace consistency.
 
 ## Whole disk layout
 
-Each block is 4 KiB; each group is 128 MiB. New standalone images reserve a filesystem-wide 16 MiB journal at the end of BG0. The formatter marks every journal block allocated and subtracts it from group and global free counts. Other group boundaries and fixed metadata offsets are unchanged.
+Each block is 4 KiB; each group is 128 MiB. New standalone images reserve a filesystem-wide journal at the end of BG0: 16 MiB by default, optionally 32/64 MiB on new version-2 file images. The diagram shows the default. The formatter marks every journal block allocated and subtracts it from group and global free counts. Other group boundaries and fixed metadata offsets are unchanged.
 
 ```mermaid
 flowchart TB
@@ -45,19 +45,19 @@ flowchart LR
     A["+0: stable anchor"] --> C["+1,+2: progress controls"] --> D["+3..+18: descriptors"] --> P["+19..+4093: full block images"] --> K["+4094,+4095: commit certificates"]
 ```
 
-All offsets in this figure are relative to journal start. The extent is fixed at 4096 blocks. The maximum protected payload is **4075 distinct blocks**, including metadata, or 16,691,200 bytes. File-data capacity is smaller because metadata consumes slots too.
+All offsets in this figure are relative to journal start. The default extent is 4096 blocks; [larger journal geometry](large-transactions-design.md) defines the optional layouts. The maximum protected payload is **4075 distinct blocks**, including metadata, or 16,691,200 bytes. File-data capacity is smaller because metadata consumes slots too.
 
 | Structure | Fields and validation |
 | --- | --- |
-| Stable anchor | Magic, version 1, test-format flag, volume byte size, random 128-bit UUID, journal extent, CRC32C |
+| Stable anchor | Magic, version 1 (legacy) or 2 (new), test-format flag, volume byte size, random 128-bit UUID, journal extent, CRC32C |
 | Progress control, two copies | Magic, transaction ID, UUID, PREPARED or RETIRED, CRC32C |
-| Descriptor area, fixed 16 blocks | Magic, transaction ID, UUID, image count, DATA-mode flag; 16-byte entries with home block, metadata/data kind, payload CRC32C |
+| Descriptor area, 16/32/64 blocks | Magic, transaction ID, UUID, image count, DATA-mode flag; 16-byte entries with home block, metadata/data kind, payload CRC32C |
 | Payload | Complete final 4 KiB images, one per distinct home block |
 | Commit certificate, two copies | Magic, transaction ID, UUID, image count, CRC32C of the entire descriptor area, DATA-mode flag, certificate CRC32C |
 
 The anchor is published and flushed last during formatting. UUID binding rejects stale records from previous formats. Transaction IDs increase without wraparound. Both control copies must be retired before a later transaction can overwrite the shared payload area.
 
-The fixed descriptor area and bitwise CRC32C prioritize a small reference implementation; they have measurable overhead on small transactions. A compact descriptor format or accelerated checksum requires further validation.
+Descriptor size follows journal geometry. CRC32C uses an immutable byte lookup table with the same reflected polynomial and initial/final XOR as the original bitwise implementation. Version-1 images remain readable; there is no automatic in-place upgrade. New version-2 images also implement [persistent cleanup](persistent-cleanup-design.md) and [bounded durable TX receipts](transaction-outcomes-design.md). The receipt page is the reserved inode-0 table slot; orphan/cleanup links use reserved inode words. Old version-1 binaries reject version 2.
 
 ## Runtime and persistence ordering
 
@@ -190,3 +190,7 @@ materialized `..` together. Legacy directory parents are backfilled when reached
 through their real parent's named entry. See [the parent and enumeration
 regressions](resilience-tests.md#parent-directory-fix-and-enumeration-verification)
 for compatibility boundaries and crash evidence.
+
+## Current extensions
+
+See [the development roadmap](development-roadmap.md) for implementation and validation status, [checkpoint ownership](checkpoint-concurrency-design.md) for queues and asynchronous completion, and [larger transactions](large-transactions-design.md) for resource and COW limits. FS metadata transactions remain automatic and independent of user TX API use.

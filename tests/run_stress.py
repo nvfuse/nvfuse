@@ -15,12 +15,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', default='build/local')
     parser.add_argument('--seeds', nargs='+', type=int, default=[1, 42, 0xc0ffee])
+    parser.add_argument('--verify-every',type=int,default=1)
+    parser.add_argument('--remount-every',type=int,default=100)
+    parser.add_argument('--command-timeout',type=int,default=240)
     parser.add_argument('--rounds', type=int, default=3000)
     parser.add_argument('--sections', nargs='+', choices=['mixed', 'inodes', 'crash'], default=['mixed', 'inodes', 'crash'])
     parser.add_argument('--report-dir', type=Path, default=Path(os.environ.get('NVFUSE_TEST_REPORT_ROOT', 'build/test-results')) /
                         ('stress-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')))
     args = parser.parse_args()
-    if args.rounds < 1 or any(s <= 0 or s > 0xffffffff for s in args.seeds):
+    if min(args.rounds,args.verify_every,args.remount_every,args.command_timeout)<1 or any(s <= 0 or s > 0xffffffff for s in args.seeds):
         parser.error('rounds must be positive and seeds must be nonzero uint32 values')
     suite = Suite(args.report_dir)
     build = Path(args.build_dir).resolve()
@@ -30,7 +33,7 @@ def main():
     (suite.root / 'run.json').write_text(json.dumps(vars(args), default=str, indent=2) + '\n')
 
     def command(name, argv, marker='PASS ', expected=0, timeout=240):
-        suite.command(name, list(map(str, argv)), marker=marker, expected=expected, timeout=timeout)
+        suite.command(name, list(map(str, argv)), marker=marker, expected=expected, timeout=max(timeout,args.command_timeout))
         return (suite.root / (name + '.log')).read_text(errors='replace')
 
     def raw(name, image):
@@ -49,7 +52,7 @@ def main():
                 for meta in (0, 1):
                     name = f'mixed-{seed}-{meta}'
                     image = images / (name + '.img')
-                    command(name, [build / 'mixed_model_test', image, seed, args.rounds, meta], marker='PASS mixed namespace')
+                    command(name, [build / 'mixed_model_test', image, seed, args.rounds, meta,args.verify_every,args.remount_every], marker='PASS mixed namespace')
                     raw(name + '-raw', image)
                     image.unlink()
         if 'crash' in args.sections:

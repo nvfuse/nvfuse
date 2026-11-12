@@ -9,7 +9,7 @@ SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
  nvfuse_gettimeofday.c nvfuse_bp_tree.c nvfuse_dirhash.c nvfuse_misc.c \
  nvfuse_mkfs.c nvfuse_malloc.c nvfuse_indirect.c nvfuse_api.c nvfuse_aio.c \
  rbtree.c nvfuse_dep.c nvfuse_ipc_ring.c nvfuse_control_plane.c nvfuse_xattr.c \
- nvfuse_portable.c nvfuse_file.c nvfuse_journal.c nvfuse_tx.c nvfuse_tx_wrappers.c
+ nvfuse_portable.c nvfuse_file.c nvfuse_journal.c nvfuse_tx.c nvfuse_tx_wrappers.c nvfuse_orphan.c nvfuse_xattr_journal.c nvfuse_resize.c nvfuse_receipt.c nvfuse_direct.c nvfuse_queue.c
 OBJECTS = $(SOURCES:%.c=$(LOCAL_BUILD)/%.o)
 .DEFAULT_GOAL := all
 .PHONY: all test framework-test clean
@@ -18,7 +18,7 @@ $(LOCAL_BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 # Keep strict warnings for the new backend and its executable.
-$(LOCAL_BUILD)/nvfuse_journal.o $(LOCAL_BUILD)/nvfuse_tx.o $(LOCAL_BUILD)/nvfuse_tx_wrappers.o $(LOCAL_BUILD)/nvfuse_portable.o $(LOCAL_BUILD)/nvfuse_file.o $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/tests/framework_test.o $(LOCAL_BUILD)/tests/limit_test.o $(LOCAL_BUILD)/tests/metadata_check.o $(LOCAL_BUILD)/tests/indirect_adapter.o $(LOCAL_BUILD)/tests/fs_model_adapter.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
+$(LOCAL_BUILD)/nvfuse_journal.o $(LOCAL_BUILD)/nvfuse_tx.o $(LOCAL_BUILD)/nvfuse_orphan.o $(LOCAL_BUILD)/nvfuse_xattr_journal.o $(LOCAL_BUILD)/nvfuse_resize.o $(LOCAL_BUILD)/nvfuse_receipt.o $(LOCAL_BUILD)/nvfuse_direct.o $(LOCAL_BUILD)/nvfuse_queue.o $(LOCAL_BUILD)/nvfuse_tx_wrappers.o $(LOCAL_BUILD)/nvfuse_portable.o $(LOCAL_BUILD)/nvfuse_file.o $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/tests/framework_test.o $(LOCAL_BUILD)/tests/limit_test.o $(LOCAL_BUILD)/tests/metadata_check.o $(LOCAL_BUILD)/tests/indirect_adapter.o $(LOCAL_BUILD)/tests/fs_model_adapter.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
 $(LOCAL_BUILD)/nvfuse.a: $(OBJECTS)
 	$(AR) rcs $@ $^
 $(LOCAL_BUILD)/local_test: $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/nvfuse.a
@@ -126,3 +126,19 @@ resilience-test: $(LOCAL_BUILD)/resilience_test $(LOCAL_BUILD)/directory_resilie
 	python3 tests/run_resilience.py --build-dir $(LOCAL_BUILD)
 chaos-test: $(LOCAL_BUILD)/mixed_model_test $(LOCAL_BUILD)/metadata_check
 	python3 tests/run_chaos.py --build-dir $(LOCAL_BUILD)
+
+$(LOCAL_BUILD)/roadmap_test: $(LOCAL_BUILD)/tests/roadmap_test.o $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+-include $(LOCAL_BUILD)/tests/roadmap_test.d
+.PHONY: roadmap-test
+roadmap-test: $(LOCAL_BUILD)/queue_test $(LOCAL_BUILD)/journal_async_test $(LOCAL_BUILD)/roadmap_test $(LOCAL_BUILD)/metadata_check
+	$(LOCAL_BUILD)/journal_async_test
+	python3 tests/run_roadmap.py --build-dir $(LOCAL_BUILD)
+
+$(LOCAL_BUILD)/journal_async_test: tests/journal_async_test.c nvfuse_journal.c include/nvfuse_journal.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_async_test.c nvfuse_journal.c -lpthread -o $@
+
+$(LOCAL_BUILD)/queue_test: $(LOCAL_BUILD)/tests/queue_test.o $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+-include $(LOCAL_BUILD)/tests/queue_test.d

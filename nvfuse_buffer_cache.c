@@ -487,6 +487,26 @@ void nvfuse_move_bc_to_unused_list(struct nvfuse_superblock *sb, u64 key) {
 	SPINLOCK_UNLOCK(&sb->sb_bm->bm_lock);
 }
 
+/* Sparse truncation visits cached buffers, never the logical hole length. */
+void nvfuse_invalidate_inode_suffix(struct nvfuse_superblock *sb,inode_t ino,u32 first) {
+    struct nvfuse_buffer_manager *bm=sb->sb_bm;
+    SPINLOCK_LOCK(&bm->bm_lock);
+    for(unsigned type=0;type<BUFFER_TYPE_NUM;type++) {
+        if(type==BUFFER_TYPE_UNUSED) continue;
+        struct list_head *ptr,*tmp;
+        list_for_each_safe(ptr,tmp,&bm->bm_list[type]) {
+            struct nvfuse_buffer_cache *bc=list_entry(ptr,struct nvfuse_buffer_cache,bc_list);
+            if(bc->bc_ino!=ino || bc->bc_lbno<first) continue;
+            SPINLOCK_LOCK(&bc->bc_lock);
+            nvfuse_remove_bhs_in_bc(sb,bc);
+            bc->bc_load=bc->bc_pno=bc->bc_dirty=0; rte_atomic32_init(&bc->bc_ref);
+            SPINLOCK_UNLOCK(&bc->bc_lock);
+            nvfuse_move_buffer_list_nolock(sb,bc,BUFFER_TYPE_UNUSED,INSERT_HEAD);
+        }
+    }
+    SPINLOCK_UNLOCK(&bm->bm_lock);
+}
+
 s32 nvfuse_remove_buffer_cache(struct nvfuse_superblock *sb, s32 nr_buffers)
 {
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;

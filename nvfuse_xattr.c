@@ -21,6 +21,9 @@
 
 #include "nvfuse_tx_dispatch.h"
 #include "nvfuse_xattr.h"
+#ifdef NVFUSE_FILE_BACKEND
+extern int nvfuse_journal_xattr(struct nvfuse_handle *,const char *,const char *,const char *,char *,size_t,int);
+#endif
 
 //#define TEST_DEBUG_CODE
 //#define PRINT_SCREEN
@@ -55,8 +58,7 @@ s32 nvfuse_set_xattr(struct nvfuse_handle *nvh, const char *path,
 		const char *name, const char *value)
 {
 #ifdef NVFUSE_FILE_BACKEND
-	/* The legacy xattr parser is not supported on journal mounts. */
-	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+	if (nvh->nvh_target->journal) return nvfuse_journal_xattr(nvh,path,name,value,NULL,0,2);
 #endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
@@ -250,8 +252,7 @@ s32 nvfuse_remove_xattr(struct nvfuse_handle *nvh, const char *path,
 		const char *name)
 {
 #ifdef NVFUSE_FILE_BACKEND
-	/* The legacy xattr parser is not supported on journal mounts. */
-	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+	if (nvh->nvh_target->journal) return nvfuse_journal_xattr(nvh,path,name,NULL,NULL,0,3);
 #endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
@@ -371,8 +372,7 @@ s32 nvfuse_get_xattr(struct nvfuse_handle *nvh, const char *path,
 		const char *name, char *buffer, size_t buf_size)
 {
 #ifdef NVFUSE_FILE_BACKEND
-	/* The legacy xattr parser is not supported on journal mounts. */
-	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+	if (nvh->nvh_target->journal) return nvfuse_journal_xattr(nvh,path,name,NULL,buffer,buf_size,0);
 #endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
@@ -483,8 +483,7 @@ s32 nvfuse_list_xattr(struct nvfuse_handle *nvh, const char *path,
 		char *buffer, size_t buf_size)
 {
 #ifdef NVFUSE_FILE_BACKEND
-	/* The legacy xattr parser is not supported on journal mounts. */
-	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+	if (nvh->nvh_target->journal) return nvfuse_journal_xattr(nvh,path,NULL,NULL,buffer,buf_size,1);
 #endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;

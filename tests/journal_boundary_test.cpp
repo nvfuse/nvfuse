@@ -50,7 +50,52 @@ static void verify(Disk &d,unsigned n,bool changed) {
         CHECK(b==(changed?image(i):zero));
     }
 }
+static void sparse_volume() {
+    /* Largest format-compatible volume below the uint32 block ceiling. */
+    const uint64_t volume=(uint64_t(UINT32_MAX)/NVJ_GROUP_BLOCKS)*NVJ_GROUP_BLOCKS*NVJ_BLOCK;
+    const uint32_t homes[]={0,4100,UINT32_C(0x80001004),uint32_t(volume/NVJ_BLOCK-1)};
+    Disk d; nvj_ops ops{Disk::io,Disk::flush,&d}; nvj *j=nullptr;
+    CHECK(!nvj_format(&ops,volume,0)); CHECK(!nvj_open(&j,&ops,volume,0));
+    CHECK(nvj_memory_bytes(j)<20u*1024*1024);
+    for(auto home:homes) nvj_mark_metadata(j,home);
+    CHECK(!nvj_begin(j,0,4));
+    for(auto home:homes) { auto b=image(home); CHECK(!nvj_transfer(j,uint64_t(home)*NVJ_BLOCK,NVJ_BLOCK,b.data(),1)); }
+    CHECK(d.pages.find(homes[3])==d.pages.end());
+    CHECK(!nvj_commit(j)); CHECK(nvj_memory_bytes(j)<20u*1024*1024); nvj_close(j);
+    CHECK(!nvj_open(&j,&ops,volume,0));
+    for(auto home:homes) CHECK(d.pages.at(home)==image(home));
+    nvj_mark_filesystem_metadata(j); CHECK(!nvj_begin(j,0,1));
+    auto b=image(7); auto high=uint64_t(UINT32_C(0x80000000));
+    CHECK(!nvj_transfer(j,high*NVJ_BLOCK,NVJ_BLOCK,b.data(),1));
+    CHECK(d.pages.find(high)==d.pages.end()); CHECK(!nvj_commit(j)); CHECK(d.pages.at(high)==b);
+    auto flushes=nvj_stats(j)->flushes;
+    CHECK(!nvj_begin(j,0,0)); CHECK(!nvj_commit(j)); CHECK(nvj_stats(j)->flushes==flushes);
+    /* Metadata-only data overwrite has no overlay, but must still flush. */
+    CHECK(!nvj_begin(j,0,0)); CHECK(!nvj_transfer(j,4101ULL*NVJ_BLOCK,NVJ_BLOCK,b.data(),1));
+    CHECK(!nvj_commit(j)); CHECK(nvj_stats(j)->flushes==flushes+1);
+    nvj_close(j); std::puts("PASS maximum-volume sparse memory <20MiB, distant overlay, fixed classification, read-only/data-only barriers");
+}
+static void large_geometry() {
+    for(unsigned blocks:{8192u,16384u}) {
+        for(unsigned extra:{0u,1u,2u,3u}) {
+            Disk d;nvj_ops ops{Disk::io,Disk::flush,&d};nvj *j=nullptr;
+            CHECK(!nvj_format_sized(&ops,bytes,0,blocks));CHECK(!nvj_open(&j,&ops,bytes,0));
+            unsigned capacity=nvj_capacity(j);CHECK(capacity==(blocks==8192?8155u:16315u));
+            unsigned n=extra==1?capacity+1:capacity;
+            CHECK(!nvj_begin(j,1,0));stage(j,n);
+            if(extra>=2) { d.fail_block=extra==2?NVJ_GROUP_BLOCKS-3:capacity-1;d.armed=true; }
+            CHECK(nvj_commit(j)==(extra==1?-E2BIG:extra>=2?-EIO:0));
+            if(extra==1) nvj_discard(j);
+            nvj_close(j);CHECK(!nvj_open(&j,&ops,bytes,0));
+            verify(d,n,extra==0 || extra==3);
+            if(extra==3) CHECK(nvj_stats(j)->replays==1);
+            nvj_close(j);
+            std::printf("PASS journal geometry=%u full-capacity=%u case=%u anchor-skip/reopen\n",blocks,capacity,extra);
+        }
+    }
+}
 int main() {
+    sparse_volume(); large_geometry();
     for (unsigned n : {NVJ_CAPACITY-1,NVJ_CAPACITY,NVJ_CAPACITY+1}) {
         Disk d; nvj_ops ops{Disk::io,Disk::flush,&d}; nvj *j=nullptr;
         CHECK(nvj_format(&ops,bytes,0)==0); CHECK(nvj_open(&j,&ops,bytes,0)==0);

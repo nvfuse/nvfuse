@@ -661,6 +661,9 @@ s32 nvfuse_path_resolve(struct nvfuse_handle *nvh, const char *path, char *filen
 	return 0;
 }
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_tx_internal.h"
+#endif
 s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
 {
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
@@ -676,8 +679,8 @@ s32 nvfuse_opendir(struct nvfuse_handle *nvh, const char *path)
 	par_ino = dir_entry.d_ino;
 
 	if (strcmp(filename, "")) {
-		if (nvfuse_lookup(sb, NULL, &dir_entry, filename, dir_entry.d_ino) < 0) {
-			return NVFUSE_ERROR;
+		if ((res = nvfuse_lookup(sb, NULL, &dir_entry, filename, dir_entry.d_ino)) < 0) {
+			return res;
 		}
 		par_ino = dir_entry.d_ino;
 	}
@@ -750,7 +753,8 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 	res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
 	if (res < 0) {
 		// no such file
-		if (flags & O_RDWR || flags & O_CREAT) {
+		if (res != -ENOENT) return res;
+		if (flags & O_CREAT) {
 			res = nvfuse_createfile(sb, par_ino, filename, &ino, mode, 0);
 			if (res < 0)
 				return res;
@@ -766,9 +770,7 @@ s32 nvfuse_openfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 			}
 #endif
 		} else {
-			res = nvfuse_lookup(sb, NULL, &dir_temp, filename, par_ino);
-			//printf("cannot read or create file \n");
-			fid = -1;
+			fid = res;
 			goto RES;
 		}
 	} else {
@@ -928,6 +930,19 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 		}
 #endif
 
+#ifdef NVFUSE_FILE_BACKEND
+        if(sb->target->journal) {
+            u32 physical=0;
+            int rc=nvfuse_get_block(sb,ictx,NVFUSE_SIZE_TO_BLK(of->rwoffset),1,NULL,&physical,0);
+            if(rc) { nvfuse_release_inode(sb,ictx,NVF_CLEAN); return rc; }
+            if(!physical) {
+                remain=CLUSTER_SIZE-(of->rwoffset&(CLUSTER_SIZE-1));
+                if(remain>count) remain=count;
+                if(remain>inode->i_size-of->rwoffset) remain=(s32)(inode->i_size-of->rwoffset);
+                memset(buffer+rcount,0,remain);rcount+=remain;of->rwoffset+=remain;count-=remain;continue;
+            }
+        }
+#endif
 		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(of->rwoffset), sync_read,
 				   NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
@@ -1074,6 +1089,14 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 
 		ictx = nvfuse_read_inode(sb, NULL, of->ino);
 		inode = ictx->ictx_inode;
+#ifdef NVFUSE_FILE_BACKEND
+        /* Another descriptor may have extended this inode since open. */
+        if(sb->target->journal && of->size<inode->i_size) of->size=inode->i_size;
+        if(sb->target->journal) {
+            int cleanup=nvfuse_finish_inode_suffix(sb,ictx);
+            if(cleanup) { nvfuse_release_inode(sb,ictx,NVF_CLEAN);return cleanup; }
+        }
+#endif
 
 		lblock = NVFUSE_SIZE_TO_BLK(of->rwoffset);
 		offset = of->rwoffset & (CLUSTER_SIZE - 1);
@@ -1081,6 +1104,15 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		if (remain > count)
 			remain = count;
 
+#ifdef NVFUSE_FILE_BACKEND
+        int fresh_block=0;
+        if(sb->target->journal) {
+            u32 physical=0;
+            ret=nvfuse_get_block(sb,ictx,lblock,1,NULL,&physical,0);
+            if(!ret && !physical) { fresh_block=1; ret=nvfuse_get_block(sb,ictx,lblock,1,NULL,NULL,1); }
+            if(ret) { nvfuse_release_inode(sb,ictx,NVF_CLEAN); return ret; }
+        } else
+#endif
 		if (count && inode->i_size <= of->rwoffset) {
 			ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL,
 					       1);
@@ -1103,8 +1135,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		{
 #ifdef NVFUSE_FILE_BACKEND
             /* A newly allocated partial block must not expose freed bytes. */
-            int fresh = sb->target->journal && inode->i_size <= of->rwoffset &&
-                        !(inode->i_size & (CLUSTER_SIZE - 1));
+            int fresh = sb->target->journal && fresh_block;
             if (fresh) {
                 bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
                 memset(bh->bh_buf, 0, CLUSTER_SIZE);
@@ -1116,6 +1147,13 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 			else
 				bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
 
+#ifdef NVFUSE_FILE_BACKEND
+            if(sb->target->journal && of->rwoffset>inode->i_size &&
+               NVFUSE_SIZE_TO_BLK(inode->i_size)==lblock) {
+                unsigned start=(unsigned)(inode->i_size&(CLUSTER_SIZE-1));
+                memset(bh->bh_buf+start,0,(size_t)offset-start);
+            }
+#endif
 			rte_memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
 		}
 
@@ -1525,7 +1563,8 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	struct nvfuse_inode *dir_inode, *inode = NULL;
 	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
-	u32 found_entry;
+	s32 found_entry;
+    inode_t orphan=0;
 	u32 search_lblock, search_entry;
 
 	if (!strcmp(filename, ".") || !strcmp(filename, "..")) return -EINVAL;
@@ -1535,8 +1574,10 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 
 	/* find an existing dentry */
 	found_entry = nvfuse_find_existing_dentry(sb, dir_ictx, dir_inode, filename);
-	if (found_entry < 0)
-		return 0;
+	if (found_entry < 0) {
+        nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+        return -ENOENT;
+    }
 
 	search_lblock = found_entry / DIR_ENTRY_NUM;
 	search_entry = found_entry % DIR_ENTRY_NUM;
@@ -1555,9 +1596,8 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	}
 
 #ifdef NVFUSE_FILE_BACKEND
-    /* Deferred orphan cleanup is not implemented. Do not free an inode still
-     * reachable through a descriptor and allow later writes to freed blocks. */
-    if (sb->target->journal && inode->i_links_count == 1) {
+    /* Version 1 has no persistent orphan contract; retain its busy behavior. */
+    if (sb->target->journal && nvj_version(sb->target->journal)<2 && inode->i_links_count == 1) {
         for (unsigned n=START_OPEN_FILE;n<MAX_OPEN_FILE;n++) {
             if (sb->sb_file_table[n].used && sb->sb_file_table[n].ino==inode->i_ino) {
                 nvfuse_release_inode(sb, ictx, NVF_CLEAN);
@@ -1582,8 +1622,16 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 #ifdef VERIFY_BEFORE_RM_FILE
 		nvfuse_fallocate_verify(sb, ictx, 0, NVFUSE_SIZE_TO_BLK(inode->i_size));
 #endif
-		nvfuse_free_inode_size(sb, ictx, 0/*size*/);
-		nvfuse_relocate_delete_inode(sb, ictx);
+#ifdef NVFUSE_FILE_BACKEND
+        if (sb->target->journal && nvj_version(sb->target->journal)>=2) {
+            orphan=inode->i_ino;
+            nvfuse_release_inode(sb,ictx,DIRTY);
+        } else
+#endif
+        {
+            nvfuse_free_inode_size(sb, ictx, 0/*size*/);
+            nvfuse_relocate_delete_inode(sb, ictx);
+        }
 	} else {
 		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
@@ -1605,6 +1653,9 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 	}
 
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
+#ifdef NVFUSE_FILE_BACKEND
+    if (orphan) nvfuse_orphan_add(sb,orphan);
+#endif
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 	nvfuse_release_super(sb);
@@ -2220,9 +2271,10 @@ s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size)
 	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
 	inode = ictx->ictx_inode;
 #ifdef NVFUSE_FILE_BACKEND
-    if (sb->target->journal && (size < 0 || size > inode->i_size)) {
-        nvfuse_release_inode(sb, ictx, NVF_CLEAN);
-        return size < 0 ? -EINVAL : -EOPNOTSUPP;
+    if (sb->target->journal) {
+        int rc=nvfuse_resize_inode(sb,ictx,size);
+        nvfuse_release_inode(sb,ictx,rc?NVF_CLEAN:DIRTY);
+        return rc;
     }
 #endif
 

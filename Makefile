@@ -120,9 +120,12 @@ endif
 
 
 # Native file-image development targets, separate from the SPDK build.
-.PHONY: local local-test local-sanitize local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-chaos-test
+.PHONY: local-roadmap-test local local-test local-sanitize local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-chaos-test
 local:
 	$(MAKE) -f Makefile.local all
+local-roadmap-test:
+	$(MAKE) -f Makefile.local roadmap-test
+
 local-test:
 	$(MAKE) -f Makefile.local test
 local-resilience-test:

@@ -226,6 +226,7 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 
 	num_block = NVFUSE_SIZE_TO_BLK(inode->i_size);
 	trun_num_block = NVFUSE_SIZE_TO_BLK(size);
+    if(size & (CLUSTER_SIZE-1)) trun_num_block++;
 	if (inode->i_size & (CLUSTER_SIZE - 1))
 		num_block++;
 
@@ -242,6 +243,10 @@ void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
 	 * FIXME: buffers will be managed by RBtree or other structures.
 	 */
 
+#ifdef NVFUSE_FILE_BACKEND
+    if(sb->target->journal) nvfuse_invalidate_inode_suffix(sb,inode->i_ino,trun_num_block);
+    else
+#endif
 	for (offset = num_block - 1; offset >= trun_num_block; offset--) {
 		nvfuse_make_pbno_key(inode->i_ino, offset, &key, NVFUSE_BP_TYPE_DATA);
 		nvfuse_move_bc_to_unused_list(sb, key);
@@ -1326,23 +1331,24 @@ s32 nvfuse_sync_superblock(struct nvfuse_superblock *sb)
 	s8 *buf;
 	s32 res;
 
+#ifdef NVFUSE_FILE_BACKEND
+    s8 storage[CLUSTER_SIZE] __attribute__((aligned(CLUSTER_SIZE)));
+    buf=storage;
+#else
 	buf = nvfuse_alloc_aligned_buffer(CLUSTER_SIZE);
 	if (buf == NULL) {
 		dprintf_error(MEMALLOC, "alloc aligned buffer \n");
-		return -1;
+		return -ENOMEM;
 	}
 
+#endif
 	memset(buf, 0, CLUSTER_SIZE);
 	nvfuse_copy_mem_sb_to_disk_sb((struct nvfuse_superblock *)buf, sb);
 	res = nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, sb->target);
-	if (res) {
-		dprintf_error(SB, "Error: Syncing superblock fails \n");
-		return -1;
-	}
-
-	nvfuse_free_aligned_buffer(buf);
-
-	return 0;
+#ifndef NVFUSE_FILE_BACKEND
+    nvfuse_free_aligned_buffer(buf);
+#endif
+    return res<0?res:res?-EIO:0;
 }
 
 s32 nvfuse_allocate_open_file_table(struct nvfuse_superblock *sb)
@@ -2114,9 +2120,22 @@ s32 nvfuse_dir(struct nvfuse_handle *nvh)
 	return NVFUSE_SUCCESS;
 }
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_tx_internal.h"
+#endif
 s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		    nvfuse_off_t trunc_size)
 {
+#ifdef NVFUSE_FILE_BACKEND
+    if(sb->target->journal) {
+        struct nvfuse_inode_ctx *ctx=NULL;
+        int rc=nvfuse_lookup(sb,&ctx,NULL,filename,par_ino);
+        if(rc) return rc;
+        rc=nvfuse_resize_inode(sb,ctx,trunc_size);
+        nvfuse_release_inode(sb,ctx,rc?NVF_CLEAN:DIRTY); return rc;
+    }
+#endif
+
 	struct nvfuse_inode_ctx *dir_ictx, *ictx;
 	struct nvfuse_inode *dir_inode, *inode = NULL;
 	struct nvfuse_dir_entry *dir = NULL;
@@ -2206,6 +2225,15 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 
 s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_size)
 {
+#ifdef NVFUSE_FILE_BACKEND
+    if(sb->target->journal) {
+        struct nvfuse_inode_ctx *ctx=nvfuse_read_inode(sb,NULL,ino);
+        if(!ctx) return -EIO;
+        int rc=nvfuse_resize_inode(sb,ctx,trunc_size);
+        nvfuse_release_inode(sb,ctx,rc?NVF_CLEAN:DIRTY); return rc;
+    }
+#endif
+
 	struct nvfuse_inode_ctx *ictx;
 
 	ictx = nvfuse_read_inode(sb, NULL, ino);

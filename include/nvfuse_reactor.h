@@ -30,10 +30,14 @@ struct io_target {
     int fd;
     uint64_t size_bytes;
     int metadata_only;
+    unsigned journal_blocks;
     uint64_t payload_bytes_discarded;
     void *spdk_transport;
     struct nvj *journal;
-    int tx_user, tx_depth, tx_rollback, tx_mounted;
+    int tx_user, tx_depth, tx_rollback, tx_mounted, tx_restoring;
+    unsigned tx_queues;
+    int tx_keyed;
+    unsigned char tx_key[16];
     void *tx_snapshot;
     pthread_t tx_thread;
 #endif

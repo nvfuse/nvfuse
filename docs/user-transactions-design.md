@@ -231,16 +231,40 @@ Record throughput, per-operation latency, commit latency at p50/p95/p99, bytes w
 
 Compare ext4 and XFS only on a suitable Linux environment, matching file-data durability and sync behavior. Their ordinary POSIX operations do not directly implement this multi-operation user API; do not compare stronger NVFUSE atomicity against weaker grouping without labeling the difference. Local image benchmarks alone cannot establish an NVMe or filesystem-wide superiority claim.
 
-## Current Implementation Limits
+## Current implementation and limits
 
-- One handle and one owning thread; begin requires all descriptors closed. Descriptor integers opened in the TX survive commit and must be discarded after abort.
-- Automatic ordinary operations commit synchronously in metadata mode; optional DATA mode is selected only for an explicit group. O_SYNC inside the group does not publish an independent commit.
-- The 16 MiB journal permits 4075 distinct protected block images, including hidden metadata. A repeated or identical write may consume fewer slots than its byte length suggests. A user TX is never split into durable subtransactions.
-- Budget overflow makes the group abort-only and surfaces `-E2BIG`. Temporary overflow staging preserves the current legacy operation until rollback; exact advance credit reservation and strict RAM limits remain future work.
-- The test-only format that discards regular-file payload rejects DATA mode. Xattrs, fallocate, direct/AIO paths, sparse writes past EOF and truncate growth are excluded from this initial integration.
-- Cache I/O and some legacy allocation/mount failures still fail fast. Journal commit/flush errors poison the handle as RECOVERY_REQUIRED; a lost response can mean the group committed. Abort must not be claimed after an uncertain commit.
-- Closing an already poisoned handle discards its caches and releases ownership with `-EIO`. A healthy active explicit TX must first commit or abort; close returns `-EBUSY`.
-- Removing the last link to an open file, including rename replacement, returns `-EBUSY` until persistent orphan cleanup exists.
-- No multiprocess isolation, persistent outcome query, background checkpointing, deferred-delete intents, or in-place legacy upgrade is provided.
+- The underlying handle has one owner thread. The new bounded submission queue
+  accepts producers on multiple threads and executes on that owner. Public begin
+  still requires closed descriptors and no live queue; internal queue groups
+  snapshot their pre-existing descriptors.
+- Automatic filesystem metadata protection works without user begin. Optional
+  DATA mode protects regular file bytes; metadata mode does not promise rollback
+  of existing ordinary data overwrites.
+- New images use version 2; version-1 journals remain readable without upgrade.
+  New file images may choose 16/32/64 MiB journals with 4075/8155/16315 distinct
+  protected images. Metadata and durable receipts share that budget.
+- Impossible DATA payloads fail before mutation; hidden metadata costs can make
+  a group abort-only. Preflight reserves classification and bounded overflow
+  workspace. Complete credit admission and safe unwind of every legacy path
+  remain unqualified; some original cache/mount I/O/allocation paths fail fast.
+- Persistent orphan and linked-truncate cleanup continues in bounded transactions
+  after commit and resumes on mount. A large pending shrink followed by growth or
+  write in the same user group can return E2BIG; no early user commit occurs.
+- Sparse write/growth, inline string xattrs, range allocation, cache-coherent direct
+  APIs and asynchronous submission queues have dedicated regressions. Historical
+  AIO prepare helpers are still rejected. The metadata-only test format rejects
+  DATA groups and direct payload I/O.
+- Optional file-backend background checkpointing acknowledges durable commit
+  certificates, joins before slot reuse and poisons the handle on a later worker
+  error. SPDK background checkpointing remains rejected.
+- Durable 16-byte keys retain up to 127 outcomes until explicitly forgotten.
+  Reusing a retained committed key returns EALREADY. UNKNOWN is meaningful only
+  on a healthy handle after recovery. Forget acknowledges loss of retry protection.
+- Closing a healthy active TX or live queue returns EBUSY. A poisoned handle closes
+  with EIO; reopen replays the durable log. An uncertain commit must never be
+  reported as an aborted group.
+- [COW is evaluated but not implemented](large-transactions-design.md). There is
+  no unlimited streaming user TX, physical multi-queue filesystem execution or
+  automatic in-place format conversion.
 
 The tests above describe both implemented checks and future coverage targets. Consult [the evaluation report](journaling-evaluation.md) for the exact executed matrix rather than treating the entire checklist as completed.

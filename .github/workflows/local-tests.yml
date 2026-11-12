@@ -34,7 +34,7 @@ jobs:
           python3 --version
 
       - name: Build and test file backend
-        run: make local-test local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test
+        run: make local-test local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-roadmap-test
 
       - name: Upload test evidence
         if: always()
