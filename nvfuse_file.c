@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #define IMAGE_GROUP_BYTES (128ULL * 1024 * 1024)
+#define META_IMAGE_SIGNATURE UINT32_C(0x4d46564e)
 static int active_handle;
 
 /* Core callers assume successful block I/O. Fail loudly rather than allowing
@@ -23,7 +24,15 @@ static int file_transfer(struct io_target *target, uint64_t offset, size_t bytes
     }
     size_t done = 0;
     while (done < bytes) {
-        ssize_t n = write_op ? pwrite(target->fd, (char *)buffer + done, bytes - done, offset + done)
+        const char *source = (char *)buffer + done;
+        size_t chunk = bytes - done;
+        uint32_t signature = META_IMAGE_SIGNATURE;
+        if (write_op && target->metadata_only && offset + done < sizeof(signature)) {
+            source = (char *)&signature + offset + done;
+            if (chunk > sizeof(signature) - offset - done)
+                chunk = sizeof(signature) - offset - done;
+        }
+        ssize_t n = write_op ? pwrite(target->fd, source, chunk, offset + done)
                              : pread(target->fd, (char *)buffer + done, bytes - done, offset + done);
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) {
@@ -31,6 +40,10 @@ static int file_transfer(struct io_target *target, uint64_t offset, size_t bytes
             perror("file backend I/O"); abort();
         }
         done += (size_t)n;
+    }
+    if (!write_op && target->metadata_only && offset == 0 && bytes >= sizeof(uint32_t)) {
+        uint32_t signature = NVFUSE_SB_SIGNATURE;
+        memcpy(buffer, &signature, sizeof(signature));
     }
     return 0;
 }
@@ -66,11 +79,17 @@ int reactor_cq_size(struct reactor_task *task)
 }
 int32_t reactor_submit_reqs(struct io_target *t, struct reactor_task *task, struct io_job **reqs, int count)
 {
+    if (!t || !task || task->target != t || (count && !reqs)) return -EINVAL;
     if (count < 0 || count > task->qdepth - 1 - reactor_cq_size(task)) return -EINVAL;
     for (int i = 0; i < count; i++) {
+        if (!reqs[i]) return -EINVAL;
         if (reqs[i]->req_type != SPDK_BDEV_IO_TYPE_FLUSH &&
             reqs[i]->req_type != SPDK_BDEV_IO_TYPE_READ &&
             reqs[i]->req_type != SPDK_BDEV_IO_TYPE_WRITE) return -EINVAL;
+        if (reqs[i]->req_type != SPDK_BDEV_IO_TYPE_FLUSH &&
+            (!reqs[i]->buf || reqs[i]->offset < 0 || reqs[i]->bytes <= 0 ||
+             (uint64_t)reqs[i]->offset > t->size_bytes ||
+             (uint64_t)reqs[i]->bytes > t->size_bytes - reqs[i]->offset)) return -EINVAL;
     }
     for (int i = 0; i < count; i++) {
         struct io_job *req = reqs[i];
@@ -106,6 +125,13 @@ void reactor_bio_cb(struct spdk_bdev_io *io, bool ok, void *arg)
 
 struct nvfuse_handle *nvfuse_file_open(const char *path, int create, uint64_t size)
 {
+    return nvfuse_file_open_mode(path, create, size, 0);
+}
+
+struct nvfuse_handle *nvfuse_file_open_mode(const char *path, int create, uint64_t size,
+                                         int metadata_only)
+{
+    if (metadata_only != 0 && metadata_only != 1) { errno = EINVAL; return NULL; }
     if (active_handle) { errno = EBUSY; return NULL; }
     if (create && (size < IMAGE_GROUP_BYTES || size % IMAGE_GROUP_BYTES ||
                    size / CLUSTER_SIZE > UINT32_MAX)) {
@@ -128,6 +154,7 @@ struct nvfuse_handle *nvfuse_file_open(const char *path, int create, uint64_t si
     struct io_target *target = calloc(1, sizeof(*target));
     if (!nvh || !target) { free(nvh); free(target); goto fail_fd; }
     target->fd = fd; target->size_bytes = size;
+    target->metadata_only = metadata_only;
     nvh->nvh_target = target;
     nvh->blk_size = SECTOR_SIZE;
     nvh->total_blkcount = size / SECTOR_SIZE;
@@ -138,7 +165,7 @@ struct nvfuse_handle *nvfuse_file_open(const char *path, int create, uint64_t si
     /* Refuse malformed/unclean images before allocating mount resources. */
     struct nvfuse_superblock_common disk;
     if (pread(fd, &disk, sizeof(disk), 0) != sizeof(disk) ||
-        disk.sb_signature != NVFUSE_SB_SIGNATURE ||
+        disk.sb_signature != (metadata_only ? META_IMAGE_SIGNATURE : NVFUSE_SB_SIGNATURE) ||
         disk.sb_no_of_sectors != (int64_t)nvh->total_blkcount ||
         disk.sb_no_of_blocks != (int64_t)(size / CLUSTER_SIZE) ||
         disk.sb_no_of_blocks_per_bg != IMAGE_GROUP_BYTES / CLUSTER_SIZE ||

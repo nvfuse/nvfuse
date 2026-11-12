@@ -73,6 +73,76 @@ disposable development images: underlying block-I/O errors or partial mount
 failures abort the process because the legacy core cannot reliably unwind those failures.
 The original SPDK build commands below remain separate from this local mode.
 
+Deterministic test framework
+----------------------------
+
+Run the extended filesystem and file-backend tests on macOS or Linux:
+
+    make local-framework
+
+The default seeds are `1` and `0xc0ffee`. Override them, keep successful images,
+or choose a report directory with:
+
+    python3 tests/run_framework.py --seeds 1,42 --keep-images \
+        --report-dir build/test-results/my-run
+
+Each run writes `run.json`, per-case logs, `results.json`, and `junit.xml`.
+Failed images remain available for diagnosis; successful images are removed
+unless `--keep-images` is set. Reports are also retained on the host when using
+`sh scripts/test-rocky9.sh`. PR CI runs this local suite on macOS and Rocky 9,
+including the Rocky 9 ASan/UBSan build.
+
+The test-only `nvfuse_file_open_mode(path, create, size, 1)` API creates a
+**metadata-only image**. It preserves inode sizes, allocation bitmaps, directory
+indexes, indirect blocks, and symlink contents, while discarding regular-file
+payload writes before they enter the data cache. Buffered reads of regular
+files return zeros immediately and after remount. Async and direct I/O paths
+are rejected in this mode. The image carries a distinct on-disk signature:
+normal and metadata-only opens reject each other's images. This mode is for
+metadata workloads; use normal images to detect payload corruption.
+
+The suite compares identical 32 MiB file workloads in both modes to verify
+physical storage savings, and checks create/rename/delete, file sizes, indirect
+block boundaries, block/inode reclamation, and fresh-process remounts. Normal
+mode additionally compares a seeded shadow model across 500 overwrites per
+seed, nine transfer sizes, zero/ones/alternating/random patterns, EOF reads,
+and invalid offsets. File-backend queues are synchronous: their capacity,
+completion identity, wraparound, and invalid-request tests do not claim real
+parallel I/O.
+
+For actual SPDK asynchronous queues and QEMU failure injection, use the
+dedicated local ARM64 VM prepared with SPDK v26.09, its DPDK submodule,
+`~/.venvs/spdk`, and the pinned-key `ssh.sh` helper:
+
+    python3 tests/run_framework.py --profile spdk --vm-dir build/vm/rocky9
+
+`--profile all` runs both suites. `tests/spdk/start_vm.sh` starts the existing
+VM images with HVF, SMMUv3, QMP, a dedicated hotpluggable PCIe port, and a
+blkdebug-backed NVMe. The SPDK suite verifies the exact QEMU vendor/device,
+serial `NVFUSEDEV0001`, 2 GiB capacity, absence of mounts, and an isolated IOMMU
+group before binding that device only. It writes to the disposable NVMe image,
+reboots the VM to apply error rules, and shuts it down after testing. Do not
+point these tests at a physical device. The VM images, credentials, and SPDK
+checkout are local prerequisites, not included in this repository.
+
+| Coverage | Local file backend | SPDK + QEMU |
+| --- | --- | --- |
+| Sizes, offsets, patterns, data comparison | Buffered, including unaligned bytes | Sector-aligned NVMe commands |
+| Queue depth and multiple queues | Synchronous queue contract | 1/2/4 queues, depths 1/8/32/64, actual completion counts |
+| Reopen and reconnect | Fresh filesystem processes | Ten fresh SPDK processes |
+| Capacity and invalid requests | Range rejection and fail-fast short reads | First/last LBA and invalid read/write ranges |
+| I/O failures | Fail-fast block-I/O contract | One-shot EIO, stalled I/O timeout/resume, removal with outstanding I/O |
+| Recovery | Clean remount | Transient-error retry and VM restart after removal |
+| NVFUSE metadata lifecycle | Normal and metadata-only images | Pending NVFUSE's SPDK API migration |
+
+The QEMU ARM platform lacks interrupt remapping. Inside this isolated VM only,
+the test temporarily enables VFIO's IRQ compatibility setting while retaining
+DMA IOMMU protection; it restores the setting, hugepage reservation, and Linux
+driver on exit. A timed-out command is resumed to verify data, and an unplugged
+controller is recovered by restarting the VM. Crash-consistent filesystem
+recovery, hot re-add without reboot, real SSD durability, and NVFUSE on current
+SPDK are not claimed. The last item is explicitly reported as skipped.
+
 Prerequisites
 =============
 In order to build NVFUSE, some relevant libraries must be configured. 

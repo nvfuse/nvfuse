@@ -34,7 +34,7 @@ jobs:
           python3 --version
 
       - name: Build and test file backend
-        run: make local-test
+        run: make local-test local-framework
 
   rocky9-test:
     name: Rocky Linux 9 file backend

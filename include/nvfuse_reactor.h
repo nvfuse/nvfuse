@@ -29,6 +29,8 @@ struct io_target {
 #ifdef NVFUSE_FILE_BACKEND
     int fd;
     uint64_t size_bytes;
+    int metadata_only;
+    uint64_t payload_bytes_discarded;
 #endif
 	struct spdk_bdev	*bdev;
 	struct spdk_bdev_desc	*desc;

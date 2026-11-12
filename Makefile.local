@@ -11,19 +11,23 @@ SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
  nvfuse_portable.c nvfuse_file.c
 OBJECTS = $(SOURCES:%.c=$(LOCAL_BUILD)/%.o)
 .DEFAULT_GOAL := all
-.PHONY: all test clean
-all: $(LOCAL_BUILD)/local_test
+.PHONY: all test framework-test clean
+all: $(LOCAL_BUILD)/local_test $(LOCAL_BUILD)/framework_test
 $(LOCAL_BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 # Keep strict warnings for the new backend and its executable.
-$(LOCAL_BUILD)/nvfuse_portable.o $(LOCAL_BUILD)/nvfuse_file.o $(LOCAL_BUILD)/tests/local_test.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
+$(LOCAL_BUILD)/nvfuse_portable.o $(LOCAL_BUILD)/nvfuse_file.o $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/tests/framework_test.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
 $(LOCAL_BUILD)/nvfuse.a: $(OBJECTS)
 	$(AR) rcs $@ $^
 $(LOCAL_BUILD)/local_test: $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/nvfuse.a
 	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+$(LOCAL_BUILD)/framework_test: $(LOCAL_BUILD)/tests/framework_test.o $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
 test: all
 	python3 tests/run_local.py $(LOCAL_BUILD)/local_test
+framework-test: all
+	python3 tests/run_framework.py --binary $(LOCAL_BUILD)/framework_test
 clean:
 	rm -rf $(LOCAL_BUILD)
--include $(OBJECTS:.o=.d) $(LOCAL_BUILD)/tests/local_test.d
+-include $(OBJECTS:.o=.d) $(LOCAL_BUILD)/tests/local_test.d $(LOCAL_BUILD)/tests/framework_test.d

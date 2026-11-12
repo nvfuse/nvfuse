@@ -878,6 +878,7 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 	struct nvfuse_file_table *of;
 
 	s32 offset, remain, rcount = 0;
+	if (count < 0 || roffset < 0) return -EINVAL;
 
 	of = nvfuse_get_file_table(sb, fid);
 
@@ -894,6 +895,20 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 
 	while (count > 0 && of->rwoffset < inode->i_size) {
 
+#ifdef NVFUSE_FILE_BACKEND
+		if (sb->target->metadata_only && inode->i_type == NVFUSE_TYPE_FILE &&
+		    !S_ISLNK(inode->i_mode)) {
+			remain = count;
+			if (remain > inode->i_size - of->rwoffset)
+				remain = inode->i_size - of->rwoffset;
+			memset(buffer + rcount, 0, remain);
+			rcount += remain;
+			of->rwoffset += remain;
+			count -= remain;
+			continue;
+		}
+#endif
+
 		bh = nvfuse_get_bh(sb, ictx, inode->i_ino, NVFUSE_SIZE_TO_BLK(of->rwoffset), sync_read,
 				   NVFUSE_TYPE_DATA);
 		if (bh == NULL) {
@@ -906,6 +921,8 @@ s32 nvfuse_readfile_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 
 
 		if (remain > count)
 			remain = count;
+		if (remain > inode->i_size - of->rwoffset)
+			remain = inode->i_size - of->rwoffset;
 
 		if (sync_read)
 			rte_memcpy(buffer + rcount, &bh->bh_buf[offset], remain);
@@ -926,6 +943,9 @@ RES:
 s32 nvfuse_readfile_directio_core(struct nvfuse_superblock *sb, u32 fid, s8 *buffer, s32 count,
 				  nvfuse_off_t roffset, s32 sync_read)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	if (sb->target->metadata_only) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_inode_ctx *ictx = NULL;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
@@ -983,6 +1003,9 @@ s32 nvfuse_readfile(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count, n
 s32 nvfuse_readfile_aio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer, s32 count,
 			nvfuse_off_t roffset)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	if (nvh->nvh_target->metadata_only) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_superblock *sb = nvfuse_read_super(nvh);
 	s32 rcount;
 
@@ -1015,6 +1038,8 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 	u32 offset = 0, remain = 0, wcount = 0;
 	lbno_t lblock = 0;
 	int ret;
+	if (woffset < 0 || woffset >= MAX_FILE_SIZE || count >= MAX_FILE_SIZE - woffset)
+		return -EINVAL;
 
 	of = nvfuse_get_file_table(sb, fid);
 
@@ -1042,17 +1067,26 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 					       1);
 			if (ret) {
 				dprintf_error(INODE, "data block allocation fails.");
+				nvfuse_release_inode(sb, ictx, NVF_CLEAN);
 				return NVFUSE_ERROR;
 			}
 		}
 
-		/*read modify write or partial write */
-		if (remain != CLUSTER_SIZE)
-			bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, READ, NVFUSE_TYPE_DATA);
-		else
-			bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
+#ifdef NVFUSE_FILE_BACKEND
+		if (sb->target->metadata_only && !S_ISLNK(inode->i_mode)) {
+			sb->target->payload_bytes_discarded += remain;
+			bh = NULL;
+		} else
+#endif
+		{
+			/* read modify write or partial write */
+			if (remain != CLUSTER_SIZE)
+				bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, READ, NVFUSE_TYPE_DATA);
+			else
+				bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
 
-		rte_memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
+			rte_memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
+		}
 
 		wcount += remain;
 		of->rwoffset += remain;
@@ -1065,7 +1099,7 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		inode->i_size = of->size;
 		assert(inode->i_size < MAX_FILE_SIZE);
 
-		nvfuse_release_bh(sb, bh, 0, DIRTY);
+		if (bh) nvfuse_release_bh(sb, bh, 0, DIRTY);
 		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
 
@@ -1089,6 +1123,9 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 s32 nvfuse_writefile_directio_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf,
 				   u32 count, nvfuse_off_t woffset)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	if (sb->target->metadata_only) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
@@ -1173,6 +1210,9 @@ s32 nvfuse_writefile_directio_prepare(struct nvfuse_handle *nvh, u32 fid, const 
 s32 nvfuse_gather_bh(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count,
 		     nvfuse_off_t woffset, struct list_head *aio_bh_head, s32 *aio_bh_count)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	if (sb->target->metadata_only) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
