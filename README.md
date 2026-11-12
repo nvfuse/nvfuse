@@ -116,7 +116,22 @@ dedicated local ARM64 VM prepared with SPDK v26.09, its DPDK submodule,
 
     python3 tests/run_framework.py --profile spdk --vm-dir build/vm/rocky9
 
-`--profile all` runs both suites. `tests/spdk/start_vm.sh` starts the existing
+For filesystem integration on that same disposable NVMe, use:
+
+    python3 tests/run_framework.py --profile integration --vm-dir build/vm/rocky9
+
+This experimental transport links the standalone, single-process NVFUSE core
+to SPDK v26.09's NVMe API. It uses one synchronous queue and a DMA bounce
+buffer; the core's heap buffers are never submitted directly to NVMe. It
+reuses the file-backend test workloads: 16 filesystem stages per seed cover
+data comparison, remounts, rename/delete, normal and metadata-only formats,
+and rejection of the wrong format mode. Separate VM restarts verify retained
+file contents and metadata, followed by deletion and another remount. Each
+device close reports actual NVMe read, write, and flush command counts.
+This is not a migration of the legacy multi-process bdev/event reactor.
+
+`--profile all` runs local, raw SPDK, and filesystem integration suites.
+`tests/spdk/start_vm.sh` starts the existing
 VM images with HVF, SMMUv3, QMP, a dedicated hotpluggable PCIe port, and a
 blkdebug-backed NVMe. The SPDK suite verifies the exact QEMU vendor/device,
 serial `NVFUSEDEV0001`, 2 GiB capacity, absence of mounts, and an isolated IOMMU
@@ -133,15 +148,18 @@ checkout are local prerequisites, not included in this repository.
 | Capacity and invalid requests | Range rejection and fail-fast short reads | First/last LBA and invalid read/write ranges |
 | I/O failures | Fail-fast block-I/O contract | One-shot EIO, stalled I/O timeout/resume, removal with outstanding I/O |
 | Recovery | Clean remount | Transient-error retry and VM restart after removal |
-| NVFUSE metadata lifecycle | Normal and metadata-only images | Pending NVFUSE's SPDK API migration |
+| NVFUSE metadata lifecycle | Normal and metadata-only images | Both formats through NVMe; VM restart persistence (`integration`) |
 
 The QEMU ARM platform lacks interrupt remapping. Inside this isolated VM only,
 the test temporarily enables VFIO's IRQ compatibility setting while retaining
 DMA IOMMU protection; it restores the setting, hugepage reservation, and Linux
 driver on exit. A timed-out command is resumed to verify data, and an unplugged
-controller is recovered by restarting the VM. Crash-consistent filesystem
-recovery, hot re-add without reboot, real SSD durability, and NVFUSE on current
-SPDK are not claimed. The last item is explicitly reported as skipped.
+controller is recovered by restarting the VM. Fault injection and multiple
+queues currently exercise the raw NVMe test program, separately from the
+NVFUSE filesystem integration. Crash-consistent filesystem recovery, hot
+re-add without reboot, real SSD durability, and parallel NVFUSE I/O are not
+claimed. Filesystem integration is reported as skipped unless selected with
+`--profile integration` or `--profile all`.
 
 Prerequisites
 =============

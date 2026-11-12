@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "test_backend.h"
 
 #define PAYLOAD_SIZE (3 * 1024 * 1024 + 137)
 #define SMALL_FILES 40

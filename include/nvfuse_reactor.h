@@ -31,6 +31,7 @@ struct io_target {
     uint64_t size_bytes;
     int metadata_only;
     uint64_t payload_bytes_discarded;
+    void *spdk_transport;
 #endif
 	struct spdk_bdev	*bdev;
 	struct spdk_bdev_desc	*desc;

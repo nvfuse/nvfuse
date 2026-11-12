@@ -21,6 +21,23 @@
 #include <sys/uio.h>
 #include <sys/statvfs.h>
 #include <dirent.h>
+/* Keep standalone adapters out of the real SPDK/DPDK symbol namespace. This
+ * permits linking the core to a separately compiled modern NVMe transport. */
+#define spdk_dma_malloc nvfuse_local_dma_malloc
+#define spdk_dma_zmalloc nvfuse_local_dma_zmalloc
+#define spdk_mempool_create nvfuse_local_pool_create
+#define spdk_mempool_free nvfuse_local_pool_free
+#define spdk_mempool_get nvfuse_local_pool_get
+#define spdk_mempool_put nvfuse_local_pool_put
+#define rte_mempool_lookup nvfuse_local_pool_lookup
+#define rte_mempool_get nvfuse_local_pool_get_into
+#define rte_mempool_get_bulk nvfuse_local_pool_get_bulk
+#define rte_mempool_put_bulk nvfuse_local_pool_put_bulk
+#define rte_ring_create nvfuse_local_ring_create
+#define rte_ring_lookup nvfuse_local_ring_lookup
+#define rte_ring_enqueue nvfuse_local_ring_enqueue
+#define rte_ring_dequeue nvfuse_local_ring_dequeue
+#define rte_ring_free nvfuse_local_ring_free
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define likely(x) __builtin_expect(!!(x), 1)
 

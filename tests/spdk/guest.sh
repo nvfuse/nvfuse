@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Only for the dedicated 2 GiB QEMU NVMe in the local development VM.
 set -euo pipefail
-case ${1:-} in matrix|boundaries|injected|hotremove|stalled) ;; *) exit 2 ;; esac
+case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check) ;; *) exit 2 ;; esac
 if [[ $1 == stalled ]]; then rm -f /tmp/nvfuse-stall-go; fi
 [[ ${2:-} =~ ^[0-9]+$ ]] || exit 2
 SPDK_ROOT_DIR=${SPDK_ROOT_DIR:-$HOME/src/spdk}
@@ -41,5 +41,47 @@ printf 'Y\n' | sudo tee "$IRQ_PARAM" > /dev/null
 sudo env PCI_ALLOWED="$BDF" DRIVER_OVERRIDE=vfio-pci HUGEMEM=512 \
     scripts/setup.sh > "$LOG_DIR/setup.log" 2>&1
 test "$(basename "$(readlink /sys/bus/pci/devices/$BDF/driver)")" = vfio-pci
+if [[ $1 == integration* ]]; then
+    BIN_DIR="$HOME/src/nvfuse/tests/spdk"
+    stage=0
+    run_fs() {
+        local binary=$1 mode=$2
+        stage=$((stage + 1))
+        local log="$LOG_DIR/$CASE-$stage-$2-seed-$3.log"
+        local args=("$mode" "pcie:$BDF")
+        if [[ $binary == integration_framework ]]; then args+=("$3"); fi
+        sudo prlimit --memlock=unlimited timeout 90 "$BIN_DIR/$binary" "${args[@]}" > "$log" 2>&1 || {
+            tail -n 50 "$log"; return 1;
+        }
+        grep -q "PASS $mode" "$log"
+        grep -q 'SPDK_IO reads=' "$log"
+        echo "PASS integration $mode seed=$3"
+        grep SPDK_IO "$log"
+    }
+    CASE=$1
+    case $1 in
+        integration-data-prepare) run_fs integration_framework data-create "$2"; exit 0 ;;
+        integration-data-check) run_fs integration_framework data-verify "$2"; exit 0 ;;
+        integration-meta-prepare) run_fs integration_framework meta-create "$2"; exit 0 ;;
+        integration-meta-check)
+            for mode in meta-verify meta-delete meta-final; do
+                run_fs integration_framework "$mode" "$2"
+            done
+            exit 0 ;;
+    esac
+    # Each invocation is a fresh process; 'reopen' additionally remounts three
+    # times in the same process. Reformat only this exact disposable QEMU disk.
+    for mode in create verify reopen mutate final; do
+        run_fs integration_test "$mode" "$2"
+    done
+    for mode in data-create data-verify reject-meta stored-create stored-verify; do
+        run_fs integration_framework "$mode" "$2"
+    done
+    for mode in meta-create reject-full meta-verify meta-verify meta-delete meta-final; do
+        run_fs integration_framework "$mode" "$2"
+    done
+    echo 'PASS integration suite'
+    exit 0
+fi
 sudo prlimit --memlock=unlimited timeout 45 "$HOME/src/nvfuse-framework/io_suite" "$1" \
     "trtype:PCIe traddr:$BDF" "$2"

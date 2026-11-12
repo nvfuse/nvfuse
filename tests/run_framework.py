@@ -101,7 +101,7 @@ def local(suite, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("local", "spdk", "all"), default="local")
+    parser.add_argument("--profile", choices=("local", "spdk", "integration", "all"), default="local")
     parser.add_argument("--binary", default="build/local/framework_test")
     parser.add_argument("--seeds", type=lambda s: [int(v, 0) for v in s.split(",")], default=[1, 0xc0ffee])
     parser.add_argument("--report-dir", type=Path,
@@ -110,7 +110,7 @@ def main():
     parser.add_argument("--vm-dir", type=Path, default=Path("build/vm/rocky9"))
     parser.add_argument("--keep-images", action="store_true")
     args = parser.parse_args()
-    if any(not 0 < s <= 0xffffffff for s in args.seeds):
+    if not args.seeds or any(not 0 < s <= 0xffffffff for s in args.seeds):
         parser.error("seeds must be nonzero 32-bit integers")
     suite = Suite(args.report_dir)
     (suite.root / "run.json").write_text(json.dumps(dict(profile=args.profile, seeds=args.seeds,
@@ -121,8 +121,12 @@ def main():
         if args.profile in ("spdk", "all"):
             from spdk.vm_suite import run as spdk
             spdk(suite, args)
-        suite.record("nvfuse-latest-spdk-integration", "skip",
-                     reason="NVFUSE still uses legacy SPDK APIs; filesystem tests currently use the file backend")
+        if args.profile in ("integration", "all"):
+            from spdk.integration_suite import run as integration
+            integration(suite, args)
+        else:
+            suite.record("nvfuse-latest-spdk-integration", "skip",
+                         reason="select --profile integration or all to run NVFUSE on the QEMU NVMe")
     except Exception as error:
         if not suite.results or suite.results[-1]["status"] != "fail":
             suite.record("framework", "fail", error=str(error))
