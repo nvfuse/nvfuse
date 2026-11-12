@@ -31,6 +31,8 @@ upgraded. See [cleanup format](persistent-cleanup-design.md),
 Generated reports below are under `build/test-results/` and intentionally ignored
 by git. Reports contain commands, exit status, per-process logs and raw-checker
 output. Counts are runner checks, not a count of independent assertions.
+The committed [case manifest](benchmarks/roadmap-validation-2026-11-12.json)
+lists the principal rerun cases and their aggregate results.
 
 | Coverage | Evidence | Result |
 | --- | --- | --- |
@@ -48,6 +50,8 @@ output. Counts are runner checks, not a count of independent assertions.
 | Checkpoint ThreadSanitizer | `build/roadmap-tsan-journal-final.log` | Gated worker proves early durable response; 32 slot reuses, worker EIO/replay and close drain passed |
 | QEMU NVMe faults | `roadmap-vm-faults` | 35 checks passed across read/write EIO, stall/resume, timeout and device removal, including near-full preparation |
 | QEMU whole-VM termination | `roadmap-vm-powercuts` | 47 checks passed across nine kill scenarios |
+| Further mixed soak | `roadmap-soak` | Two million choices: one million per normal/payload-discard format, cold verification and raw accounting passed |
+| Further process-crash continuation | `roadmap-chaos` | 60 crashes, 192 checks passed across three seeds and both image formats |
 
 The QEMU tests reopen the original image and verify complete directory
 enumeration, parent/path accessibility, file contents and EOF. Recovery is not
@@ -139,6 +143,6 @@ ownership and completion drain. COW needs persistent allocation quarantine and
 reclamation; the current implementation evaluates that design and implements
 bounded full-data redo instead. These are explicit remaining tasks, not passes.
 
-The baseline PR CI run `43211689897` passed macOS and Rocky Linux. New code needs
-its own post-push CI result. Periodic schedules are definitions until merged;
+The baseline PR CI run `43211689897` passed macOS and Rocky Linux. Roadmap commit `214abc2` started CI run `43219342096`; both jobs were still running
+at report time. This is separate from the passing local evidence. Periodic schedules are definitions until merged;
 the opt-in dedicated QEMU runner is not provisioned by this change.

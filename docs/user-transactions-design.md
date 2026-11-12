@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: Implemented synchronous reference API for the standalone journal backends; see [evaluation](journaling-evaluation.md).
+Status: Implemented bounded standalone API, with optional background file-image checkpointing; see [current validation](roadmap-validation.md).
 
 NVFUSE must preserve its own metadata consistency without an application transaction API. This API adds an optional application boundary around several filesystem operations. It builds on [metadata journaling](metadata-journaling-design.md); it does not replace or enable the filesystem's ordinary crash protection.
 
@@ -57,7 +57,7 @@ int nvfuse_tx_abort(struct nvfuse_handle *fs);
 int nvfuse_tx_status(struct nvfuse_handle *fs);
 ```
 
-`block_budget` bounds the number of distinct journaled blocks, including hidden metadata changes. It must fit journal capacity and reserve descriptor, commit, and control overhead. Zero selects the full capacity of 4075 distinct protected blocks. Reject invalid modes or impossible budgets before beginning the transaction.
+`block_budget` bounds the number of distinct journaled blocks, including hidden metadata changes. It must fit journal capacity and reserve descriptor, commit, and control overhead. Zero selects the discovered capacity: 4075, 8155 or 16315 distinct protected blocks for 16, 32 or 64 MiB journals. Reject invalid modes or impossible budgets before beginning the transaction.
 
 Existing filesystem APIs join the active transaction on that handle. Helpers inherit the current transaction and cannot create independent durable commits. Without an explicit user transaction, the public filesystem operation obtains an internal boundary automatically.
 
@@ -97,7 +97,7 @@ The fragment assumes negative errno-style results. Preserve both the original op
 
 ## Ownership and Visibility
 
-Version 1 supports one handle, one calling thread, and one active user transaction. Nested begin returns `-EBUSY`. Cross-thread use, multiprocess sharing, asynchronous I/O, and direct I/O are rejected where unsupported. These limits match the initial standalone backend; they do not claim general serializable multi-client transactions.
+The standalone backend supports one handle, one owner thread and one active user transaction. Nested begin returns `-EBUSY`. Other threads may submit through the bounded queue; filesystem execution stays on the owner. Cache-bypass I/O is synchronous and joins the same overlay. Multiprocess sharing and historical AIO prepare helpers remain unsupported. These limits do not claim general serializable multi-client transactions.
 
 The owner sees its own pending changes. Other access to the volume is excluded by image or device ownership. No external reader may observe partially checkpointed committed metadata. Supporting independent readers later requires snapshots, versioned caches, or a defined lock protocol.
 
@@ -109,14 +109,15 @@ Begin requires no open file descriptors; otherwise it returns `-EBUSY`. Descript
 | --- | --- | --- |
 | Create, mkdir, rename, link, unlink, rmdir | Atomic metadata group | Atomic metadata group |
 | Permissions, ownership, timestamps | Wrapped where available on the platform | Wrapped where available on the platform |
-| Xattrs and fallocate | Reject with `-EOPNOTSUPP` | Reject with `-EOPNOTSUPP` |
+| Inline string xattrs and fallocate | Atomic metadata; allocated data is initialized/ordered | Protected data and metadata |
 | Read and lookup | Read own changes | Read own changes |
 | Buffered write | Metadata atomic, regular-file bytes not rolled back | Data and metadata atomic |
 | Sequential extension and shrinking | Metadata atomic; bytes are not restored | Protected bytes and metadata are restored |
-| Sparse writes past EOF and truncate growth | Reject with `-EOPNOTSUPP` | Reject with `-EOPNOTSUPP` |
+| Sparse writes past EOF and truncate growth (v2) | Holes read zero; metadata atomic | Data and metadata atomic |
 | Symlink creation | Target content is protected metadata | Target content is protected metadata |
 | `fsync`, `fdatasync`, `sync` inside user TX | Reject with `-EBUSY` | Reject with `-EBUSY` |
-| Direct or asynchronous I/O | Reject until integrated | Reject until integrated |
+| Aligned FS-cache-bypass I/O | Same ordered metadata contract | Same protected DATA overlay |
+| Queued submissions | Owner executes grouped metadata requests | Owner executes grouped DATA requests; queue is exclusive with public user TX |
 
 The matrix is an integration checklist, not a claim that all legacy APIs already implement correct failure paths. An operation is supported only after its mutation, error, resource-exhaustion, and recovery paths pass the tests below. Unsupported APIs must fail before changing state.
 
@@ -133,25 +134,25 @@ stateDiagram-v2
     Active --> Committing: commit
     Active --> RollingBack: abort
     AbortOnly --> RollingBack: abort or rejected commit
-    Committing --> Idle: durable commit and checkpoint complete
+    Committing --> Idle: durable commit; checkpoint may continue
     RollingBack --> Idle: undo and cache restoration complete
     Committing --> RecoveryRequired: persistence outcome uncertain
     RollingBack --> RecoveryRequired: restoration fails
     RecoveryRequired --> [*]: close and recover before further writes
 ```
 
-Any participating operation failure, including a negative lookup, makes the transaction abort-only. Continuing successful operations must not accidentally commit earlier partial work. This is deliberately conservative; distinguishing ordinary negative lookups from mutation failures is future work.
+Mutation, storage and budget failures make the transaction abort-only. Expected ENOENT, ENOTDIR, ENODATA and ERANGE from read-only lookup/query operations preserve the active transaction. A failed mutation using the same errno still makes the group abort-only; continuing must not accidentally commit partial work.
 
 | Result | Required meaning |
 | --- | --- |
 | Begin succeeds | A transaction is active with a valid mode, owner and on-disk block budget. Overflow staging can temporarily use additional RAM. |
 | Operation succeeds inside TX | The change is visible to the owner; it is not yet durably committed. |
-| Commit returns zero | The entire selected metadata/data group is durably committed. Version 1 also completes checkpoint and retirement before returning. |
+| Commit returns zero | The entire selected metadata/data group is durably committed. Default synchronous mode completes checkpoint and retirement; optional background mode completes them before slot reuse. |
 | Abort returns zero | Protected state is restored; aborted descriptors are invalid. Metadata mode may retain ordinary file-data writes. |
 | Capacity or mutation failure before commit | The group cannot be committed; restore it through abort. |
 | Commit I/O error with uncertain persistence | Do not claim rollback. Stop writes and recover the image to determine the outcome. |
 
-A lost commit response can leave an application uncertain even when recovery preserves a valid committed transaction. Stable application idempotency keys or queryable transaction outcomes need additional persistent records and are outside the first API. Do not tell applications to retry non-idempotent work blindly.
+A lost commit response can leave an application uncertain even when recovery preserves a valid committed transaction. Version 2 provides 16-byte application keys and queryable outcomes in a bounded retained receipt page. See [durable outcomes](transaction-outcomes-design.md) for begin/query/forget semantics. Unkeyed applications still must not retry non-idempotent work blindly.
 
 ## Shared Journal Architecture
 
@@ -267,4 +268,4 @@ Compare ext4 and XFS only on a suitable Linux environment, matching file-data du
   no unlimited streaming user TX, physical multi-queue filesystem execution or
   automatic in-place format conversion.
 
-The tests above describe both implemented checks and future coverage targets. Consult [the evaluation report](journaling-evaluation.md) for the exact executed matrix rather than treating the entire checklist as completed.
+The tests above describe both implemented checks and future coverage targets. Consult [the current validation report](roadmap-validation.md) for the exact executed matrix rather than treating the entire checklist as completed.

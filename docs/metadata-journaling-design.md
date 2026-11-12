@@ -45,7 +45,7 @@ flowchart LR
     A["+0: stable anchor"] --> C["+1,+2: progress controls"] --> D["+3..+18: descriptors"] --> P["+19..+4093: full block images"] --> K["+4094,+4095: commit certificates"]
 ```
 
-All offsets in this figure are relative to journal start. The default extent is 4096 blocks; [larger journal geometry](large-transactions-design.md) defines the optional layouts. The maximum protected payload is **4075 distinct blocks**, including metadata, or 16,691,200 bytes. File-data capacity is smaller because metadata consumes slots too.
+All offsets in this default-geometry figure are relative to journal start. The default extent is 4096 blocks; [larger journal geometry](large-transactions-design.md) defines the optional layouts. The default maximum protected payload is **4075 distinct blocks**, including metadata, or 16,691,200 bytes. File-data capacity is smaller because metadata consumes slots too.
 
 | Structure | Fields and validation |
 | --- | --- |
@@ -126,15 +126,25 @@ CRC32C detects corruption; it is not authentication. There is one stable anchor,
 
 ## Failure handling and support limits
 
-The initial implementation supports one filesystem handle, one owning thread, synchronous buffered APIs and no nested explicit TX. Direct/AIO paths, xattrs and fallocate are rejected on journal mounts. Unlink of the last link to an open file, and rename replacement of such a target, return `-EBUSY` until orphan tracking exists. Sparse writes past EOF and truncate growth are rejected; sequential extension and shrinking are supported. The test-only payload-discard format cannot provide DATA transactions.
+The standalone implementation has one filesystem handle and owner thread, no
+nested explicit user TX, and serialized filesystem execution. Version 2 supports
+persistent open-unlink/replace, resumable truncate/delete, sparse growth, inline
+string xattrs and fallocate. An aligned cache-bypass API joins the journal overlay;
+producer threads can submit bounded futures to the owner. Historical AIO prepare
+helpers remain unsupported. The payload-discard test format rejects DATA groups.
 
-A failed explicit operation makes the TX abort-only. Budget overflow returns `-E2BIG` at the public boundary and requires abort. The journal preserves overflow images in memory long enough to finish the current legacy operation coherently; such images cannot be committed. This is bounded on-disk capacity, not strict bounded RAM admission. Exact operation-credit reservation remains future work. The staging index also costs approximately 4.125 bytes per volume block, in addition to the initial 16 MiB image buffer; very large volumes require a sparse index before this is practical.
+Mutation/storage failures make user TX abort-only; expected read-only lookup
+misses do not. Budget overflow returns `-E2BIG` and requires abort. Overflow images
+may finish the current legacy operation coherently but cannot be committed.
+Sparse staging/classification indexes replace volume-proportional allocations,
+and API boundaries preflight workspace. Exact operation-credit reservation and
+strict bounded RAM admission for every legacy path remain unfinished.
 
 Abort discards caches and remounts the committed image. A failed automatic operation uses the same rollback path. Metadata mode cannot undo ordinary data overwrites. O_SYNC uses the outer boundary; inside an explicit group it does not publish an independent commit. Explicit `sync`, `fsync` and `fdatasync` return `-EBUSY` while the group is active.
 
 An I/O/flush failure during journal publication or checkpoint marks the handle RECOVERY_REQUIRED and rejects subsequent operations. Close can discard volatile caches and release an already failed handle, returning `-EIO`; reopen resolves the durable log. Legacy cache I/O failures and some legacy allocation/partial-mount failures still terminate the process because those core paths cannot unwind safely. This reference version does not promise complete recoverable errno behavior under all ENOSPC/ENOMEM conditions.
 
-The original multiprocess bdev/event reactor is outside this implementation. Its journal-format mounts must not bypass signature validation. There is no orphan/deferred-delete format, concurrent group commit, background checkpointing, online resizing or persistent outcome-query API.
+The original multiprocess bdev/event reactor is outside this implementation. Its journal-format mounts must not bypass signature validation. The owner supports queued group commit, optional file-backend background checkpointing and bounded v2 outcome queries. Physical parallel SPDK execution, arbitrary-size/COW transactions and online journal resizing remain unimplemented.
 
 ## ext4, XFS and NVFUSE
 
@@ -152,17 +162,17 @@ flowchart TB
     end
     subgraph NV["NVFUSE reference version"]
         direction LR
-        N1["Single writer; full-block overlay"] --> N2["Fixed BG0 slot, dual controls and certificates"] --> N3["Immediate checkpoint and retirement"]
+        N1["Single writer; full-block overlay"] --> N2["Fixed BG0 slot, dual controls and certificates"] --> N3["Sync or optional file-worker checkpoint; retirement before reuse"]
     end
 ```
 
 | Property | ext4 | XFS | NVFUSE reference implementation |
 | --- | --- | --- | --- |
-| Log location | Usually an internal journal inode; external journal supported | Internal log extent or external log device | Fixed 16 MiB extent in BG0 |
+| Log location | Usually an internal journal inode; external journal supported | Internal log extent or external log device | Reserved 16/32/64 MiB extent in BG0 |
 | Main representation | JBD2 descriptor and full-block metadata images, commit and revoke records | Typed metadata log items, regions and intent/done mechanisms | Full 4 KiB metadata images; optional regular data images |
 | Ordinary file data | Commonly ordered mode; writeback and data-journal modes available | Regular data is not ordinarily journaled | Ordered regular writes; optional DATA user TX |
-| Space reuse | Circular journal, sequence and revoke handling | Circular log, LSN/cycle and tail tracking | One reusable slot; synchronous checkpoint and dual retirement |
-| Throughput machinery | Concurrent transactions, batching, asynchronous checkpoint | Delayed logging, CIL aggregation, scalable allocation groups | Single writer, synchronous checkpoint, explicit application batching |
+| Space reuse | Circular journal, sequence and revoke handling | Circular log, LSN/cycle and tail tracking | One reusable slot; dual retirement before reuse |
+| Throughput machinery | Concurrent transactions, batching, asynchronous checkpoint | Delayed logging, CIL aggregation, scalable allocation groups | Owner-thread batching and optional file-backend background checkpoint |
 | Recovery | Established JBD2 replay/revoke semantics | Established typed replay and deferred-operation recovery | Checksum-validated physical image replay |
 | Arbitrary application multi-operation TX API | Not provided by ordinary POSIX interfaces | Not provided by ordinary POSIX interfaces | Explicit begin/commit/abort on the supported embedded handle |
 | Maturity | Broad production deployment | Broad production deployment | New reference implementation with limited coverage |
@@ -177,7 +187,7 @@ For authoritative format and architecture details, see the Linux kernel document
 - [Backend, format and mount ordering](../nvfuse_file.c), [cache metadata classification](../nvfuse_buffer_cache.c).
 - [Automatic/user transaction boundaries](../nvfuse_tx.c), [public API wrappers](../nvfuse_tx_wrappers.c).
 - [Independent persistence model](../tests/journal_engine_test.c), [filesystem TX oracle](../tests/transaction_test.c), [crash runner](../tests/run_transactions.py).
-- [Measurements and remaining validation gaps](journaling-evaluation.md).
+- [Current measurements and remaining validation gaps](roadmap-validation.md).
 
 
 ### Directory parent metadata
