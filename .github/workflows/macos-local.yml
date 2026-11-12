@@ -1,0 +1,37 @@
+name: macOS local tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-local-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-test:
+    name: File backend smoke test
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Show build environment
+        run: |
+          uname -sm
+          clang --version
+          python3 --version
+
+      - name: Build and test file backend
+        run: make local-test

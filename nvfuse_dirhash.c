@@ -277,6 +277,20 @@ s32 ext2fs_dirhash(int version, const char *name, int len,
 #define SCALE_F 4
 #endif
 
+#ifdef NVFUSE_FILE_BACKEND
+/* Match x86 CRC32C: reflected Castagnoli, initial ~0, no final xor. */
+u32 crc32c_intel(unsigned char const *data, unsigned long length)
+{
+    u32 crc = ~0U;
+    while (length--) {
+        crc ^= *data++;
+        for (int bit = 0; bit < 8; bit++)
+            crc = (crc >> 1) ^ (0x82f63b78U & (0U - (crc & 1U)));
+    }
+    return crc;
+}
+void crc32c_intel_probe(void) {}
+#else
 int crc32c_intel_available = 0;
 static int crc32c_probed;
 
@@ -346,3 +360,5 @@ void crc32c_intel_probe(void)
 		crc32c_probed = 1;
 	}
 }
+
+#endif

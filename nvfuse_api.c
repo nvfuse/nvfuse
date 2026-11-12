@@ -22,10 +22,12 @@
 #include <errno.h>
 
 #include "nvfuse_config.h"
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+#if NVFUSE_OS != NVFUSE_OS_WINDOWS
 #include <dirent.h>
 #include <sys/uio.h>
+#ifdef __linux__
 #include <sys/sysmacros.h>
+#endif
 #endif
 
 #ifdef SPDK_ENABLED
@@ -147,6 +149,7 @@ void nvfuse_distinguish_core_and_app_options(int argc, char **argv,
 	}*/
 }
 
+#ifndef NVFUSE_FILE_BACKEND
 s32 nvfuse_configure_spdk(struct nvfuse_ipc_context *ipc_ctx, struct nvfuse_params *params, s32 qdepth)
 {
 	sprintf(params->cpu_core_mask_str, "%d", params->cpu_core_mask);
@@ -164,6 +167,8 @@ s32 nvfuse_configure_spdk(struct nvfuse_ipc_context *ipc_ctx, struct nvfuse_para
 
 	return 0;
 }
+
+#endif
 
 static char *ltrim(char *str)
 {
@@ -307,6 +312,7 @@ PRINT_USAGE:
 	return -1;
 }
 
+#ifndef NVFUSE_FILE_BACKEND
 #ifdef NVFUSE_USE_CEPH_SPDK
 static inline u32 spdk_bdev_get_block_size(struct spdk_bdev *bdev)
 {
@@ -414,6 +420,8 @@ void nvfuse_destroy_handle(struct nvfuse_handle *nvh, s32 deinit_iom, s32 need_u
 
 	nvfuse_ipc_exit(&nvh->nvh_ipc_ctx);
 }
+
+#endif
 
 struct nvfuse_dir_entry * nvfuse_lookup_linear(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *dir_ictx, 
 						struct nvfuse_inode *dir_inode, const s8 *filename, struct nvfuse_buffer_head **dir_bh_return)
@@ -1839,7 +1847,10 @@ s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t 
 
 	sb = nvfuse_read_super(nvh);
 
-	nvfuse_rm_direntry(sb, par_ino, name, &ino);
+	if (nvfuse_rm_direntry(sb, par_ino, name, &ino)) {
+		nvfuse_release_super(sb);
+		return -ENOENT;
+	}
 
 	if (!nvfuse_lookup(sb, &ictx, NULL, newname, new_par_ino)) {
 		inode = ictx->ictx_inode;

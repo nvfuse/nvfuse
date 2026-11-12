@@ -24,9 +24,11 @@
 #include <sys/uio.h>
 #endif
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/env.h"
 #include "spdk/bdev.h"
-
 #include <rte_common.h>
 #include <rte_memory.h>
 #include <rte_memzone.h>
@@ -40,6 +42,7 @@
 #include <rte_ring.h>
 #include <rte_log.h>
 #include <rte_mempool.h>
+#endif
 
 #include "nvfuse_dep.h"
 #include "nvfuse_buffer_cache.h"
@@ -764,7 +767,8 @@ s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	bp_deinit_master(master);
 
 	end_tsc = spdk_get_ticks();
-	assert((end_tsc - start_tsc) > 0);
+	/* A fast operation can complete within one clock tick. */
+	assert(end_tsc >= start_tsc);
 	sb->bp_set_index_tsc += (end_tsc - start_tsc);
 	sb->bp_set_index_count++;
 
@@ -881,6 +885,8 @@ s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 
 	if (bp_find_key(master, &key, &offset) < 0) {
 		dprintf_error(DIRECTORY, " find key %lu \n", (unsigned long)key);
+		B_RELEASE_BH(master, master->m_bh);
+		bp_deinit_master(master);
 		return -1;
 	}
 
@@ -960,7 +966,7 @@ void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks)
 
 	assert(num_blocks <= AIO_MAX_QDEPTH);
 
-#if (NVFUSE_OS==NVFUSE_OS_LINUX)
+#if (NVFUSE_OS==NVFUSE_OS_LINUX) || defined(NVFUSE_FILE_BACKEND)
 	res = nvfuse_make_jobs(sb, jobs, num_blocks);
 	if (res != 0) {
 		/* FIXME: */
@@ -1452,8 +1458,13 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 
 	dprintf_info(MOUNT, " mempool size for value: %d\n", (int)(sizeof(struct io_job) * AIO_MAX_QDEPTH * 2));
 
+#ifdef NVFUSE_FILE_BACKEND
+	mempool_size = AIO_MAX_QDEPTH * 2;
+#else
+	mempool_size = sizeof(struct io_job) * AIO_MAX_QDEPTH * 32;
+#endif
 	sb->io_job_mempool = spdk_mempool_create(mempool_name,
-			     (sizeof(struct io_job) * AIO_MAX_QDEPTH * 32),
+			     mempool_size,
 			     sizeof(struct io_job), 128, SPDK_ENV_SOCKET_ID_ANY);
 	if (sb->io_job_mempool == NULL) {
 		dprintf_error(MOUNT, "allocation of mempool io_jobs \n");
@@ -1733,7 +1744,8 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		nvfuse_send_health_check_msg_to_primary_process(nvh);
 	}
 
-	assert (sb->sb_state == FS_STATE_INITIALIZED);
+	/* A clean unmount preserves the initialized directory indexes. */
+	assert(sb->sb_state == FS_STATE_INITIALIZED || sb->sb_state == FS_STATE_UMOUNTED);
 
 	sb->sb_state = FS_STATE_MOUNTED;
 
@@ -2535,8 +2547,8 @@ s32 nvfuse_link(struct nvfuse_superblock *sb, u32 newino, s8 *new_filename, s32 
 	if (empty_dentry < 0) {
 		return -1;
 	}
-	search_lblock = dir_inode->i_ptr / DIR_ENTRY_NUM;
-	search_entry = dir_inode->i_ptr % DIR_ENTRY_NUM;
+	search_lblock = empty_dentry / DIR_ENTRY_NUM;
+	search_entry = empty_dentry % DIR_ENTRY_NUM;
 
 	dir_inode->i_ptr = search_lblock * DIR_ENTRY_NUM + search_entry;
 	dir_inode->i_links_count++;
@@ -2705,7 +2717,7 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 	struct nvfuse_inode *inode = NULL;
 	struct nvfuse_dir_entry *dir = NULL;
 	struct nvfuse_buffer_head *dir_bh = NULL;
-	u32 found_entry;
+	s32 found_entry;
 	u32 search_lblock, search_entry;
 
 	dir_ictx = nvfuse_read_inode(sb, NULL, par_ino);
@@ -2713,8 +2725,10 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 
 	/* find an existing dentry */
 	found_entry = nvfuse_find_existing_dentry(sb, dir_ictx, dir_inode, name);
-	if (found_entry < 0)
-		return 0;
+	if (found_entry < 0) {
+		nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+		return -ENOENT;
+	}
 
 	search_lblock = found_entry / DIR_ENTRY_NUM;
 	search_entry = found_entry % DIR_ENTRY_NUM;
@@ -2745,6 +2759,15 @@ s32 nvfuse_rm_direntry(struct nvfuse_superblock *sb, inode_t par_ino, s8 *name, 
 	dir->d_flag = DIR_DELETED;
 
 	nvfuse_release_bh(sb, dir_bh, 0, DIRTY);
+
+	/* Keep dentries dense, as create/link and subsequent removals expect. */
+	dir_inode->i_links_count--;
+	dir_inode->i_ptr = dir_inode->i_links_count - 1;
+	nvfuse_shrink_dentry(sb, dir_ictx, found_entry, dir_inode->i_links_count);
+	if ((dir_inode->i_links_count * DIR_ENTRY_SIZE) % CLUSTER_SIZE == 0) {
+		nvfuse_free_inode_size(sb, dir_ictx, (u64)dir_inode->i_links_count * DIR_ENTRY_SIZE);
+		dir_inode->i_size -= CLUSTER_SIZE;
+	}
 	nvfuse_release_inode(sb, dir_ictx, DIRTY);
 
 	nvfuse_release_inode(sb, ictx, DIRTY);

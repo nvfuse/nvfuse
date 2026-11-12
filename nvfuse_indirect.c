@@ -45,7 +45,11 @@
 //#define NDEBUG
 #include <assert.h>
 #include <errno.h>
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/env.h"
+#endif
 
 #ifdef __linux__
 #include <sys/uio.h>

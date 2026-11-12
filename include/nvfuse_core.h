@@ -17,7 +17,11 @@
 #include "nvfuse_types.h"
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_stat.h"
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "rte_spinlock.h"
+#endif
 #include "list.h"
 #include "rbtree.h"
 

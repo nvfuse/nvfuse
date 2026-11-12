@@ -22,12 +22,16 @@
 //#define NDEBUG
 #include <assert.h>
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include <rte_common.h>
 #include <rte_config.h>
 #include <rte_eal.h>
 #include <rte_lcore.h>
 #include <rte_memcpy.h>
 #include <rte_malloc.h>
+#endif
 
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"

@@ -12,8 +12,12 @@
 * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
 * more details.
 */
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/bdev.h"
 #include "spdk/event.h"
+#endif
 
 #ifndef __NVFUSE_REACTOR__
 #define __NVFUSE_REACTOR__
@@ -22,6 +26,10 @@
 #define REACTOR_BUFFER_IOVS 4
 
 struct io_target {
+#ifdef NVFUSE_FILE_BACKEND
+    int fd;
+    uint64_t size_bytes;
+#endif
 	struct spdk_bdev	*bdev;
 	struct spdk_bdev_desc	*desc;
 	struct spdk_io_channel	*ch;

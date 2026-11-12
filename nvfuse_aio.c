@@ -20,6 +20,10 @@
 #include <assert.h>
 
 #include "nvfuse_io_manager.h"
+#if defined(__APPLE__) && defined(NVFUSE_FILE_BACKEND)
+/* macOS has no RUSAGE_THREAD; standalone statistics cover this process. */
+#define RUSAGE_THREAD RUSAGE_SELF
+#endif
 #include "nvfuse_core.h"
 #include "nvfuse_aio.h"
 #include "nvfuse_api.h"

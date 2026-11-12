@@ -25,8 +25,10 @@
 //#define NDEBUG
 #include <assert.h>
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/env.h"
-
 #include <rte_common.h>
 #include <rte_memory.h>
 #include <rte_memzone.h>
@@ -40,6 +42,8 @@
 #include <rte_ring.h>
 #include <rte_log.h>
 #include <rte_mempool.h>
+#endif
+
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"

@@ -35,7 +35,12 @@
 //#define USE_NVFUSE_TRACE 0
 //#define USE_BUFFER_POOL 0
 
-#ifndef __USE_FUSE__
+#ifdef NVFUSE_FILE_BACKEND
+#define USE_RAMDISK 0
+#define USE_FILEDISK 0
+#define USE_BLKDEVIO 0
+#define USE_SPDK 0
+#elif !defined(__USE_FUSE__)
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #	define USE_RAMDISK  0
 #	define USE_FILEDISK 0

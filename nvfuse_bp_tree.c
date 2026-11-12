@@ -18,7 +18,7 @@
 #include <stdlib.h>
 //#define NDEBUG
 #include <assert.h>
-#ifndef __linux__
+#if defined(_WIN32)
 #include <windows.h>
 #endif
 #ifdef SPDK_ENABLED

@@ -13,8 +13,13 @@
 * more details.
 */
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "rte_spinlock.h"
 #include "rte_atomic.h"
+#endif
+
 #include "nvfuse_config.h"
 #include "nvfuse_core.h"
 #include "nvfuse_buffer_cache.h"

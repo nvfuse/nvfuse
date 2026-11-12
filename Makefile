@@ -118,3 +118,12 @@ ifneq ($(wildcard .depend),)
 include .depend
 endif
 
+
+# Native file-image development targets, separate from the SPDK build.
+.PHONY: local local-test local-sanitize
+local:
+	$(MAKE) -f Makefile.local all
+local-test:
+	$(MAKE) -f Makefile.local test
+local-sanitize:
+	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test

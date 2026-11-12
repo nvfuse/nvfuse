@@ -22,9 +22,12 @@
 
 #define NVFUSE_OS_WINDOWS 1
 #define NVFUSE_OS_LINUX 2
+#define NVFUSE_OS_DARWIN 3
 
 #ifdef __linux__
 #	define NVFUSE_OS NVFUSE_OS_LINUX
+#elif defined(__APPLE__)
+#	define NVFUSE_OS NVFUSE_OS_DARWIN
 #else
 #	define NVFUSE_OS NVFUSE_OS_WINDOWS
 #endif
@@ -86,11 +89,19 @@ static inline int nvfuse_process_model_is_dataplane(void)
 #define NVFUSE_BUFFER_DEFAULT_ALLOC_SIZE_PER_MSG 1
 
 /* Buffer Head Mempool Settings */
+#ifdef NVFUSE_FILE_BACKEND
+#define NVFUSE_BH_MEMPOOL_TOTAL_SIZE 8192
+#else
 #define NVFUSE_BH_MEMPOOL_TOTAL_SIZE	(0x10000) /* 256MB */
+#endif
 #define NVFUSE_BH_MEMPOOL_CACHE_SIZE	2048
 
 /* Buffer Cache Mempool Settings */
+#ifdef NVFUSE_FILE_BACKEND
+#define NVFUSE_BC_MEMPOOL_TOTAL_SIZE 8192
+#else
 #define NVFUSE_BC_MEMPOOL_TOTAL_SIZE	(0x400000) /* 16GB */
+#endif
 #define NVFUSE_BC_MEMPOOL_CACHE_SIZE	2048
 
 /* Buffer Cache Mempool Settings */

@@ -109,7 +109,7 @@ static inline struct page * rb_insert_page_cache(struct inode * inode,
 
 #ifndef	_LINUX_RBTREE_H
 #define	_LINUX_RBTREE_H
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #if defined(container_of)
 #undef container_of
 #define container_of(ptr, type, member) ({			\
@@ -121,7 +121,10 @@ static inline struct page * rb_insert_page_cache(struct inode * inode,
         (type *)( (char *)__mptr - offsetof(type,member) );})
 #endif
 
-#if defined(offsetof)
+#if defined(NVFUSE_FILE_BACKEND)
+#undef offsetof
+#define offsetof(TYPE, MEMBER) __builtin_offsetof(TYPE, MEMBER)
+#elif defined(offsetof)
 #undef offsetof
 #define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
 #else

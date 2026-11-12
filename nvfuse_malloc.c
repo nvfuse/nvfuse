@@ -17,12 +17,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 #include "nvfuse_types.h"
 #include "nvfuse_malloc.h"
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/env.h"
+#endif
 
 static u64 memalloc_allocated_size = 0;
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+#if NVFUSE_OS == NVFUSE_OS_LINUX || NVFUSE_OS == NVFUSE_OS_DARWIN
 #include <unistd.h> /* getpagesize() */
 
 #ifdef SPDK_ENABLED
@@ -60,7 +65,8 @@ void *nvfuse_alloc_aligned_buffer(size_t size)
 #ifndef USE_RTE_MEMALLOC
 	s32 ret;
 	ret = posix_memalign(&p, getpagesize(), size);
-	if (!p || ret) {
+	if (ret) {
+		errno = ret;
 		perror("memalign");
 		return NULL;
 	}

@@ -13,10 +13,14 @@
 * more details.
 */
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/env.h"
 #include <rte_lcore.h>
 #include <rte_mempool.h>
 #include <rte_malloc.h>
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -297,7 +301,12 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 		ictxc->ictxc_hash_count[i] = 0;
 	}
 
-	ictxc->ictx_buf = spdk_dma_malloc(sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE, 0, NULL);
+	ictxc->ictx_buf = spdk_dma_zmalloc(sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE, 0, NULL);
+	if (ictxc->ictx_buf == NULL) {
+		spdk_dma_free(ictxc);
+		sb->sb_ictxc = NULL;
+		return -1;
+	}
 
 	dprintf_info(BUFFER, " ictx cache size = %d \n", (int)sizeof(struct nvfuse_inode_ctx) * NVFUSE_ICTXC_SIZE);
 
@@ -306,6 +315,8 @@ int nvfuse_init_ictx_cache(struct nvfuse_superblock *sb)
 		struct nvfuse_inode_ctx *ictx;
 
 		ictx = ((struct nvfuse_inode_ctx *)ictxc->ictx_buf) + i;
+		/* Replacement locks unused contexts before their first initialization. */
+		SPINLOCK_INIT(&ictx->ictx_lock);
 
 		list_add(&ictx->ictx_cache_list, &ictxc->ictxc_list[BUFFER_TYPE_UNUSED]);
 		hlist_add_head(&ictx->ictx_hash, &ictxc->ictxc_hash[HASH_NUM]);

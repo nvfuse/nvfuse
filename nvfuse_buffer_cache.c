@@ -13,10 +13,14 @@
 * more details.
 */
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/env.h"
 #include <rte_lcore.h>
 #include <rte_mempool.h>
 #include <rte_malloc.h>
+#endif
 
 #include <stdio.h>
 #include <string.h>

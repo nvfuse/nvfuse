@@ -21,3 +21,5 @@ mktags.sh
 libfuse
 mkfs
 xattr_test
+
+/build/

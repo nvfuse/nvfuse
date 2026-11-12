@@ -359,8 +359,13 @@ static inline void list_splice_tail_init(struct list_head *list,
 #undef container_of
 #endif
 
+#ifdef NVFUSE_FILE_BACKEND
+#define container_of(ptr, type, member) \
+	((type *)((char *)(ptr) - __builtin_offsetof(type, member)))
+#else
 #define container_of(ptr, type, member) \
 	((type *)((char *)(ptr)-(unsigned long)(&((type *)0)->member)))
+#endif
 
 /**
  * list_entry - get the struct for this entry

@@ -8,6 +8,58 @@ NVFUSE is an embeddable file system as a library running in the user-space incor
  - Simple file system layout that is identical to EXT family file system (e.g., EXT3).
  - Strong file system consistency and durability without pessimistic journaling mechanism (e.g., EXT4 journaling) through NVMe metadata feature as described [NVMe spec](http://nvmexpress.org/wp-content/uploads/NVM_Express_1_2_Gold_20141209.pdf). 
 
+Local development on macOS
+==========================
+
+A separate file-image backend supports native macOS development without SPDK,
+DPDK, hugepages, root access, or macFUSE. It runs the existing NVFUSE filesystem,
+including its metadata, buffer cache and directory indexes, against a regular
+file using `pread`, `pwrite` and `fsync`.
+
+Requirements: Xcode Command Line Tools (`clang`, `make`) and Python 3.9 or later.
+Verified on Apple Silicon macOS. Linux and recent SPDK support are follow-up work.
+
+    make local
+    make local-test
+    make local-sanitize
+
+`local-test` creates a disposable 256 MiB sparse image, then runs separate
+processes to create and verify a binary file larger than 3 MiB, perform an
+unaligned overwrite, verify 40 small files, rename and delete entries, and verify
+those changes after remount. It also checks repeated mounts within one process
+and rejects existing create targets, locked images, symlinks and invalid image
+headers. Temporary images are removed automatically; failures exit nonzero.
+`local-sanitize` runs the same tests with AddressSanitizer and
+UndefinedBehaviorSanitizer. Legacy source warnings remain visible; the new
+backend and test executable compile with `-Werror`.
+
+Pull requests run `make local-test` on a GitHub-hosted macOS runner through
+`.github/workflows/macos-local.yml`. The workflow can also be started manually
+from the Actions tab. It tests the file backend; Linux and SPDK CI are follow-up
+work.
+
+To keep an image for debugging, use a new path:
+
+    ./build/local/local_test create /tmp/nvfuse-dev.img
+    ./build/local/local_test verify /tmp/nvfuse-dev.img
+    ./build/local/local_test mutate /tmp/nvfuse-dev.img
+    ./build/local/local_test final /tmp/nvfuse-dev.img
+
+The executable's source is `tests/local_test.c`. Applications can link
+`build/local/nvfuse.a`, compile with `-DNVFUSE_FILE_BACKEND -Iinclude`, open a
+filesystem with `nvfuse_file_open()` from `include/nvfuse_file.h`, call the normal
+`nvfuse_*` file APIs, and finish with `nvfuse_file_close()`. Creation requires a
+new file path and an image size in multiples of 128 MiB; reopening never formats
+an existing image. Use a different path for another fresh image.
+
+This backend currently supports one filesystem handle per process and calls
+from one thread. I/O executes synchronously, including batched cache writeback.
+It does not validate SPDK performance, multiprocess IPC, crash recovery, or
+Linux image compatibility, and does not mount a volume in Finder. Use disposable
+development images: underlying block-I/O errors or partial mount failures abort
+the process because the legacy core cannot reliably unwind those failures.
+The original SPDK build commands below remain separate from this local mode.
+
 Prerequisites
 =============
 In order to build NVFUSE, some relevant libraries must be configured. 
