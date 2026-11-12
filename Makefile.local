@@ -1,8 +1,8 @@
-# Native file-image development build. Does not use SPDK, DPDK or macFUSE.
+# Native macOS/Linux file-image build. Does not use SPDK, DPDK or FUSE.
 CC = clang
 LOCAL_BUILD ?= build/local
 LOCAL_CFLAGS ?= -O1 -g
-CPPFLAGS += -DDEBUG -DNVFUSE_FILE_BACKEND -Iinclude
+CPPFLAGS += -D_GNU_SOURCE -DDEBUG -DNVFUSE_FILE_BACKEND -Iinclude
 CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Wno-unused-variable -Wno-unused-function -Wno-format -Wno-pointer-sign
 SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
  nvfuse_gettimeofday.c nvfuse_bp_tree.c nvfuse_dirhash.c nvfuse_misc.c \

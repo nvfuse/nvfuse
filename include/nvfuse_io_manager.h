@@ -23,7 +23,7 @@
 #ifndef __IO_MANAGER__
 #define __IO_MANAGER__
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+#if NVFUSE_OS == NVFUSE_OS_LINUX && !defined(NVFUSE_FILE_BACKEND)
 #include <libaio.h>
 #endif
 #ifndef _NVFUSE_IO_H

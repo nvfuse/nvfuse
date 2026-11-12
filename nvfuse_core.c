@@ -1890,7 +1890,7 @@ s32 nvfuse_is_bd(s8 *buf)
 
 }
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+#if NVFUSE_OS == NVFUSE_OS_LINUX && !defined(NVFUSE_FILE_BACKEND)
 u32 get_part_size(s32 fd)
 {
 	u32 size, blksize;

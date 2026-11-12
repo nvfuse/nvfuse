@@ -8,16 +8,17 @@ NVFUSE is an embeddable file system as a library running in the user-space incor
  - Simple file system layout that is identical to EXT family file system (e.g., EXT3).
  - Strong file system consistency and durability without pessimistic journaling mechanism (e.g., EXT4 journaling) through NVMe metadata feature as described [NVMe spec](http://nvmexpress.org/wp-content/uploads/NVM_Express_1_2_Gold_20141209.pdf). 
 
-Local development on macOS
-==========================
+Local development on macOS and Linux
+===================================
 
-A separate file-image backend supports native macOS development without SPDK,
-DPDK, hugepages, root access, or macFUSE. It runs the existing NVFUSE filesystem,
+A separate file-image backend supports macOS and Linux development without SPDK,
+DPDK, hugepages, root access, or FUSE. It runs the existing NVFUSE filesystem,
 including its metadata, buffer cache and directory indexes, against a regular
 file using `pread`, `pwrite` and `fsync`.
 
-Requirements: Xcode Command Line Tools (`clang`, `make`) and Python 3.9 or later.
-Verified on Apple Silicon macOS. Linux and recent SPDK support are follow-up work.
+Requirements: `clang`, `make` and Python 3.9 or later. On macOS, install Xcode
+Command Line Tools. Verified on Apple Silicon macOS and Rocky Linux 9 ARM64 in
+Colima. Recent SPDK support remains follow-up work.
 
     make local
     make local-test
@@ -33,10 +34,22 @@ headers. Temporary images are removed automatically; failures exit nonzero.
 UndefinedBehaviorSanitizer. Legacy source warnings remain visible; the new
 backend and test executable compile with `-Werror`.
 
-Pull requests run `make local-test` on a GitHub-hosted macOS runner through
-`.github/workflows/macos-local.yml`. The workflow can also be started manually
-from the Actions tab. It tests the file backend; Linux and SPDK CI are follow-up
-work.
+Pull requests run `make local-test` on a GitHub-hosted macOS runner and both
+regular and ASan/UBSan tests in a Rocky Linux 9 container on an Ubuntu x86_64
+runner through `.github/workflows/local-tests.yml`. The workflow can also be
+started manually from the Actions tab. SPDK CI remains follow-up work.
+
+To run the Rocky Linux 9 tests through an existing Colima Docker VM:
+
+    sh scripts/test-rocky9.sh
+
+The script builds a toolchain image with `clang`, `compiler-rt`, `make` and
+Python, then runs both the regular and ASan/UBSan tests. Source is mounted read
+only; build products and disposable filesystem images stay inside a temporary
+container. Tests run without network access. The toolchain image is retained
+for reuse. Override `NVFUSE_DOCKER_CONTEXT` to use a different Docker context.
+On Apple Silicon, the default Colima VM tests Linux ARM64; the GitHub Actions
+Rocky 9 job tests x86_64. Rocky 8 requires separate validation.
 
 To keep an image for debugging, use a new path:
 
@@ -55,9 +68,9 @@ an existing image. Use a different path for another fresh image.
 This backend currently supports one filesystem handle per process and calls
 from one thread. I/O executes synchronously, including batched cache writeback.
 It does not validate SPDK performance, multiprocess IPC, crash recovery, or
-Linux image compatibility, and does not mount a volume in Finder. Use disposable
-development images: underlying block-I/O errors or partial mount failures abort
-the process because the legacy core cannot reliably unwind those failures.
+cross-platform image interchange, and does not mount a volume in Finder. Use
+disposable development images: underlying block-I/O errors or partial mount
+failures abort the process because the legacy core cannot reliably unwind those failures.
 The original SPDK build commands below remain separate from this local mode.
 
 Prerequisites

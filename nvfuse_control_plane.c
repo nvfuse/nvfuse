@@ -44,7 +44,9 @@
 #include "nvfuse_mkfs.h"
 
 #if NVFUSE_OS == NVFUSE_OS_LINUX
+#ifndef NVFUSE_FILE_BACKEND
 #include <libaio.h>
+#endif
 #	include <unistd.h>
 #	include <sys/types.h>
 #endif

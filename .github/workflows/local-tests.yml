@@ -1,4 +1,4 @@
-name: macOS local tests
+name: Local file backend tests
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: macos-local-${{ github.ref }}
+  group: local-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -18,12 +18,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: '3.12'
 
@@ -35,3 +35,18 @@ jobs:
 
       - name: Build and test file backend
         run: make local-test
+
+  rocky9-test:
+    name: Rocky Linux 9 file backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test Rocky Linux 9 container
+        env:
+          NVFUSE_DOCKER_CONTEXT: default
+        run: sh scripts/test-rocky9.sh
