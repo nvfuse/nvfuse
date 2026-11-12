@@ -6,7 +6,7 @@ NVFUSE is an embeddable file system as a library running in the user-space incor
  - Running in userspace without any interactions with kernel driver so that interrupts, context switches, and memory copies are eliminated. 
  - Embeddable file system as a library that introduces new interfaces are similar to POSIX API.
  - Simple file system layout that is identical to EXT family file system (e.g., EXT3).
- - Strong file system consistency and durability without pessimistic journaling mechanism (e.g., EXT4 journaling) through NVMe metadata feature as described [NVMe spec](http://nvmexpress.org/wp-content/uploads/NVM_Express_1_2_Gold_20141209.pdf). 
+ - Metadata redo journaling and optional application transactions in the standalone file and SPDK/NVMe backends. See the support limits below; NVMe commands alone do not make multiple metadata writes atomic.
 
 Local development on macOS and Linux
 ===================================
@@ -67,11 +67,46 @@ an existing image. Use a different path for another fresh image.
 
 This backend currently supports one filesystem handle per process and calls
 from one thread. I/O executes synchronously, including batched cache writeback.
-It does not validate SPDK performance, multiprocess IPC, crash recovery, or
+It does not validate physical NVMe performance, multiprocess IPC, or
 cross-platform image interchange, and does not mount a volume in Finder. Use
 disposable development images: underlying block-I/O errors or partial mount
 failures abort the process because the legacy core cannot reliably unwind those failures.
 The original SPDK build commands below remain separate from this local mode.
+
+Metadata journaling and optional user transactions
+-------------------------------------------------
+
+New standalone images reserve a 16 MiB metadata redo journal in BG0. Reopening
+validates and replays the original journal before mounting; reformatting is not
+recovery. Ordinary supported operations obtain automatic internal transactions.
+Legacy clean images remain readable through their old mode and have no journal.
+
+Applications can optionally group operations using `nvfuse_tx_begin`,
+`nvfuse_tx_commit` and `nvfuse_tx_abort` from `include/nvfuse_tx.h`:
+
+- `NVFUSE_TX_METADATA`: atomic metadata; ordinary file bytes may survive abort.
+- `NVFUSE_TX_DATA`: atomic metadata and regular-file bytes using full-block redo.
+
+Begin requires no open descriptors, one owning thread, and no nested TX.
+Capacity is 4075 distinct protected blocks including metadata; zero budget uses
+that maximum. Abort invalidates descriptors opened inside the group. Explicit
+sync inside a TX returns `-EBUSY`. Direct/AIO, xattrs, fallocate, sparse writes
+past EOF and truncate growth are outside this reference implementation.
+Legacy cache errors and some allocation failures still terminate the process.
+
+    make -f Makefile.local journal-test
+    make -f Makefile.local journal-bench
+
+The journal tests combine a separate volatile/durable persistence model with
+fresh-process original-image replay. Reports and benchmark samples are saved
+under `build/test-results/`; failure images are retained in the reported temp
+folder. Existing `local-test` and `local-framework` also exercise new journal
+images by default. The standalone SPDK integration runs the TX oracle on the
+dedicated QEMU NVMe and checks recovery after injected I/O failures.
+
+See [disk format, ordering, recovery diagrams and ext4/XFS comparison](docs/metadata-journaling-design.md),
+[the user TX API contract](docs/user-transactions-design.md), and
+[executed validation and performance results](docs/journaling-evaluation.md).
 
 Deterministic test framework
 ----------------------------
@@ -147,10 +182,11 @@ the 10-second transport deadline, and removal with a submitted read pending.
 The synchronous NVFUSE transport does not poll SPDK's hotplug scanner; unplug
 can therefore terminate through the I/O deadline rather than an immediate
 removal notification.
-The current filesystem aborts on block-I/O failure. Tests require SIGABRT and
-the corresponding transport error, then verify that a fresh process rejects
-the on-disk mounted state after VM restart. These are failure-detection tests;
-automatic recovery of that filesystem is explicitly reported as skipped.
+Legacy cache paths still abort on block-I/O failure. Tests require SIGABRT and
+the corresponding transport error, then reopen the original journal volume
+after VM restart and verify its payload before reformatting. The integration
+profile also exercises explicit metadata/DATA transactions and original-image
+replay after interruption at journal persistence boundaries.
 Faulted disks are retained as compact qcow2 images in the report directory
 before another test reformats the disposable disk. A final format and data
 round trip check that the device and environment can be reused.
@@ -173,7 +209,7 @@ checkout are local prerequisites, not included in this repository.
 | Reopen and reconnect | Fresh filesystem processes | Ten fresh SPDK processes |
 | Capacity and invalid requests | Range rejection and fail-fast short reads | First/last LBA and invalid read/write ranges |
 | I/O failures | Fail-fast block-I/O contract | Raw NVMe failure handling; NVFUSE read/write EIO, timeout/resume, and removal (`integration-faults`) |
-| Recovery | Clean remount | Raw transient-error retry; NVFUSE clean resume or rejection of unclean images after reboot |
+| Recovery | Original-image journal replay and an independent persistence model | Raw transient-error retry; original journal-volume recovery and payload verification after reboot |
 | NVFUSE metadata lifecycle | Normal and metadata-only images | Both formats through NVMe; VM restart persistence (`integration`) |
 
 The QEMU ARM platform lacks interrupt remapping. Inside this isolated VM only,
@@ -182,9 +218,9 @@ DMA IOMMU protection; it restores the setting, hugepage reservation, and Linux
 driver on exit. A timed-out command is resumed to verify data, and an unplugged
 controller is recovered by restarting the VM. Multiple queues currently
 exercise the raw NVMe test program; the NVFUSE transport remains synchronous.
-Crash-consistent filesystem recovery, hot
-re-add without reboot, real SSD durability, and parallel NVFUSE I/O are not
-claimed. Filesystem integration is reported as skipped unless selected with
+Hot re-add without reboot, physical SSD power-loss durability, and parallel
+NVFUSE I/O are not claimed. Journal recovery is limited to the supported
+standalone paths documented above. Filesystem integration is reported as skipped unless selected with
 `--profile integration`, `--profile integration-faults`, or `--profile all`.
 
 Prerequisites

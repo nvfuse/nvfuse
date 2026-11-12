@@ -4,6 +4,7 @@
 #include "nvfuse_file.h"
 #include "nvfuse_mkfs.h"
 #include "nvfuse_ipc_ring.h"
+#include "nvfuse_tx_internal.h"
 #ifdef NVFUSE_SPDK_TRANSPORT
 #include "nvfuse_nvme_transport.h"
 #endif
@@ -28,7 +29,7 @@ static int raw_transfer(struct io_target *target, uint64_t offset, size_t bytes,
 #ifdef NVFUSE_SPDK_TRANSPORT
     if (target->spdk_transport) {
         int rc = nvfuse_nvme_transfer(target->spdk_transport, offset, bytes, buffer, write_op);
-        if (rc) { fprintf(stderr, "NVFUSE SPDK: block I/O failed: %d\n", rc); abort(); }
+        if (rc) return rc;
         return 0;
     }
 #endif
@@ -39,7 +40,7 @@ static int raw_transfer(struct io_target *target, uint64_t offset, size_t bytes,
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) {
             if (!n) errno = EIO;
-            perror("file backend I/O"); abort();
+            return -errno;
         }
         done += (size_t)n;
     }
@@ -52,17 +53,34 @@ static int file_transfer(struct io_target *target, uint64_t offset, size_t bytes
         fprintf(stderr, "file backend: I/O beyond image boundary\n");
         abort();
     }
-    if (write_op && target->metadata_only && offset < sizeof(uint32_t)) {
-        uint32_t signature = META_IMAGE_SIGNATURE;
-        size_t prefix = sizeof(signature) - offset;
-        if (prefix > bytes) prefix = bytes;
-        raw_transfer(target, offset, prefix, (char *)&signature + offset, 1);
-        return raw_transfer(target, offset + prefix, bytes - prefix, (char *)buffer + prefix, 1);
+    if (write_op && target->tx_rollback) return 0;
+    void *transfer_buffer = buffer;
+    void *copy = NULL;
+    if (write_op && offset == 0 && bytes >= sizeof(uint32_t) &&
+        (target->metadata_only || target->journal)) {
+        copy = malloc(bytes);
+        if (!copy) abort();
+        memcpy(copy, buffer, bytes);
+        uint32_t signature = target->journal ?
+            (target->metadata_only ? NVJ_META_SIGNATURE : NVJ_SIGNATURE) : META_IMAGE_SIGNATURE;
+        memcpy(copy, &signature, sizeof(signature));
+        transfer_buffer = copy;
     }
-    raw_transfer(target, offset, bytes, buffer, write_op);
-    if (!write_op && target->metadata_only && offset == 0 && bytes >= sizeof(uint32_t)) {
+    int rc = target->journal ? nvj_transfer(target->journal, offset, bytes, transfer_buffer, write_op)
+                             : raw_transfer(target, offset, bytes, transfer_buffer, write_op);
+    free(copy);
+    /* Legacy callers cannot unwind a failed cache operation. A soft TX budget
+     * error is surfaced by the operation wrapper after cache staging completes. */
+    if (rc) { fprintf(stderr, "file backend I/O transfer error: %d\n", rc); abort(); }
+    if (!write_op && offset == 0 && bytes >= sizeof(uint32_t) &&
+        (target->metadata_only || target->journal)) {
         uint32_t signature = NVFUSE_SB_SIGNATURE;
         memcpy(buffer, &signature, sizeof(signature));
+        if (target->journal && bytes >= sizeof(struct nvfuse_superblock_common)) {
+            struct nvfuse_superblock_common *disk = buffer;
+            if (disk->sb_state == FS_STATE_MOUNTED || disk->sb_state == FS_STATE_CRASHED)
+                disk->sb_state = FS_STATE_UMOUNTED;
+        }
     }
     return 0;
 }
@@ -74,19 +92,57 @@ int reactor_sync_write_blk(struct io_target *t, long block, int count, void *buf
 {
     return file_transfer(t, (uint64_t)block * CLUSTER_SIZE, (size_t)count * CLUSTER_SIZE, buf, 1);
 }
-int reactor_sync_flush(struct io_target *t)
+static int raw_flush(struct io_target *t)
 {
 #ifdef NVFUSE_SPDK_TRANSPORT
     if (t->spdk_transport) {
         int rc = nvfuse_nvme_flush(t->spdk_transport);
-        if (rc) { fprintf(stderr, "NVFUSE SPDK: flush failed: %d\n", rc); abort(); }
+        if (rc) return rc;
         return 0;
     }
 #endif
     int ret;
     do { ret = fsync(t->fd); } while (ret < 0 && errno == EINTR);
-    if (ret) { perror("file backend fsync"); abort(); }
+    if (ret) return -errno;
     return 0;
+}
+
+int reactor_sync_flush(struct io_target *t)
+{
+    /* The outer commit supplies the ordered-data barrier. Never commit a user
+     * transaction as a side effect of cache eviction or an internal helper. */
+    if (t->tx_rollback || (t->journal && nvj_active(t->journal))) return 0;
+    return raw_flush(t);
+}
+static int journal_transfer(void *t, uint64_t off, size_t n, void *buf, int write_op)
+{
+    return raw_transfer(t, off, n, buf, write_op);
+}
+static int journal_flush(void *t) { return raw_flush(t); }
+static struct nvj_ops journal_ops(struct io_target *t)
+{
+    return (struct nvj_ops){journal_transfer, journal_flush, t};
+}
+static int format_journal(struct io_target *t)
+{
+    unsigned char block[CLUSTER_SIZE];
+    int rc;
+    if ((rc = raw_transfer(t, CLUSTER_SIZE, sizeof(block), block, 0))) return rc;
+    struct nvfuse_bg_descriptor *bd = (void *)block;
+    uint32_t bitmap_block = bd->bd_dbitmap_start;
+    if (NVJ_START < bd->bd_dtable_start) return -EINVAL;
+    bd->bd_free_blocks -= NVJ_BLOCKS;
+    if ((rc = raw_transfer(t, CLUSTER_SIZE, sizeof(block), block, 1))) return rc;
+    if ((rc = raw_transfer(t, (uint64_t)bitmap_block * CLUSTER_SIZE, sizeof(block), block, 0))) return rc;
+    for (unsigned i=NVJ_START; i<NVJ_START+NVJ_BLOCKS; i++) block[i/8] |= 1u << (i%8);
+    if ((rc = raw_transfer(t, (uint64_t)bitmap_block * CLUSTER_SIZE, sizeof(block), block, 1))) return rc;
+    if ((rc = raw_transfer(t, 0, sizeof(block), block, 0))) return rc;
+    struct nvfuse_superblock_common *disk = (void *)block;
+    disk->sb_free_blocks -= NVJ_BLOCKS;
+    disk->sb_signature = t->metadata_only ? NVJ_META_SIGNATURE : NVJ_SIGNATURE;
+    if ((rc = raw_transfer(t, 0, sizeof(block), block, 1))) return rc;
+    struct nvj_ops ops = journal_ops(t);
+    return nvj_format(&ops, t->size_bytes, t->metadata_only);
 }
 
 /* Synchronous execution with explicit completions preserves the cache's batch
@@ -162,23 +218,43 @@ static int mount_target(struct nvfuse_handle *nvh, int create)
     struct io_target *target = nvh->nvh_target;
     uint64_t size = target->size_bytes;
     int metadata_only = target->metadata_only;
+    target->tx_thread = pthread_self();
     nvh->blk_size = SECTOR_SIZE;
     nvh->total_blkcount = size / SECTOR_SIZE;
     nvh->nvh_params.buffer_size = 16;
     nvh->nvh_params.qdepth = 32;
     nvh->nvh_params.need_mount = 1;
     if (create && nvfuse_format(nvh)) return -1;
+    if (create && format_journal(target)) return -1;
     /* Refuse malformed/unclean images before allocating mount resources. */
     struct nvfuse_superblock_common disk;
-    if (read_disk_header(target, &disk) ||
-        disk.sb_signature != (metadata_only ? META_IMAGE_SIGNATURE : NVFUSE_SB_SIGNATURE) ||
+    if (read_disk_header(target, &disk)) { errno = EINVAL; return -1; }
+    if (!target->journal) {
+        struct nvj_ops ops = journal_ops(target);
+        int rc = nvj_open(&target->journal, &ops, size, metadata_only);
+        if (rc && disk.sb_signature != NVFUSE_SB_SIGNATURE && disk.sb_signature != META_IMAGE_SIGNATURE) {
+            errno = -rc; return -1;
+        }
+        /* New-format images are never downgraded to clean-only legacy mode. */
+        if (!rc) read_disk_header(target, &disk);
+    }
+    uint32_t expected = target->journal ? (metadata_only ? NVJ_META_SIGNATURE : NVJ_SIGNATURE) :
+                                        (metadata_only ? META_IMAGE_SIGNATURE : NVFUSE_SB_SIGNATURE);
+    if (
+        disk.sb_signature != expected ||
         disk.sb_no_of_sectors != (int64_t)nvh->total_blkcount ||
         disk.sb_no_of_blocks != (int64_t)(size / CLUSTER_SIZE) ||
         disk.sb_no_of_blocks_per_bg != IMAGE_GROUP_BYTES / CLUSTER_SIZE ||
         disk.sb_bg_num != (int64_t)(size / IMAGE_GROUP_BYTES) ||
         disk.sb_root_ino != ROOT_INO ||
-        (disk.sb_state != FS_STATE_FORMATTED && disk.sb_state != FS_STATE_UMOUNTED)) {
+        (disk.sb_state != FS_STATE_FORMATTED && disk.sb_state != FS_STATE_UMOUNTED &&
+         !(target->journal && disk.sb_state == FS_STATE_MOUNTED))) {
         errno = EINVAL; return -1;
+    }
+    if (target->journal) {
+        for (uint64_t base=0; base<size/CLUSTER_SIZE; base+=NVJ_GROUP_BLOCKS)
+            for (unsigned i=0; i<4100; i++) nvj_mark_metadata(target->journal, (uint32_t)(base+i));
+        if (nvj_begin(target->journal, 0, 0)) return -1;
     }
     /* Existing core statistics use process-local rings and lazy pools. */
     if (nvfuse_ipc_init(&nvh->nvh_ipc_ctx)) return -1;
@@ -187,6 +263,20 @@ static int mount_target(struct nvfuse_handle *nvh, int create)
         fprintf(stderr, "file backend: mount initialization failed\n");
         /* The legacy core has no partial-mount unwind contract. */
         abort();
+    }
+    target->tx_mounted = 1;
+    if (target->journal) {
+        nvfuse_check_flush_dirty(&nvh->nvh_sb, DIRTY_FLUSH_FORCE);
+        nvfuse_sync_superblock(&nvh->nvh_sb);
+        int rc = nvj_commit(target->journal);
+        if (rc) {
+            target->tx_rollback = 1;
+            nvfuse_umount(nvh);
+            nvfuse_ipc_exit(&nvh->nvh_ipc_ctx);
+            rte_ring_free(nvh->nvh_ipc_ctx.id_gen);
+            target->tx_rollback = target->tx_mounted = 0;
+            errno = -rc; return -1;
+        }
     }
     active_handle = 1;
     return 0;
@@ -228,6 +318,7 @@ struct nvfuse_handle *nvfuse_file_open_mode(const char *path, int create, uint64
     if (mount_target(nvh, create)) goto fail_handle;
     return nvh;
 fail_handle:
+    nvj_close(target->journal);
     free(target); free(nvh);
 fail_fd:;
     int saved_errno = errno;
@@ -238,13 +329,26 @@ fail_fd:;
 
 int nvfuse_file_close(struct nvfuse_handle *nvh)
 {
-    int ret = nvfuse_umount(nvh);
+    if (nvh->nvh_target->journal && !pthread_equal(nvh->nvh_target->tx_thread, pthread_self())) return -EPERM;
+    int failed = nvj_recovery_required(nvh->nvh_target->journal);
+    if (!failed && nvh->nvh_target->tx_user) return -EBUSY;
+    if (failed) nvh->nvh_target->tx_rollback = 1;
+    if (!failed && nvh->nvh_target->journal && nvj_begin(nvh->nvh_target->journal, 0, 0)) return -EIO;
+    int mounted = nvh->nvh_target->tx_mounted;
+    int ret = mounted ? nvfuse_umount(nvh) : 0;
     if (ret) return ret;
-    reactor_sync_flush(nvh->nvh_target);
+    nvh->nvh_target->tx_mounted = 0;
+    if (!failed && nvh->nvh_target->journal) {
+        ret = nvj_commit(nvh->nvh_target->journal);
+        if (ret) failed = 1;
+    }
+    if (!failed) reactor_sync_flush(nvh->nvh_target);
     int fd = nvh->nvh_target->fd;
     /* Keep the handle alive until IPC teardown is complete. */
-    nvfuse_ipc_exit(&nvh->nvh_ipc_ctx);
-    rte_ring_free(nvh->nvh_ipc_ctx.id_gen);
+    if (mounted) {
+        nvfuse_ipc_exit(&nvh->nvh_ipc_ctx);
+        rte_ring_free(nvh->nvh_ipc_ctx.id_gen);
+    }
     int result;
 #ifdef NVFUSE_SPDK_TRANSPORT
     if (nvh->nvh_target->spdk_transport)
@@ -252,9 +356,28 @@ int nvfuse_file_close(struct nvfuse_handle *nvh)
     else
 #endif
         result = close(fd);
+    nvj_close(nvh->nvh_target->journal);
+    free(nvh->nvh_target->tx_snapshot);
     free(nvh->nvh_target); free(nvh);
     active_handle = 0;
-    return result;
+    return failed ? -EIO : result;
+}
+
+int nvfuse_file_reload(struct nvfuse_handle *h)
+{
+    struct io_target *t = h->nvh_target;
+    t->tx_rollback = 1;
+    int rc = nvfuse_umount(h);
+    nvfuse_ipc_exit(&h->nvh_ipc_ctx);
+    rte_ring_free(h->nvh_ipc_ctx.id_gen);
+    t->tx_mounted = 0;
+    nvj_discard(t->journal);
+    t->tx_rollback = t->tx_user = t->tx_depth = 0;
+    if (rc) { nvj_require_recovery(t->journal); return rc; }
+    memset(h, 0, sizeof(*h));
+    h->nvh_target = t;
+    if (mount_target(h, 0)) { nvj_require_recovery(t->journal); return -EIO; }
+    return 0;
 }
 
 #ifdef NVFUSE_SPDK_TRANSPORT
@@ -273,13 +396,19 @@ struct nvfuse_handle *nvfuse_nvme_fs_open(const char *bdf, int format,
     uint64_t device_size;
     int rc = nvfuse_nvme_open(bdf, &t->spdk_transport, &device_size);
     if (rc) { errno = -rc; goto fail; }
+    t->size_bytes = device_size;
     if (!format) {
+        struct nvj_ops ops = journal_ops(t);
+        int probe = nvj_probe(&ops, device_size, &logical_size, metadata_only);
+        if (probe && probe != -ENOENT) { errno = -probe; goto fail; }
+        if (probe == -ENOENT) {
         struct nvfuse_superblock_common disk;
         if (read_disk_header(t, &disk) || disk.sb_no_of_blocks <= 0 ||
             disk.sb_no_of_blocks > (int64_t)(device_size / CLUSTER_SIZE)) {
             errno = EINVAL; goto fail;
         }
         logical_size = disk.sb_no_of_blocks * CLUSTER_SIZE;
+        }
     }
     if (logical_size > device_size || logical_size < IMAGE_GROUP_BYTES || logical_size % IMAGE_GROUP_BYTES) {
         errno = EINVAL; goto fail;
@@ -292,6 +421,7 @@ struct nvfuse_handle *nvfuse_nvme_fs_open(const char *bdf, int format,
 fail:;
     int saved = errno;
     nvfuse_nvme_close(t->spdk_transport);
+    nvj_close(t->journal);
     free(t); free(h); errno = saved;
     return NULL;
 }

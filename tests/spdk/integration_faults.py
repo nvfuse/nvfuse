@@ -1,4 +1,4 @@
-"""Filesystem-level fault injection. Expected aborts do not imply crash recovery."""
+"""Filesystem-level fault injection. Verify faulted original images after journal recovery."""
 import re
 import json
 import shutil
@@ -137,11 +137,11 @@ immediately = "on"
                 "bash ~/src/nvfuse-framework/guest.sh integration-data-check 1"],
                 marker="PASS integration data-verify", timeout=120)
         else:
-            command(prefix + "-unclean-rejected", "unclean", "PASS unclean mounted image rejected")
-    # Demonstrate device/environment reuse, without claiming old-image recovery.
+            command(prefix + "-journal-recovery", "unclean", "PASS unclean journal image recovered and payload verified")
+    # Original images were verified above before any reinitialization.
     prepare("integration-fault-reinitialize")
     suite.command("integration-fault-reinitialized-data-verify", ssh + [
         "bash ~/src/nvfuse-framework/guest.sh integration-data-check 1"],
         marker="PASS integration data-verify", timeout=120)
-    suite.record("integration-automatic-crash-recovery", "skip",
-                 reason="core aborts on block I/O failure and rejects mounted images; automatic recovery is not implemented")
+    suite.record("integration-automatic-crash-recovery", "pass",
+                 cases=list(cases), oracle="original-image payload compared before reformatting")

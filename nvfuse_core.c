@@ -13,6 +13,7 @@
 * more details.
 */
 
+#include "nvfuse_tx_dispatch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1301,6 +1302,7 @@ s32 nvfuse_sync_superblock(struct nvfuse_superblock *sb)
 		return -1;
 	}
 
+	memset(buf, 0, CLUSTER_SIZE);
 	nvfuse_copy_mem_sb_to_disk_sb((struct nvfuse_superblock *)buf, sb);
 	res = nvfuse_write_cluster(buf, INIT_NVFUSE_SUPERBLOCK_NO, sb->target);
 	if (res) {
@@ -2144,8 +2146,22 @@ s32 nvfuse_truncate(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename,
 		return error_msg(" rmfile() is supported for a file.");
 	}
 
+#ifdef NVFUSE_FILE_BACKEND
+    if (sb->target->journal && (trunc_size < 0 || trunc_size > inode->i_size)) {
+        nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+        nvfuse_release_bh(sb, dir_bh, 0, NVF_CLEAN);
+        nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+        return trunc_size < 0 ? -EINVAL : -EOPNOTSUPP;
+    }
+#endif
 	nvfuse_free_inode_size(sb, ictx, trunc_size);
 	inode->i_size = trunc_size;
+#ifdef NVFUSE_FILE_BACKEND
+    if (sb->target->journal)
+        for (unsigned n=START_OPEN_FILE;n<MAX_OPEN_FILE;n++)
+            if (sb->sb_file_table[n].used && sb->sb_file_table[n].ino==inode->i_ino)
+                sb->sb_file_table[n].size=trunc_size;
+#endif
 	assert(inode->i_size < MAX_FILE_SIZE);
 	nvfuse_release_inode(sb, ictx, DIRTY);
 
@@ -2163,7 +2179,16 @@ s32 nvfuse_truncate_ino(struct nvfuse_superblock *sb, inode_t ino, s64 trunc_siz
 	struct nvfuse_inode_ctx *ictx;
 
 	ictx = nvfuse_read_inode(sb, NULL, ino);
+#ifdef NVFUSE_FILE_BACKEND
+    if (sb->target->journal && (trunc_size < 0 || trunc_size > ictx->ictx_inode->i_size)) {
+        nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+        return trunc_size < 0 ? -EINVAL : -EOPNOTSUPP;
+    }
+#endif
 	nvfuse_free_inode_size(sb, ictx, trunc_size);
+#ifdef NVFUSE_FILE_BACKEND
+    if (sb->target->journal) ictx->ictx_inode->i_size=trunc_size;
+#endif
 	nvfuse_release_inode(sb, ictx, DIRTY);
 
 	return NVFUSE_SUCCESS;

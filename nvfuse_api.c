@@ -13,6 +13,7 @@
 * more details.
 */
 
+#include "nvfuse_tx_dispatch.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1079,6 +1080,15 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		} else
 #endif
 		{
+#ifdef NVFUSE_FILE_BACKEND
+            /* A newly allocated partial block must not expose freed bytes. */
+            int fresh = sb->target->journal && inode->i_size <= of->rwoffset &&
+                        !(inode->i_size & (CLUSTER_SIZE - 1));
+            if (fresh) {
+                bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
+                memset(bh->bh_buf, 0, CLUSTER_SIZE);
+            } else
+#endif
 			/* read modify write or partial write */
 			if (remain != CLUSTER_SIZE)
 				bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, READ, NVFUSE_TYPE_DATA);
@@ -1103,6 +1113,11 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		nvfuse_release_inode(sb, ictx, DIRTY);
 	}
 
+	#ifdef NVFUSE_FILE_BACKEND
+    /* The public wrapper stages dirty buffers and commits after this returns.
+     * Explicit transactions retain their group boundary even with O_SYNC. */
+    if (sb->target->journal) return wcount;
+#endif
 	if (of->flags & O_SYNC) {
 		if (of->flags & __O_SYNC) {
 			ictx = nvfuse_read_inode(sb, NULL, of->ino);
@@ -1501,6 +1516,20 @@ s32 nvfuse_rmfile(struct nvfuse_superblock *sb, inode_t par_ino, s8 *filename)
 		return NVFUSE_ERROR;
 	}
 
+#ifdef NVFUSE_FILE_BACKEND
+    /* Deferred orphan cleanup is not implemented. Do not free an inode still
+     * reachable through a descriptor and allow later writes to freed blocks. */
+    if (sb->target->journal && inode->i_links_count == 1) {
+        for (unsigned n=START_OPEN_FILE;n<MAX_OPEN_FILE;n++) {
+            if (sb->sb_file_table[n].used && sb->sb_file_table[n].ino==inode->i_ino) {
+                nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+                nvfuse_release_bh(sb, dir_bh, 0, NVF_CLEAN);
+                nvfuse_release_inode(sb, dir_ictx, NVF_CLEAN);
+                return -EBUSY;
+            }
+        }
+    }
+#endif
 	if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
 		dprintf_error(INODE, " rmfile() is prohibited due to directory (%s)n", filename);
 		return NVFUSE_ERROR;
@@ -1884,6 +1913,7 @@ s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t 
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
 	inode_t ino = 0;
+    int result = 0;
 
 	sb = nvfuse_read_super(nvh);
 
@@ -1896,20 +1926,21 @@ s32 nvfuse_rename(struct nvfuse_handle *nvh, inode_t par_ino, s8 *name, inode_t 
 		inode = ictx->ictx_inode;
 		if (inode->i_type == NVFUSE_TYPE_DIRECTORY) {
 			nvfuse_release_inode(sb, ictx, DIRTY);
-			nvfuse_rmdir(sb, new_par_ino, newname);
+			result = nvfuse_rmdir(sb, new_par_ino, newname);
 		} else {
 			nvfuse_release_inode(sb, ictx, DIRTY);
-			nvfuse_rmfile(sb, new_par_ino, newname);
+			result = nvfuse_rmfile(sb, new_par_ino, newname);
 		}
+        if (result) { nvfuse_release_super(sb); return result; }
 	}
 
-	nvfuse_link(sb, new_par_ino, newname, ino);
+	result = nvfuse_link(sb, new_par_ino, newname, ino);
 
 	nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
 
 	nvfuse_release_super(sb);
 
-	return 0;
+	return result;
 }
 
 s32 nvfuse_rename_path(struct nvfuse_handle *nvh, const char *from, const char *to)
@@ -2096,6 +2127,12 @@ s32 nvfuse_ftruncate(struct nvfuse_handle *nvh, s32 fid, nvfuse_off_t size)
 
 	ictx = nvfuse_read_inode(sb, NULL, ft->ino);
 	inode = ictx->ictx_inode;
+#ifdef NVFUSE_FILE_BACKEND
+    if (sb->target->journal && (size < 0 || size > inode->i_size)) {
+        nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+        return size < 0 ? -EINVAL : -EOPNOTSUPP;
+    }
+#endif
 
 	nvfuse_free_inode_size(sb, ictx, size);
 

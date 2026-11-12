@@ -120,12 +120,14 @@ endif
 
 
 # Native file-image development targets, separate from the SPDK build.
-.PHONY: local local-test local-sanitize local-framework
+.PHONY: local local-test local-sanitize local-framework local-journal-test
 local:
 	$(MAKE) -f Makefile.local all
 local-test:
 	$(MAKE) -f Makefile.local test
+local-journal-test:
+	$(MAKE) -f Makefile.local journal-test
 local-framework:
 	$(MAKE) -f Makefile.local framework-test
 local-sanitize:
-	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test
+	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test journal-test

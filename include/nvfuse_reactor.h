@@ -32,6 +32,10 @@ struct io_target {
     int metadata_only;
     uint64_t payload_bytes_discarded;
     void *spdk_transport;
+    struct nvj *journal;
+    int tx_user, tx_depth, tx_rollback, tx_mounted;
+    void *tx_snapshot;
+    pthread_t tx_thread;
 #endif
 	struct spdk_bdev	*bdev;
 	struct spdk_bdev_desc	*desc;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Only for the dedicated 2 GiB QEMU NVMe in the local development VM.
 set -euo pipefail
-case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault) ;; *) exit 2 ;; esac
+case ${1:-} in matrix|boundaries|injected|hotremove|stalled|integration|integration-data-prepare|integration-data-check|integration-meta-prepare|integration-meta-check|integration-fault|integration-transactions) ;; *) exit 2 ;; esac
 if [[ $1 == stalled ]]; then rm -f /tmp/nvfuse-stall-go; fi
 [[ ${2:-} =~ ^[0-9]+$ ]] || exit 2
 SPDK_ROOT_DIR=${SPDK_ROOT_DIR:-$HOME/src/spdk}
@@ -43,6 +43,26 @@ sudo env PCI_ALLOWED="$BDF" DRIVER_OVERRIDE=vfio-pci HUGEMEM=512 \
 test "$(basename "$(readlink /sys/bus/pci/devices/$BDF/driver)")" = vfio-pci
 if [[ $1 == integration* ]]; then
     BIN_DIR="$HOME/src/nvfuse/tests/spdk"
+    if [[ $1 == integration-transactions ]]; then
+        tx="$BIN_DIR/integration_transactions"
+        txrun() { sudo prlimit --core=0 --memlock=unlimited timeout 60 "$tx" "$1" "pcie:$BDF" "${@:2}"; }
+        txrun setup
+        txrun functional
+        txrun new
+        for phase in payload-flush commit-flush checkpoint-write retire-flush; do
+            txrun setup
+            set +e
+            txrun crash "$phase" 1
+            status=$?
+            set -e
+            test "$status" = 86
+            if [[ $phase == payload-flush ]]; then outcome=old; else outcome=new; fi
+            txrun "$outcome"
+            txrun "$outcome"
+        done
+        echo 'PASS NVMe transactions and original-image crash replay'
+        exit 0
+    fi
     if [[ $1 == integration-fault ]]; then
         case ${3:-} in locate|unclean|read-eio|write-eio|stall-resume|stall-timeout|hotremove) ;; *) exit 2 ;; esac
         [[ ${4:-} =~ ^[0-9]+$ ]] || exit 2
@@ -62,7 +82,7 @@ if [[ $1 == integration* ]]; then
                 grep -q "SUBMITTED fault $3" "$log"
                 case $3 in
                     read-eio|write-eio)
-                        grep -q 'NVFUSE SPDK: block I/O failed: -5' "$log"
+                        grep -Eq '(NVFUSE SPDK: block I/O failed: -5|file backend I/O transfer error: -5)' "$log"
                         grep -q "completion error op=${3%-eio} " "$log" ;;
                     stall-timeout) grep -q 'NVFUSE SPDK: I/O timeout after 10 seconds' "$log" ;;
                     hotremove) grep -Eq 'NVFUSE SPDK: (block I/O failed:|completion polling failed:|I/O timeout)' "$log" ;;

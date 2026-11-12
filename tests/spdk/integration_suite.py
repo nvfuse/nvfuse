@@ -65,10 +65,14 @@ def run(suite, args):
             ". ~/.venvs/spdk/bin/activate; cd ~/src/nvfuse/tests/spdk; "
             "make -f Makefile.integration; make -f Makefile.integration APP=integration_framework; "
             "make -f Makefile.integration APP=integration_fault; "
+            "make -f Makefile.integration APP=integration_transactions; "
             "test -x integration_test; test -x integration_framework; "
             "git -C ~/src/spdk describe --tags --exact-match; git -C ~/src/spdk rev-parse HEAD; "
             "echo 'PASS integration built'"], input=data.getvalue(),
             marker="PASS integration built", timeout=180)
+        suite.command("integration-user-transactions", ssh + [
+            "bash ~/src/nvfuse-framework/guest.sh integration-transactions 1"],
+            marker="PASS NVMe transactions and original-image crash replay", timeout=180)
         if args.profile == "integration-faults":
             from .integration_faults import run as faults
             faults(suite, ssh, vm, config, guest, boot, stop, args.fault_cases)

@@ -29,6 +29,9 @@
 #include <assert.h>
 
 #include "nvfuse_core.h"
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_journal.h"
+#endif
 #include "nvfuse_dep.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_inode_cache.h"
@@ -385,6 +388,11 @@ struct nvfuse_buffer_head *_nvfuse_get_bh(struct nvfuse_superblock *sb,
 	bh->bh_ictx = ictx ? ictx : NULL;
 
 FOUND_BH:
+#ifdef NVFUSE_FILE_BACKEND
+    if (sb->target->journal && (is_meta ||
+        (ictx && ictx->ictx_inode && S_ISLNK(ictx->ictx_inode->i_mode))))
+        nvj_mark_metadata(sb->target->journal, bc->bc_pno);
+#endif
 
 	if (is_meta)
 		nvfuse_set_bh_status(bh, BUFFER_STATUS_META);

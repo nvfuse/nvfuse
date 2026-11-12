@@ -19,6 +19,7 @@
 * more details.
 */
 
+#include "nvfuse_tx_dispatch.h"
 #include "nvfuse_xattr.h"
 
 //#define TEST_DEBUG_CODE
@@ -52,7 +53,11 @@
  */
 s32 nvfuse_set_xattr(struct nvfuse_handle *nvh, const char *path,
 		const char *name, const char *value)
-{	
+{
+#ifdef NVFUSE_FILE_BACKEND
+	/* The legacy xattr parser is not supported on journal mounts. */
+	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
@@ -244,6 +249,10 @@ RET:
 s32 nvfuse_remove_xattr(struct nvfuse_handle *nvh, const char *path,
 		const char *name)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	/* The legacy xattr parser is not supported on journal mounts. */
+	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
@@ -361,6 +370,10 @@ RET:
 s32 nvfuse_get_xattr(struct nvfuse_handle *nvh, const char *path,
 		const char *name, char *buffer, size_t buf_size)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	/* The legacy xattr parser is not supported on journal mounts. */
+	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;
@@ -469,6 +482,10 @@ RET:
 s32 nvfuse_list_xattr(struct nvfuse_handle *nvh, const char *path,
 		char *buffer, size_t buf_size)
 {
+#ifdef NVFUSE_FILE_BACKEND
+	/* The legacy xattr parser is not supported on journal mounts. */
+	if (nvh->nvh_target->journal) return -EOPNOTSUPP;
+#endif
 	struct nvfuse_dir_entry dir_entry;
 	struct nvfuse_inode_ctx *ictx;
 	struct nvfuse_inode *inode;

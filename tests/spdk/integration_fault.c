@@ -3,6 +3,7 @@
 #include "../framework_test.c"
 #undef main
 #include <time.h>
+#include "nvfuse_journal.h"
 
 static const char *fault;
 static uint64_t target_lba;
@@ -48,11 +49,13 @@ int main(int argc, char **argv)
         struct nvfuse_superblock_common disk;
         CHECK(nvfuse_nvme_open(argv[2] + 5, &device, &size) == 0);
         CHECK(nvfuse_nvme_transfer(device, 0, sizeof(disk), &disk, 0) == 0);
-        CHECK(disk.sb_signature == NVFUSE_SB_SIGNATURE && disk.sb_state == FS_STATE_MOUNTED);
+        CHECK(disk.sb_signature == NVJ_SIGNATURE && disk.sb_state == FS_STATE_MOUNTED);
         CHECK(nvfuse_nvme_close(device) == 0);
         struct nvfuse_handle *h = nvfuse_file_open(argv[2], 0, 0);
-        CHECK(!h && errno == EINVAL);
-        puts("PASS unclean mounted image rejected");
+        CHECK(h);
+        CHECK(workload(h, seed, 0) == 0);
+        CHECK(nvfuse_file_close(h) == 0);
+        puts("PASS unclean journal image recovered and payload verified");
         return 0;
     }
     CHECK(!strcmp(fault, "locate") || !strcmp(fault, "read-eio") ||
