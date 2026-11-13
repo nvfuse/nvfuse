@@ -133,7 +133,11 @@ s32 nvfuse_start_flushworker(struct nvfuse_superblock *sb)
 
 	dprintf_info(FLUSHWORK, " start flush worker \n");
 #ifndef USE_PTHREAD
+#ifdef RTE_LCORE_FOREACH_WORKER
+	RTE_LCORE_FOREACH_WORKER(lcore_id) {
+#else
 	RTE_LCORE_FOREACH_SLAVE(lcore_id) {
+#endif
 		break;
 	}
 

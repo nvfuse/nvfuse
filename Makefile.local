@@ -25,6 +25,17 @@ $(LOCAL_BUILD)/local_test: $(LOCAL_BUILD)/tests/local_test.o $(LOCAL_BUILD)/nvfu
 	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
 $(LOCAL_BUILD)/framework_test: $(LOCAL_BUILD)/tests/framework_test.o $(LOCAL_BUILD)/nvfuse.a
 	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+$(LOCAL_BUILD)/backend_test: $(LOCAL_BUILD)/tests/backend_test.o $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
+$(LOCAL_BUILD)/tests/backend_test.o: CFLAGS = -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror
+-include $(LOCAL_BUILD)/tests/backend_test.d
+$(LOCAL_BUILD)/backend_options_test: tests/backend_options_test.c $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(CPPFLAGS) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $^ -lpthread -lm -o $@
+$(LOCAL_BUILD)/inode_cache_test: tests/inode_cache_test.c $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(CPPFLAGS) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $^ -lpthread -lm -o $@
+.PHONY: inode-cache-test
+inode-cache-test: $(LOCAL_BUILD)/inode_cache_test
+	$(LOCAL_BUILD)/inode_cache_test
 test: all
 	python3 tests/run_local.py $(LOCAL_BUILD)/local_test
 framework-test: all
@@ -33,9 +44,15 @@ clean:
 	rm -rf $(LOCAL_BUILD)
 -include $(OBJECTS:.o=.d) $(LOCAL_BUILD)/tests/local_test.d $(LOCAL_BUILD)/tests/framework_test.d $(LOCAL_BUILD)/tests/transaction_test.d $(LOCAL_BUILD)/tests/journal_bench.d $(LOCAL_BUILD)/tests/limit_test.d $(LOCAL_BUILD)/tests/metadata_check.d
 
-$(LOCAL_BUILD)/journal_engine_test: tests/journal_engine_test.c nvfuse_journal.c include/nvfuse_journal.h
+$(LOCAL_BUILD)/journal_engine_test: tests/journal_engine_test.c nvfuse_journal.c nvfuse_journal_v3.inc include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_engine_test.c nvfuse_journal.c -o $@
+$(LOCAL_BUILD)/journal_v3_test: tests/journal_v3_test.c nvfuse_journal.c nvfuse_journal_v3.inc include/nvfuse_journal.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_v3_test.c nvfuse_journal.c -lpthread -o $@
+.PHONY: journal-v3-test
+journal-v3-test: $(LOCAL_BUILD)/journal_v3_test
+	$(LOCAL_BUILD)/journal_v3_test
 $(LOCAL_BUILD)/transaction_test: $(LOCAL_BUILD)/tests/transaction_test.o $(LOCAL_BUILD)/nvfuse.a
 	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
 .PHONY: journal-test
@@ -142,3 +159,12 @@ $(LOCAL_BUILD)/journal_async_test: tests/journal_async_test.c nvfuse_journal.c i
 $(LOCAL_BUILD)/queue_test: $(LOCAL_BUILD)/tests/queue_test.o $(LOCAL_BUILD)/nvfuse.a
 	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
 -include $(LOCAL_BUILD)/tests/queue_test.d
+
+$(LOCAL_BUILD)/journal_crc_test: tests/journal_crc_test.c nvfuse_journal.c include/nvfuse_journal.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< -lpthread -o $@
+.PHONY: journal-crc-test
+journal-crc-test: $(LOCAL_BUILD)/journal_crc_test
+	NVFUSE_JOURNAL_CRC=auto $(LOCAL_BUILD)/journal_crc_test
+	NVFUSE_JOURNAL_CRC=software $(LOCAL_BUILD)/journal_crc_test
+	NVFUSE_JOURNAL_CRC=invalid $(LOCAL_BUILD)/journal_crc_test

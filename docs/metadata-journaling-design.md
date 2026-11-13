@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: Single-writer implementation with optional file-backend background checkpointing for the standalone file and SPDK/NVMe backends. See [validation and measurements](journaling-evaluation.md) for tested behavior and remaining limits.
+Status: Single-writer implementation with optional file-backend background checkpointing for the standalone file and SPDK/NVMe backends.
 
 ## Purpose and boundaries
 
@@ -144,7 +144,7 @@ Abort discards caches and remounts the committed image. A failed automatic opera
 
 An I/O/flush failure during journal publication or checkpoint marks the handle RECOVERY_REQUIRED and rejects subsequent operations. Close can discard volatile caches and release an already failed handle, returning `-EIO`; reopen resolves the durable log. Legacy cache I/O failures and some legacy allocation/partial-mount failures still terminate the process because those core paths cannot unwind safely. This reference version does not promise complete recoverable errno behavior under all ENOSPC/ENOMEM conditions.
 
-The original multiprocess bdev/event reactor is outside this implementation. Its journal-format mounts must not bypass signature validation. The owner supports queued group commit, optional file-backend background checkpointing and bounded v2 outcome queries. Physical parallel SPDK execution, arbitrary-size/COW transactions and online journal resizing remain unimplemented.
+The historical multiprocess dataplane remains outside this implementation. The modern serialized primary reactor now has a separate [metadata-journal adapter](spdk-primary-journaling.md), with AIO fencing and its own explicitly stated coverage. Journal-format mounts must not bypass signature validation. The owner supports queued group commit, optional file-backend background checkpointing and bounded v2 outcome queries. Physical parallel SPDK execution, arbitrary-size/COW transactions and online journal resizing remain unimplemented.
 
 ## ext4, XFS and NVFUSE
 
@@ -177,17 +177,16 @@ flowchart TB
 | Arbitrary application multi-operation TX API | Not provided by ordinary POSIX interfaces | Not provided by ordinary POSIX interfaces | Explicit begin/commit/abort on the supported embedded handle |
 | Maturity | Broad production deployment | Broad production deployment | New reference implementation with limited coverage |
 
-NVFUSE has **no demonstrated advantage in metadata recovery robustness or general filesystem throughput over ext4/XFS**. Its concrete application benefit is an embedded transaction boundary that can atomically publish several filesystem operations and optionally their file bytes. Batching reduces this implementation's repeated journal overhead; measured results are in the evaluation report. That benefit is separate from the mandatory automatic metadata protection and is not a direct ext4/XFS speed comparison.
+NVFUSE has **no demonstrated advantage in metadata recovery robustness or general filesystem throughput over ext4/XFS**. Its concrete application benefit is an embedded transaction boundary that can atomically publish several filesystem operations and optionally their file bytes. Batching reduces this implementation's repeated journal overhead. That benefit is separate from the mandatory automatic metadata protection and is not a direct ext4/XFS speed comparison.
 
 For authoritative format and architecture details, see the Linux kernel documentation for [ext4 journal/JBD2](https://docs.kernel.org/filesystems/ext4/journal.html), [XFS logging](https://docs.kernel.org/filesystems/xfs/xfs-logging.html), and [XFS delayed logging](https://docs.kernel.org/filesystems/xfs/xfs-delayed-logging-design.html).
 
-## Source and validation
+## Source references
 
 - [Journal engine and recovery](../nvfuse_journal.c), [disk constants and backend API](../include/nvfuse_journal.h).
 - [Backend, format and mount ordering](../nvfuse_file.c), [cache metadata classification](../nvfuse_buffer_cache.c).
 - [Automatic/user transaction boundaries](../nvfuse_tx.c), [public API wrappers](../nvfuse_tx_wrappers.c).
 - [Independent persistence model](../tests/journal_engine_test.c), [filesystem TX oracle](../tests/transaction_test.c), [crash runner](../tests/run_transactions.py).
-- [Current measurements and remaining validation gaps](roadmap-validation.md).
 
 
 ### Directory parent metadata
@@ -197,10 +196,12 @@ word at byte offset 60. The 4 KiB inode size, block offsets and journal record
 format remain unchanged. Mkdir stores the parent even when the directory has no
 data block; directory moves journal the namespace edge, parent word and any
 materialized `..` together. Legacy directory parents are backfilled when reached
-through their real parent's named entry. See [the parent and enumeration
-regressions](resilience-tests.md#parent-directory-fix-and-enumeration-verification)
-for compatibility boundaries and crash evidence.
+through their real parent's named entry.
 
 ## Current extensions
 
-See [the development roadmap](development-roadmap.md) for implementation and validation status, [checkpoint ownership](checkpoint-concurrency-design.md) for queues and asynchronous completion, and [larger transactions](large-transactions-design.md) for resource and COW limits. FS metadata transactions remain automatic and independent of user TX API use.
+See [checkpoint ownership](checkpoint-concurrency-design.md) for queues and asynchronous completion, and [larger transactions](large-transactions-design.md) for resource and COW limits. FS metadata transactions remain automatic and independent of user TX API use.
+
+The layouts and single-slot ordering above describe v1/v2. The optional primary
+[compact v3 log](journal-compact-log-v3-design.md) uses append records and deferred
+home materialization; new formats remain v2 by default.

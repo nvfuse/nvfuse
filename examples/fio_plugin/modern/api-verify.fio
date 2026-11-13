@@ -1,0 +1,15 @@
+[api-verify]
+ioengine=./examples/fio_plugin/modern/nvfuse_spdk.so
+thread=1
+numjobs=1
+nrfiles=1
+filename=/fio-large
+size=1G
+direct=1
+rw=write
+bs=64k
+iodepth=8
+verify=crc32c
+verify_fatal=1
+do_verify=1
+end_fsync=1

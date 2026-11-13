@@ -6,6 +6,11 @@
  * adapters. The transport uses DMA bounce buffers and synchronous completion
  * polling; the core's malloc-backed cache is never passed to NVMe directly. */
 int nvfuse_nvme_open(const char *bdf, void **device, uint64_t *size);
+/* Explicit PCI namespace selection for the optional standalone backend opener.
+ * Unlike nvfuse_nvme_open, this is not restricted to the QEMU test fixture.
+ * The controller must already be bound to a suitable userspace driver.
+ * One PCI controller per process; supports 512-byte or 4096-byte sectors. */
+int nvfuse_nvme_open_namespace(const char *bdf, uint32_t nsid, void **device, uint64_t *size);
 int nvfuse_nvme_transfer(void *device, uint64_t offset, size_t bytes, void *buffer, int write_op);
 int nvfuse_nvme_flush(void *device);
 int nvfuse_nvme_close(void *device);

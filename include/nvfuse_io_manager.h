@@ -87,6 +87,7 @@ struct io_job {
 	size_t ret; //return value of pread or pwrite
 
 	int complete;
+	int journal_staged; /* Owner prepared overlay result; I/O thread posts CQ. */
 	void *tag1;
 	void *tag2;
 };

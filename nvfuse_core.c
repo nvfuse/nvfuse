@@ -57,6 +57,9 @@
 #include "nvfuse_malloc.h"
 #include "nvfuse_api.h"
 #include "nvfuse_dirhash.h"
+#ifdef NVFUSE_PRIMARY_JOURNAL
+#include "nvfuse_primary_journal.h"
+#endif
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_debug.h"
@@ -305,7 +308,15 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 		return 0;
 	}
 
+#if INODE_ENTRY_NUM == 1 && !defined(NVFUSE_USE_MKFS_INODE_ZEROING)
+	/* The bitmap has reserved this inode and initialization below replaces the
+	 * entire cache block. Do not read discarded contents from the device.
+	 * Keep the ordinary metadata buffer/journal path and dirty release. */
+	bh = nvfuse_get_bh(sb, ictx, ITABLE_INO, search_block, WRITE, NVFUSE_TYPE_META);
+#else
+	/* Packed inode blocks and zeroing-based allocation inspect old contents. */
 	bh = nvfuse_get_bh(sb, ictx, ITABLE_INO, search_block, READ, NVFUSE_TYPE_META);
+#endif
 	ip = (struct nvfuse_inode *)bh->bh_buf;
 #ifdef NVFUSE_USE_MKFS_INODE_ZEROING
 	for (j = 0; j < INODE_ENTRY_NUM; j++) {
@@ -1002,6 +1013,27 @@ void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks)
 
 	assert(num_blocks <= AIO_MAX_QDEPTH);
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (sb->target->journal && sb->target->journal_owner_collect) {
+        struct nvj_home_write images[AIO_MAX_QDEPTH];
+        unsigned n = 0;
+        SPINLOCK_LOCK(&bm->bm_lock);
+        list_for_each_safe(ptr, temp, &bm->bm_list[BUFFER_TYPE_FLUSHING]) {
+            bc = list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
+            SPINLOCK_LOCK(&bc->bc_lock);
+            assert(bc->bc_dirty && bc->bc_flush && n < (unsigned)num_blocks);
+            images[n++] = (struct nvj_home_write){(uint64_t)bc->bc_pno * CLUSTER_SIZE,
+                                                  CLUSTER_SIZE, bc->bc_buf};
+            SPINLOCK_UNLOCK(&bc->bc_lock);
+        }
+        SPINLOCK_UNLOCK(&bm->bm_lock);
+        assert(n == (unsigned)num_blocks);
+        /* Flushing buffers stay pinned by the serialized owner. Copy first,
+         * then let the existing caller move them to its clean list. */
+        if (nvfuse_primary_journal_collect(sb->target, images, n)) return;
+    }
+#endif
+
 #if (NVFUSE_OS==NVFUSE_OS_LINUX) || defined(NVFUSE_FILE_BACKEND)
 	res = nvfuse_make_jobs(sb, jobs, num_blocks);
 	if (res != 0) {
@@ -1499,7 +1531,8 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 #ifdef NVFUSE_FILE_BACKEND
 	mempool_size = AIO_MAX_QDEPTH * 2;
 #else
-	mempool_size = sizeof(struct io_job) * AIO_MAX_QDEPTH * 32;
+	/* SPDK expects an object count here, not a byte count. */
+	mempool_size = AIO_MAX_QDEPTH * 32;
 #endif
 	sb->io_job_mempool = spdk_mempool_create(mempool_name,
 			     mempool_size,
@@ -1682,6 +1715,18 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh)
 		rte_memcpy(sb->sb_bd + i, buf, sizeof(struct nvfuse_bg_descriptor));
 		//printf("b %d ibitmap start = %d \n", i, g_nvfuse_sb->sb_bd[i].bd_ibitmap_start);
 		assert(sb->sb_bd[i].bd_id == i);
+	}
+	if (nvfuse_process_model_is_standalone()) {
+		/* Reuse descriptors already read during mount; this is only a search
+		 * hint. Allocation still checks live descriptors and the bitmap. */
+		sb->sb_last_allocated_bgid = 0;
+		sb->sb_last_allocated_bgid_by_ino = 0;
+		for (i = 0; i < sb->sb_bg_num; i++) {
+			if (sb->sb_bd[i].bd_free_blocks) {
+				sb->sb_last_allocated_bgid = i;
+				break;
+			}
+		}
 	}
 	nvfuse_free_aligned_buffer(buf);
 

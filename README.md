@@ -1,12 +1,12 @@
 NVFUSE
 ======
 
-NVFUSE is an embeddable file system as a library running in the user-space incorporated with [SPDK library](https://github.com/spdk/spdk) which is a user-space NVMe driver newly introduced by Intel. Using this file system applications can directly submit I/O requests to NVMe SSDs. Then, it provides high performance, high reliability as well as POSIX-like interfaces (e.g., nvfuse_open, nvfuse_read, nvfuse_write, and nvfuse_close functions). Note that this file system doesn't make use of well-known FUSE (File System in Userspace) library to provide POSIX compatibility. Key features are listed as follows.
+NVFUSE is an embeddable file system as a library running in the user-space incorporated with [SPDK library](https://github.com/spdk/spdk) which is a user-space NVMe driver newly introduced by Intel. Using this file system applications can directly submit I/O requests to NVMe SSDs. Then, it provides high performance, high reliability as well as POSIX-like interfaces (e.g., nvfuse_open, nvfuse_read, nvfuse_write, and nvfuse_close functions). The primary performance interface is the direct API with SPDK. Optional Linux FUSE 3 mounts and kernel/image backends provide compatibility and development access. Key features are listed as follows.
 
  - Running in userspace without any interactions with kernel driver so that interrupts, context switches, and memory copies are eliminated. 
  - Embeddable file system as a library that introduces new interfaces are similar to POSIX API.
  - Simple file system layout that is identical to EXT family file system (e.g., EXT3).
- - Metadata redo journaling and optional application transactions in the standalone file and SPDK/NVMe backends. See the support limits below; NVMe commands alone do not make multiple metadata writes atomic.
+ - Metadata redo journaling defaults ON in the modern serialized API/SPDK runtime. Optional application transactions remain a standalone-backend feature. See the support limits below; NVMe commands alone do not make multiple metadata writes atomic.
 
 Local development on macOS and Linux
 ===================================
@@ -18,7 +18,9 @@ file using `pread`, `pwrite` and `fsync`.
 
 Requirements: `clang`, `make` and Python 3.9 or later. On macOS, install Xcode
 Command Line Tools. Verified on Apple Silicon macOS and Rocky Linux 9 ARM64 in
-Colima. Recent SPDK support remains follow-up work.
+Colima. Modern SPDK correctness integration and optional FUSE mounting are
+available in the dedicated QEMU environment described below; performance-engine
+qualification remains separate.
 
     make local
     make local-test
@@ -72,6 +74,25 @@ cross-platform image interchange, and does not mount a volume in Finder. Use
 disposable development images: underlying block-I/O errors or partial mount
 failures abort the process because the legacy core cannot reliably unwind those failures.
 The original SPDK build commands below remain separate from this local mode.
+For SPDK v26.09 and fio 3.41, use the [primary API/SPDK fio engine](docs/spdk-fio.md).
+It exercises NVFUSE AIO without a FUSE mount. The primary runtime defaults to
+[metadata journaling](docs/spdk-primary-journaling.md); the experimental
+[compact v3 log](docs/journal-compact-log-v3-design.md) requires an explicit new
+format. For live IOPS, bandwidth, latency and queues, enable
+`NVFUSE_SPDK_STATS=1` and use [live monitoring](docs/spdk-live-monitoring.md).
+
+An optional Linux FUSE 3 frontend is available with `make fuse` for mounting a
+normal image inside the QEMU Linux development guest. It shares the existing
+core and has a separate build. See [Linux FUSE integration](docs/linux-fuse-integration.md)
+for setup, commands, tests, and capability limits. The native macOS local tests
+and the original SPDK build remain independent of FUSE.
+The optional `make fuse-spdk` build adds a synchronous SPDK-backed mount.
+See the [interface/backend matrix](docs/backend-matrix.md) for all six
+combinations, their performance roles, API selection and validation.
+Use `make backend-regression-qemu` for three functional rounds of all six
+combinations in the dedicated VM, or `make backend-regression` for the four
+portable Linux combinations. The [backend matrix](docs/backend-matrix.md)
+describes the compatibility boundary. These defaults run no performance benchmarks.
 
 Metadata journaling and optional user transactions
 -------------------------------------------------
@@ -105,8 +126,9 @@ images by default. The standalone SPDK integration runs the TX oracle on the
 dedicated QEMU NVMe and checks recovery after injected I/O failures.
 
 See [disk format, ordering, recovery diagrams and ext4/XFS comparison](docs/metadata-journaling-design.md),
-[the user TX API contract](docs/user-transactions-design.md), and
-[executed validation and performance results](docs/journaling-evaluation.md).
+[the user TX API contract](docs/user-transactions-design.md),
+[checkpoint ownership](docs/checkpoint-concurrency-design.md), and
+[durable transaction outcomes](docs/transaction-outcomes-design.md).
 
 Metadata boundary and reclamation tests
 ---------------------------------------
@@ -127,11 +149,6 @@ The stress suite sweeps every inode bitmap slot of the maximum journal-volume
 geometry twice, compares mixed operations against an independent namespace and
 content model, and exercises 70 near-full crash windows with recovery/reuse.
 Python runners retain JSON, JUnit and logs under `build/test-results`.
-See [the boundary matrix and measured results](docs/metadata-boundary-tests.md)
-for coverage boundaries and the distinction between model and image evidence.
-See [the six-area resilience campaign](docs/resilience-tests.md) for stored-data
-crashes, adversarial hash collisions, journal ENOMEM, owner isolation, QEMU VM
-power cuts, full directory enumeration/readback, and parent-directory recovery.
 
 Deterministic test framework
 ----------------------------

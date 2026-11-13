@@ -2,6 +2,7 @@
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_file.h"
+#include "nvfuse_backend.h"
 #include "nvfuse_mkfs.h"
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_tx_internal.h"
@@ -12,6 +13,10 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+#endif
 
 #define IMAGE_GROUP_BYTES (128ULL * 1024 * 1024)
 #define META_IMAGE_SIGNATURE UINT32_C(0x4d46564e)
@@ -403,43 +408,59 @@ int nvfuse_file_reload(struct nvfuse_handle *h)
     return 0;
 }
 
+/* Device geometry discovery is shared by kernel and SPDK transports. It stays
+ * outside the I/O hot path and retains mount_target's journal/recovery logic. */
+#if defined(__linux__) || defined(NVFUSE_SPDK_TRANSPORT)
+static int mount_device(struct nvfuse_handle *h, uint64_t capacity, int format,
+                        uint64_t logical_size, int metadata_only)
+{
+    struct io_target *t = h->nvh_target;
+    t->size_bytes = capacity;
+    if (format && !logical_size)
+        logical_size = capacity - capacity % IMAGE_GROUP_BYTES;
+    if (!format) {
+        struct nvj_ops ops = journal_ops(t);
+        int probe = nvj_probe(&ops, capacity, &logical_size, metadata_only);
+        if (probe && probe != -ENOENT) { errno = -probe; return -1; }
+        if (probe == -ENOENT) {
+            struct nvfuse_superblock_common disk;
+            if (read_disk_header(t, &disk) || disk.sb_no_of_blocks <= 0 ||
+                disk.sb_no_of_blocks > (int64_t)(capacity / CLUSTER_SIZE)) {
+                errno = EINVAL; return -1;
+            }
+            logical_size = disk.sb_no_of_blocks * CLUSTER_SIZE;
+        }
+    }
+    if (logical_size > capacity || logical_size < IMAGE_GROUP_BYTES ||
+        logical_size % IMAGE_GROUP_BYTES || logical_size / CLUSTER_SIZE > INT32_MAX) {
+        errno = EINVAL; return -1;
+    }
+    t->size_bytes = logical_size;
+    t->metadata_only = metadata_only;
+    return mount_target(h, format);
+}
+#endif
+
 #ifdef NVFUSE_SPDK_TRANSPORT
-struct nvfuse_handle *nvfuse_nvme_fs_open(const char *bdf, int format,
-                                        uint64_t logical_size, int metadata_only)
+static struct nvfuse_handle *nvme_fs_open(const char *bdf, uint32_t nsid,
+                                         int format, uint64_t size,
+                                         int metadata_only, int fixture_only)
 {
     if (active_handle) { errno = EBUSY; return NULL; }
-    if ((metadata_only != 0 && metadata_only != 1) ||
-        (format && (logical_size < IMAGE_GROUP_BYTES || logical_size % IMAGE_GROUP_BYTES))) {
+    if (!bdf || (metadata_only != 0 && metadata_only != 1) ||
+        (format && (size < IMAGE_GROUP_BYTES || size % IMAGE_GROUP_BYTES))) {
         errno = EINVAL; return NULL;
     }
     struct nvfuse_handle *h = calloc(1, sizeof(*h));
     struct io_target *t = calloc(1, sizeof(*t));
-    if (!h || !t) { free(h); free(t); return NULL; }
+    if (!h || !t) { free(h); free(t); errno = ENOMEM; return NULL; }
     t->fd = -1;
-    uint64_t device_size;
-    int rc = nvfuse_nvme_open(bdf, &t->spdk_transport, &device_size);
-    if (rc) { errno = -rc; goto fail; }
-    t->size_bytes = device_size;
-    if (!format) {
-        struct nvj_ops ops = journal_ops(t);
-        int probe = nvj_probe(&ops, device_size, &logical_size, metadata_only);
-        if (probe && probe != -ENOENT) { errno = -probe; goto fail; }
-        if (probe == -ENOENT) {
-        struct nvfuse_superblock_common disk;
-        if (read_disk_header(t, &disk) || disk.sb_no_of_blocks <= 0 ||
-            disk.sb_no_of_blocks > (int64_t)(device_size / CLUSTER_SIZE)) {
-            errno = EINVAL; goto fail;
-        }
-        logical_size = disk.sb_no_of_blocks * CLUSTER_SIZE;
-        }
-    }
-    if (logical_size > device_size || logical_size < IMAGE_GROUP_BYTES || logical_size % IMAGE_GROUP_BYTES) {
-        errno = EINVAL; goto fail;
-    }
-    t->size_bytes = logical_size;
-    t->metadata_only = metadata_only;
     h->nvh_target = t;
-    if (mount_target(h, format)) goto fail;
+    uint64_t capacity;
+    int rc = fixture_only ? nvfuse_nvme_open(bdf, &t->spdk_transport, &capacity) :
+                           nvfuse_nvme_open_namespace(bdf, nsid, &t->spdk_transport, &capacity);
+    if (rc) { errno = -rc; goto fail; }
+    if (mount_device(h, capacity, format, size, metadata_only)) goto fail;
     return h;
 fail:;
     int saved = errno;
@@ -448,4 +469,90 @@ fail:;
     free(t); free(h); errno = saved;
     return NULL;
 }
+
+/* Preserve the old test API's exact disposable-device restriction. */
+struct nvfuse_handle *nvfuse_nvme_fs_open(const char *bdf, int format,
+                                        uint64_t logical_size, int metadata_only)
+{
+    return nvme_fs_open(bdf, 1, format, logical_size, metadata_only, 1);
+}
 #endif
+
+#ifdef __linux__
+static struct nvfuse_handle *kernel_fs_open(const struct nvfuse_backend_options *options)
+{
+    if (active_handle) { errno = EBUSY; return NULL; }
+    /* O_EXCL claims a block device in the kernel, including partition/holder
+     * conflicts. An advisory file lock alone cannot exclude a mounted FS. */
+    int fd = open(options->target, O_RDWR | O_EXCL | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return NULL;
+    struct stat st;
+    uint64_t capacity;
+    if (fstat(fd, &st)) goto fail_fd;
+    if (!S_ISBLK(st.st_mode)) { errno = ENOTBLK; goto fail_fd; }
+    if (ioctl(fd, BLKGETSIZE64, &capacity)) goto fail_fd;
+    struct nvfuse_handle *h = calloc(1, sizeof(*h));
+    struct io_target *t = calloc(1, sizeof(*t));
+    if (!h || !t) { free(h); free(t); errno = ENOMEM; goto fail_fd; }
+    t->fd = fd;
+    h->nvh_target = t;
+    if (!mount_device(h, capacity, options->format, options->size_bytes, 0)) return h;
+    nvj_close(t->journal);
+    free(t); free(h);
+fail_fd:;
+    int saved = errno;
+    close(fd);
+    errno = saved;
+    return NULL;
+}
+#endif
+
+int nvfuse_backend_supported(enum nvfuse_backend_kind kind)
+{
+    switch (kind) {
+    case NVFUSE_BACKEND_IMAGEFILE: return 1;
+#ifdef __linux__
+    case NVFUSE_BACKEND_KERNEL: return 1;
+#endif
+#ifdef NVFUSE_SPDK_TRANSPORT
+    case NVFUSE_BACKEND_SPDK: return 1;
+#endif
+    default: return 0;
+    }
+}
+
+struct nvfuse_handle *nvfuse_backend_open(const struct nvfuse_backend_options *o)
+{
+    if (!o || !o->target || !o->target[0] || (o->format != 0 && o->format != 1) ||
+        (o->kind != NVFUSE_BACKEND_SPDK && o->namespace_id) ||
+        (!o->format && o->size_bytes) ||
+        (o->format && (o->size_bytes || o->kind == NVFUSE_BACKEND_IMAGEFILE) &&
+                      (o->size_bytes < IMAGE_GROUP_BYTES ||
+                       o->size_bytes % IMAGE_GROUP_BYTES ||
+                       o->size_bytes / CLUSTER_SIZE > UINT32_MAX))) {
+        errno = EINVAL; return NULL;
+    }
+    if (o->kind < NVFUSE_BACKEND_IMAGEFILE || o->kind > NVFUSE_BACKEND_SPDK) {
+        errno = EINVAL; return NULL;
+    }
+    if (!nvfuse_backend_supported(o->kind)) { errno = ENOTSUP; return NULL; }
+    switch (o->kind) {
+    case NVFUSE_BACKEND_IMAGEFILE:
+        return nvfuse_file_open(o->target, o->format, o->size_bytes);
+#ifdef __linux__
+    case NVFUSE_BACKEND_KERNEL:
+        return kernel_fs_open(o);
+#endif
+#ifdef NVFUSE_SPDK_TRANSPORT
+    case NVFUSE_BACKEND_SPDK:
+        return nvme_fs_open(o->target, o->namespace_id ? o->namespace_id : 1,
+                            o->format, o->size_bytes, 0, 0);
+#endif
+    default: errno = ENOTSUP; return NULL;
+    }
+}
+
+int nvfuse_backend_close(struct nvfuse_handle *h)
+{
+    return h ? nvfuse_file_close(h) : -EINVAL;
+}

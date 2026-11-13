@@ -139,7 +139,9 @@
 
 /* # OF MAX OPEN FILE */
 #define START_OPEN_FILE	3 /* STDIN, STDOUT, STDERR*/
+#ifndef MAX_OPEN_FILE
 #define MAX_OPEN_FILE	16
+#endif
 
 #define NVFUSE_BP_TYPE_DATA 0
 #define NVFUSE_BP_TYPE_DIR 1
@@ -553,6 +555,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh);
 s32 nvfuse_umount(struct nvfuse_handle *nvh);
 struct nvfuse_superblock *nvfuse_read_super(struct nvfuse_handle *nvh);
 s32 nvfuse_scan_superblock(struct nvfuse_handle *nvh, struct nvfuse_superblock *cur_sb);
+s32 nvfuse_sync_superblock(struct nvfuse_superblock *sb);
 void nvfuse_release_super(struct nvfuse_superblock *sb);
 void nvfuse_copy_mem_sb_to_disk_sb(struct nvfuse_superblock *disk, struct nvfuse_superblock *memory);
 void nvfuse_copy_disk_sb_to_sb(struct nvfuse_superblock *memory, struct nvfuse_superblock *disk);

@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""iostat-style live view of NVFUSE API/SPDK statistics (no dependencies)."""
+import argparse
+from datetime import datetime
+import glob
+import math
+import os
+from pathlib import Path
+import stat
+import struct
+import sys
+import time
+
+MAGIC = 0x4E56465354415431
+WORDS = ('seq magic version pid state timestamp_ns read_ios write_ios read_bytes '
+         'write_bytes read_lat_ticks write_lat_ticks errors inflight pending ready '
+         'submitted completed ticks_hz fs_core io_core').split()
+LEGACY_RECORD = struct.Struct('<' + 'Q' * len(WORDS))
+RECORD = struct.Struct('<' + 'Q' * len(WORDS) + '32s128s')
+
+
+def snapshot(path):
+    """Reject partial updates, truncated files, symlinks and unknown versions."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size not in (RECORD.size, LEGACY_RECORD.size):
+            raise ValueError('unexpected statistics file size/type')
+        layout = RECORD if info.st_size == RECORD.size else LEGACY_RECORD
+        for _ in range(8):
+            raw = os.pread(fd, layout.size, 0)
+            if len(raw) != layout.size:
+                raise ValueError('truncated statistics record')
+            values = layout.unpack(raw)
+            tail = os.pread(fd, 8, 0)
+            if len(tail) != 8:
+                raise ValueError('truncated sequence')
+            sequence = struct.unpack('<Q', tail)[0]
+            if not (values[0] & 1) and values[0] == sequence:
+                row = dict(zip(WORDS, values))
+                if row['magic'] != MAGIC or row['version'] != (2 if layout is RECORD else 1) or not row['ticks_hz']:
+                    raise ValueError('unsupported/uninitialized statistics protocol')
+                row['bdf'] = values[len(WORDS)].split(b'\0', 1)[0].decode() if layout is RECORD else 'unknown'
+                row['bdev'] = values[len(WORDS)+1].split(b'\0', 1)[0].decode() if layout is RECORD else 'unknown'
+                row['device'] = row['bdf'] + '/' + row['bdev']
+                return row
+        raise ValueError('statistics writer is updating; retry next interval')
+    finally:
+        os.close(fd)
+
+
+def rates(before, after):
+    elapsed = (after['timestamp_ns'] - before['timestamp_ns']) / 1e9
+    counters = ('read_ios', 'write_ios', 'read_bytes', 'write_bytes',
+                'read_lat_ticks', 'write_lat_ticks', 'errors')
+    if (before['pid'] != after['pid'] or before.get('device') != after.get('device') or
+            before['ticks_hz'] != after['ticks_hz'] or elapsed <= 0 or
+            any(after[k] < before[k] for k in counters)):
+        return None
+    delta = {k: after[k] - before[k] for k in counters}
+    result = {k: delta[k] / elapsed for k in ('read_ios', 'write_ios', 'read_bytes', 'write_bytes', 'errors')}
+    for op in ('read', 'write'):
+        result[op + '_us'] = (delta[op + '_lat_ticks'] * 1e6 / after['ticks_hz'] /
+                             delta[op + '_ios']) if delta[op + '_ios'] else 0
+    return result
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def combine(rows):
+    snapshot_sum = {k: sum(row[k] for row, _ in rows) for k in ('inflight', 'pending', 'ready')}
+    rates_sum = {k: sum(rate[k] for _, rate in rows) for k in
+                 ('read_ios', 'write_ios', 'read_bytes', 'write_bytes', 'errors')}
+    for op in ('read', 'write'):
+        ios = rates_sum[op + '_ios']
+        rates_sum[op + '_us'] = (sum(rate[op + '_ios'] * rate[op + '_us'] for _, rate in rows) / ios) if ios else 0
+    return snapshot_sum, rates_sum
+
+
+def print_row(device, pid, row, rate, state):
+    print(f"{datetime.now():%H:%M:%S} {device:30s} {pid:7s} {rate['read_ios']:8.0f} {rate['write_ios']:8.0f} "
+          f"{rate['read_bytes']/1048576:7.1f} {rate['write_bytes']/1048576:7.1f} "
+          f"{rate['read_us']:7.1f} {rate['write_us']:7.1f} "
+          f"{row['inflight']:5d} {row['pending']:4d} {row['ready']:5d} {rate['errors']:5.1f} {state}", flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('interval', type=float, nargs='?', default=1, help='seconds between rows (default: 1)')
+    parser.add_argument('count', type=int, nargs='?', help='number of sampling intervals, as in iostat')
+    parser.add_argument('--file', type=Path, help='explicit statistics path; also displays its final snapshot')
+    parser.add_argument('--device', help='exact PCI BDF, bdev name, or BDF/bdev')
+    parser.add_argument('--total', action='store_true', help='also show the sum of displayed process rows')
+    parser.add_argument('--pid', type=int, help='show only this NVFUSE/fio process')
+    parser.add_argument('--directory', type=Path, default=Path('/tmp'), help='automatic discovery directory')
+    parser.add_argument('--json', action='store_true', help='one JSON object per line')
+    args = parser.parse_args()
+    if not math.isfinite(args.interval) or args.interval < 0.1 or (args.count is not None and args.count < 1):
+        parser.error('interval must be >= 0.1 and count must be positive')
+    previous = {}
+    if not args.json:
+        print('NVFUSE API/SPDK  await_us=API-submit→FS-complete; queues=instantaneous; MiB=2^20', flush=True)
+        print('time     device                            pid    rIOPS    wIOPS  rMiB/s  wMiB/s r_await w_await  infl pend ready err/s state', flush=True)
+    iterations = 0
+    try:
+        while args.count is None or iterations <= args.count:
+            paths = [str(args.file)] if args.file else sorted(glob.glob(str(args.directory / 'nvfuse-spdk-*.stats')))
+            found = 0
+            interval_rows = []
+            for path in paths:
+                try:
+                    row = snapshot(path)
+                    if args.device and args.device.casefold() not in {row[k].casefold() for k in ('bdf', 'bdev', 'device')}:
+                        continue
+                    if args.pid and row['pid'] != args.pid:
+                        continue
+                    if not args.file and (row['state'] != 1 or not alive(row['pid'])):
+                        continue
+                    found += 1
+                    old = previous.get(path)
+                    previous[path] = row
+                    if old is None:
+                        if args.file and row['state'] == 2:
+                            if args.json:
+                                import json
+                                print(json.dumps({'path': path, 'snapshot': row, 'rates': None}), flush=True)
+                            else:
+                                print(f"{row['device']} pid={row['pid']} state=stop "
+                                      f"read_ios={row['read_ios']} write_ios={row['write_ios']} errors={row['errors']}", flush=True)
+                            return
+                        continue
+                    rate = rates(old, row)
+                    if rate is None:
+                        continue
+                    state = 'run' if row['state'] == 1 else 'stop'
+                    if args.json:
+                        import json
+                        print(json.dumps({'time': datetime.now().isoformat(timespec='seconds'), 'path': path,
+                                          'snapshot': row, 'rates': rate}), flush=True)
+                    else:
+                        print_row(row['device'], str(row['pid']), row, rate, state)
+                    interval_rows.append((row, rate))
+                except (OSError, ValueError) as error:
+                    if args.file:
+                        print(f'{path}: {error}', file=sys.stderr, flush=True)
+            if args.total and interval_rows:
+                total_row, total_rate = combine(interval_rows)
+                if args.json:
+                    import json
+                    print(json.dumps({'total': True, 'processes': len(interval_rows),
+                                      'snapshot': total_row, 'rates': total_rate}), flush=True)
+                else:
+                    print_row('TOTAL', '-', total_row, total_rate, 'sum')
+            if not found and not args.json:
+                print(f'{datetime.now():%H:%M:%S} waiting for NVFUSE stats (start engine with NVFUSE_SPDK_STATS=1)', flush=True)
+            if args.count is not None and iterations >= args.count:
+                break
+            time.sleep(args.interval)
+            iterations += 1
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == '__main__':
+    main()

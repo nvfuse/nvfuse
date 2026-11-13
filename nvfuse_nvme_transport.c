@@ -11,9 +11,11 @@ struct device {
     struct spdk_nvme_transport_id trid;
     unsigned char *bounce;
     uint64_t size, reads, writes, flushes;
+    uint32_t nsid, sector_shift;
 };
 struct result { int done, error; unsigned sct, sc; };
 static int env_ready;
+static struct spdk_pci_addr env_address;
 #ifdef NVFUSE_NVME_TEST_HOOKS
 static void (*io_observer)(int, int, uint64_t);
 void nvfuse_nvme_test_observer(void (*observer)(int, int, uint64_t))
@@ -56,12 +58,14 @@ static void attach(void *arg, const struct spdk_nvme_transport_id *id,
     struct device *d = arg;
     (void)id; (void)opts;
     d->ctrlr = ctrlr;
-    d->ns = spdk_nvme_ctrlr_get_ns(ctrlr, 1);
+    d->ns = spdk_nvme_ctrlr_get_ns(ctrlr, d->nsid);
 }
-int nvfuse_nvme_open(const char *bdf, void **out, uint64_t *size)
+static int open_namespace(const char *bdf, uint32_t nsid, void **out, uint64_t *size, int fixture_only)
 {
     struct spdk_pci_addr address;
-    if (spdk_pci_addr_parse(&address, bdf)) return -EINVAL;
+    if (!bdf || !out || !size || !nsid || spdk_pci_addr_parse(&address, bdf)) return -EINVAL;
+    *out = NULL;
+    if (env_ready && spdk_pci_addr_compare(&address, &env_address)) return -EXDEV;
     if (!env_ready) {
         struct spdk_env_opts opts = {.opts_size = sizeof(opts)};
         spdk_env_opts_init(&opts);
@@ -71,21 +75,28 @@ int nvfuse_nvme_open(const char *bdf, void **out, uint64_t *size)
         opts.num_pci_addr = 1;
         opts.pci_allowed = &address;
         if (spdk_env_init(&opts) < 0) return -EIO;
+        env_address = address;
         env_ready = 1;
         atexit(spdk_env_fini);
     }
     struct device *d = calloc(1, sizeof(*d));
     if (!d) return -ENOMEM;
+    d->nsid = nsid;
     d->trid.trtype = SPDK_NVME_TRANSPORT_PCIE;
-    snprintf(d->trid.traddr, sizeof(d->trid.traddr), "%s", bdf);
+    spdk_pci_addr_fmt(d->trid.traddr, sizeof(d->trid.traddr), &address);
     int rc = spdk_nvme_probe(&d->trid, d, probe, attach, NULL);
     if (rc || !d->ctrlr || !d->ns || !spdk_nvme_ns_is_active(d->ns)) goto fail;
     const struct spdk_nvme_ctrlr_data *data = spdk_nvme_ctrlr_get_data(d->ctrlr);
     d->size = spdk_nvme_ns_get_size(d->ns);
-    if (data->vid != 0x1b36 || memcmp(data->sn, "NVFUSEDEV0001", 13) ||
-        d->size != UINT64_C(2147483648) || spdk_nvme_ns_get_sector_size(d->ns) != 512) {
+    uint32_t sector_size = spdk_nvme_ns_get_sector_size(d->ns);
+    if (fixture_only && (data->vid != 0x1b36 || memcmp(data->sn, "NVFUSEDEV0001", 13) ||
+        d->size != UINT64_C(2147483648) || sector_size != 512 || nsid != 1)) {
         rc = -EPERM; goto fail;
     }
+    if (!d->size || spdk_nvme_ns_get_csi(d->ns) != SPDK_NVME_CSI_NVM ||
+        (sector_size != 512 && sector_size != 4096) ||
+        spdk_nvme_ns_get_md_size(d->ns)) { rc = -ENOTSUP; goto fail; }
+    d->sector_shift = sector_size == 512 ? 9 : 12;
     d->qpair = spdk_nvme_ctrlr_alloc_io_qpair(d->ctrlr, NULL, 0);
     d->bounce = spdk_dma_zmalloc(BOUNCE_SIZE, 4096, NULL);
     if (!d->qpair || !d->bounce) { rc = -ENOMEM; goto fail; }
@@ -94,6 +105,14 @@ int nvfuse_nvme_open(const char *bdf, void **out, uint64_t *size)
 fail:
     nvfuse_nvme_close(d);
     return rc ? rc : -ENODEV;
+}
+int nvfuse_nvme_open(const char *bdf, void **out, uint64_t *size)
+{
+    return open_namespace(bdf, 1, out, size, 1);
+}
+int nvfuse_nvme_open_namespace(const char *bdf, uint32_t nsid, void **out, uint64_t *size)
+{
+    return open_namespace(bdf, nsid, out, size, 0);
 }
 static int io(struct device *d, uint64_t lba, uint32_t blocks, int write_op)
 {
@@ -117,16 +136,17 @@ int nvfuse_nvme_transfer(void *arg, uint64_t offset, size_t bytes, void *buffer,
 {
     struct device *d = arg;
     if (offset > d->size || bytes > d->size - offset) return -EINVAL;
+    size_t sector_mask = (1u << d->sector_shift) - 1;
     while (bytes) {
-        size_t within = offset % 512;
+        size_t within = offset & sector_mask;
         size_t count = bytes < BOUNCE_SIZE - within ? bytes : BOUNCE_SIZE - within;
-        uint32_t blocks = (within + count + 511) / 512;
+        uint32_t blocks = (within + count + sector_mask) >> d->sector_shift;
         int rc = 0;
-        if (!write_op || within || count % 512) rc = io(d, offset / 512, blocks, 0);
+        if (!write_op || within || (count & sector_mask)) rc = io(d, offset >> d->sector_shift, blocks, 0);
         if (rc) return rc;
         if (write_op) {
             memcpy(d->bounce + within, buffer, count);
-            rc = io(d, offset / 512, blocks, 1);
+            rc = io(d, offset >> d->sector_shift, blocks, 1);
         } else memcpy(buffer, d->bounce + within, count);
         if (rc) return rc;
         offset += count; bytes -= count; buffer = (char *)buffer + count;

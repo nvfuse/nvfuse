@@ -120,6 +120,21 @@ endif
 
 
 # Native file-image development targets, separate from the SPDK build.
+.PHONY: fuse fuse-adapter-test fuse-test fuse-extended-test
+fuse fuse-adapter-test fuse-test fuse-extended-test:
+	$(MAKE) -f Makefile.fuse $@
+
+.PHONY: fuse-spdk
+fuse-spdk:
+	$(MAKE) -C examples/fuse3 -f Makefile.spdk
+
+REGRESSION_REPEAT ?= 3
+.PHONY: backend-regression backend-regression-qemu
+backend-regression:
+	python3 tests/run_backend_regression.py --profile portable --repeat "$(REGRESSION_REPEAT)" --sanitize
+backend-regression-qemu:
+	python3 scripts/test-fuse-qemu.py --backends --repeat "$(REGRESSION_REPEAT)" --sanitize
+
 .PHONY: local-roadmap-test local local-test local-sanitize local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-chaos-test
 local:
 	$(MAKE) -f Makefile.local all
@@ -144,3 +159,10 @@ local-framework:
 	$(MAKE) -f Makefile.local framework-test
 local-sanitize:
 	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test journal-test limit-test boundary-suite stress-test resilience-test
+
+# Current SPDK primary reactor and FIO API engine (separate object directory).
+.PHONY: spdk-primary spdk-fio
+spdk-primary:
+	$(MAKE) -f Makefile.spdk all
+spdk-fio:
+	$(MAKE) -f Makefile.spdk fio

@@ -18,6 +18,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <time.h>
 
 #include "nvfuse_io_manager.h"
 #if defined(__APPLE__) && defined(NVFUSE_FILE_BACKEND)
@@ -32,6 +33,7 @@
 #include "nvfuse_misc.h"
 #include "nvfuse_debug.h"
 #include "nvfuse_malloc.h"
+#include "nvfuse_indirect.h"
 
 #ifdef SPDK_ENABLED
 #include "spdk/env.h"
@@ -200,16 +202,51 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queu
 	s32 job_count = 0;
 	struct io_job *jobs[AIO_MAX_QDEPTH];
 	s32 res;
+#ifndef NVFUSE_FILE_BACKEND
+    struct nvfuse_file_table *of;
+    struct nvfuse_inode_ctx *ictx;
+    int write = areq->opcode == WRITE;
+    u32 fast_read_physical = 0;
+    int fast_read = 0;
+#endif
 
-	assert(areq->bio_job_count);
+	if ((areq->opcode != READ && areq->opcode != WRITE) ||
+        !areq->bytes || areq->bytes % CLUSTER_SIZE ||
+	    areq->offset < 0 || areq->offset % CLUSTER_SIZE ||
+	    areq->bio_job_count <= 0 || areq->bio_job_count > AIO_MAX_QDEPTH)
+		return -1;
 
 	res = nvfuse_make_jobs(sb, jobs, areq->bio_job_count);
 	if (res < 0) {
 		return res;
 	}
 
-	start = areq->offset;
-	length = areq->bytes;
+#ifndef NVFUSE_FILE_BACKEND
+    /* Prepare and resolve mappings under one inode acquisition. The old
+     * path prepared every request, then reacquired and remapped it below. */
+    if (areq->offset >= MAX_FILE_SIZE ||
+        (write ? areq->bytes >= MAX_FILE_SIZE - areq->offset :
+                 areq->bytes > MAX_FILE_SIZE - areq->offset)) goto free_jobs;
+    of = nvfuse_get_file_table(sb, areq->fid);
+    if (!write) fast_read = nvfuse_try_cached_read_mapping(sb, of->ino,
+                               areq->offset, areq->bytes, &fast_read_physical);
+    ictx = fast_read ? NULL : nvfuse_read_inode(sb, NULL, of->ino);
+    if (!ictx && !fast_read) goto free_jobs;
+    if (!write && !fast_read && ictx->ictx_inode->i_size < areq->offset + areq->bytes) goto map_failed;
+    if (write && ictx->ictx_inode->i_size < areq->offset) {
+        /* Preserve dense extension, including a gap before this request. */
+        u32 block = ictx->ictx_inode->i_size / CLUSTER_SIZE;
+        u32 end = areq->offset / CLUSTER_SIZE;
+        while (block < end) {
+            u32 allocated = 0;
+            res = nvfuse_get_block(sb, ictx, block, end - block, &allocated, NULL, 1);
+            if (res || !allocated || allocated > end - block) goto map_failed;
+            block += allocated;
+        }
+    }
+#endif
+    start = areq->offset;
+    length = areq->bytes;
 
 	//dprintf_info(AIO, " start = %ld, length = %ld \n", start, length);
 
@@ -226,10 +263,35 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queu
 		max_blocks = 1;
 #endif
 
-		pblk = nvfuse_fgetblk(sb, areq->fid, lblk, max_blocks, &num_alloc);
-		if (pblk < 0) {
+#ifdef NVFUSE_FILE_BACKEND
+        pblk = nvfuse_fgetblk(sb, areq->fid, lblk, max_blocks, &num_alloc);
+#else
+        u32 physical = 0;
+        if (fast_read) {
+            physical = fast_read_physical;
+            num_alloc = max_blocks;
+            res = 0;
+        } else {
+            res = nvfuse_get_block_cached(sb, ictx, lblk, max_blocks, &num_alloc, &physical);
+        }
+        if (!res && !num_alloc && write) {
+            /* Allocation can return multiple noncontiguous physical blocks.
+             * Re-resolve only newly allocated mappings to obtain a contiguous
+             * extent; never submit the allocation count as an extent length. */
+            res = nvfuse_get_block(sb, ictx, lblk, max_blocks, &num_alloc, NULL, 1);
+            if (!res) res = nvfuse_get_block_cached(sb, ictx, lblk, max_blocks, &num_alloc, &physical);
+        }
+        pblk = res ? -1 : (s32)physical;
+#endif
+		if (pblk <= 0 || !num_alloc || num_alloc > max_blocks ||
+		    job_count >= areq->bio_job_count) {
 			dprintf_error(AIO, " Error: nvfuse_fgetblk() lblk = %x\n", lblk);
-			return -1;
+#ifdef NVFUSE_FILE_BACKEND
+            nvfuse_release_jobs(sb, jobs, areq->bio_job_count);
+            return -1;
+#else
+            goto map_failed;
+#endif
 		}
 
 		//dprintf_info(AIO, " lblk = %d, pblk = %d, num_alloc = %d \n", lblk, pblk, num_alloc);
@@ -253,7 +315,21 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queu
 		job_count++;
 	}
 
-	if (job_count < areq->bio_job_count) {
+#ifndef NVFUSE_FILE_BACKEND
+    if (write) {
+        if (ictx->ictx_inode->i_size < areq->offset + areq->bytes)
+            ictx->ictx_inode->i_size = areq->offset + areq->bytes;
+        /* Overwrites change inode metadata too. Preserve the on-disk format's
+         * one-second resolution and journal the timestamps with the mapping. */
+        ictx->ictx_inode->i_mtime = ictx->ictx_inode->i_ctime = (u32)time(NULL);
+    }
+    of->rwoffset = areq->offset + areq->bytes;
+    if (of->rwoffset > of->size) of->size = of->rwoffset;
+    nvfuse_release_inode(sb, ictx, write ? DIRTY : NVF_CLEAN);
+    /* Threshold flush stays outside the inode lock. */
+    if (write) nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+#endif
+    if (job_count < areq->bio_job_count) {
 		nvfuse_release_jobs(sb, jobs + job_count, areq->bio_job_count - job_count);
 	}
 
@@ -269,13 +345,25 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queu
 	res = reactor_submit_reqs(sb->target, aioq->task, jobs, job_count);
 	if (res < 0) {
 		dprintf_error(AIO, " Error: aio submit error = %d\n", res);
+		nvfuse_release_jobs(sb, jobs, job_count);
 		return -1;
 	}
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (sb->target->journal) sb->target->journal_aio++;
+#endif
 	aioq->total_bio_job_count += job_count;
 	areq->bio_job_count = job_count;
 
-	return 0;
+    return 0;
+#ifndef NVFUSE_FILE_BACKEND
+map_failed:
+    nvfuse_release_inode(sb, ictx, write ? DIRTY : NVF_CLEAN);
+    if (write) nvfuse_check_flush_dirty(sb, sb->sb_dirty_sync_policy);
+free_jobs:
+    nvfuse_release_jobs(sb, jobs, areq->bio_job_count);
+    return -1;
+#endif
 }
 
 s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq)
@@ -292,6 +380,7 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 	//dprintf_info(AIO, " aio ready queue : fd = %d offset = %ld, bytes = %ld, op = %d\n", areq->fid, (long)areq->offset,
 	//	(long)areq->bytes, areq->opcode);
 	assert(nvfuse_is_directio(&nvh->nvh_sb, areq->fid));
+#ifdef NVFUSE_FILE_BACKEND
 	if (areq->opcode == READ) {
 		bytes = nvfuse_readfile_aio_directio(nvh, areq->fid, areq->buf, areq->bytes,
 							 areq->offset);
@@ -299,6 +388,12 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		bytes = nvfuse_writefile_directio_prepare(nvh, areq->fid, areq->buf, areq->bytes,
 				areq->offset);
 	}
+
+#else
+    /* Primary AIO performs bounds checking, preparation and mapping once in
+     * nvfuse_aio_gen_dev_reqs, rather than traversing metadata twice. */
+    bytes = areq->bytes;
+#endif
 
 	if (bytes == areq->bytes) {
 		/* move to submission queue */
@@ -321,8 +416,10 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		/* direct i/o without buffer head */
 		areq->bio_job_count = NVFUSE_SIZE_TO_BLK(areq->bytes);
 		res = nvfuse_aio_gen_dev_reqs(&nvh->nvh_sb, aioq, areq);
-		if (res < 0)
+		if (res < 0) {
+			nvfuse_aio_queue_dequeue(aioq, areq, NVFUSE_SUBMISSION_QUEUE);
 			return -1;
+		}
 
 		nvfuse_aio_queue_dequeue(aioq, areq, NVFUSE_SUBMISSION_QUEUE);
 	}
@@ -356,6 +453,12 @@ s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb, struct nvfuse_aio_que
 		}
 
 		if (areq->bio_job_count == 0) {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+            if (sb->target->journal) {
+                assert(sb->target->journal_aio);
+                sb->target->journal_aio--;
+            }
+#endif
 			assert(nvfuse_is_directio(sb, areq->fid));
 			nvfuse_aio_gen_dev_cpls(areq);
 		}

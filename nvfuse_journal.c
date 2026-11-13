@@ -8,6 +8,21 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <time.h>
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#include <nmmintrin.h>
+#define NVJ_X86_CRC 1
+#elif defined(__aarch64__) && defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#include <arm_acle.h>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#define NVJ_ARM_CRC 1
+#elif defined(__linux__)
+#include <sys/auxv.h>
+#include <asm/hwcap.h>
+#define NVJ_ARM_CRC 1
+#endif
+#endif
 
 #define ANCHOR UINT64_C(0x314c4e524a46564e)
 #define CONTROL UINT64_C(0x314c52544346564e)
@@ -21,6 +36,7 @@
 struct entry { uint32_t home, kind, checksum; };
 struct bucket { uint32_t block, value; };
 struct sparse { struct bucket *buckets; unsigned capacity, used; };
+struct nvj_v3;
 struct nvj {
     struct nvj_ops ops;
     uint64_t bytes, id;
@@ -35,11 +51,22 @@ struct nvj {
     int active, full, error, failed;
     struct nvj_stats stats;
     int async_checkpoint, pending, checkpoint_error;
+    int batch_io, profile, compare_reads, log_join, sparse_reset;
+    nvj_home_writer home_writer;
+    void *home_context;
     pthread_t checkpoint_thread;
     nvj_io_fault fault; void *fault_arg;
     nvj_hook hook;
     void *hook_arg;
+    struct nvj_v3 *v3;
 };
+static int v3_format(struct nvj *);
+static int v3_open(struct nvj *);
+static void v3_close(struct nvj *);
+static int v3_commit(struct nvj *);
+static int v3_checkpoint(struct nvj *);
+static const unsigned char *v3_image(struct nvj *, uint32_t);
+static size_t v3_memory_bytes(const struct nvj *);
 /* Open addressing with a <= 50% load. Values use zero as the empty marker;
  * block zero and the full uint32 block domain are valid keys. No tombstones
  * are needed: the overlay is cleared as a unit, classification is append-only. */
@@ -49,6 +76,42 @@ static int wait_checkpoint(struct nvj *j) {
         return j->checkpoint_error;
     }
     return 0;
+}
+static uint64_t profile_start(struct nvj *j) {
+    if(!j->profile) return 0;
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t);
+    return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec;
+}
+static void profile_end(struct nvj *j,unsigned stage,uint64_t start) {
+    if(j->profile) j->stats.profile_ns[stage]+=profile_start(j)-start;
+}
+int nvj_set_batch_io(struct nvj *j,int enabled) {
+    wait_checkpoint(j);
+    if(!j || (enabled!=0 && enabled!=1)) return -EINVAL;
+    if(j->active) return -EBUSY;
+    j->batch_io=enabled; return 0;
+}
+int nvj_set_compare_reads(struct nvj *j,int enabled) {
+    wait_checkpoint(j);
+    if(!j || (enabled!=0 && enabled!=1)) return -EINVAL;
+    if(j->active) return -EBUSY;
+    j->compare_reads=enabled; return 0;
+}
+int nvj_set_log_join(struct nvj *j,int enabled) {
+    wait_checkpoint(j);
+    if(!j || (enabled!=0 && enabled!=1)) return -EINVAL;
+    if(j->failed) return -EIO;
+    if(j->active) return -EBUSY;
+    j->log_join=enabled; return 0;
+}
+int nvj_set_home_writer(struct nvj *j,nvj_home_writer writer,void *context) {
+    wait_checkpoint(j);
+    if(!j || j->failed) return -EIO;
+    if(j->active) return -EBUSY;
+    j->home_writer=writer; j->home_context=context; return 0;
+}
+void nvj_set_profile(struct nvj *j,int enabled) {
+    wait_checkpoint(j); if(j) j->profile=!!enabled;
 }
 static unsigned hash_block(uint32_t block) {
     block ^= block >> 16; block *= UINT32_C(0x7feb352d);
@@ -166,10 +229,76 @@ static const uint32_t crc32c_table[256]={
     UINT32_C(0x79b737ba),UINT32_C(0x8bdcb4b9),UINT32_C(0x988c474d),UINT32_C(0x6ae7c44e),
     UINT32_C(0xbe2da0a5),UINT32_C(0x4c4623a6),UINT32_C(0x5f16d052),UINT32_C(0xad7d5351),
 };
-static uint32_t crc(const void *buf,size_t len) {
+static uint32_t crc_software(const void *buf,size_t len) {
     const unsigned char *p=buf; uint32_t c=~0u;
     while(len--) c=(c>>8)^crc32c_table[(c^*p++)&255u];
     return ~c;
+}
+/* Same reflected Castagnoli polynomial, initial/final complement and byte
+ * order as the software/disk ABI. memcpy handles unaligned and aliased input.
+ * No ISA instruction executes until process-wide runtime feature detection. */
+#ifdef NVJ_X86_CRC
+__attribute__((target("sse4.2")))
+static uint32_t crc_accelerated(const void *buf,size_t len) {
+    const unsigned char *p=buf; uint64_t c=~0u;
+    while(len>=8) {
+        uint64_t word; memcpy(&word,p,sizeof(word));
+        c=_mm_crc32_u64(c,word); p+=8; len-=8;
+    }
+    while(len--) c=_mm_crc32_u8((uint32_t)c,*p++);
+    return ~(uint32_t)c;
+}
+static int crc_cpu_supported(void) {
+    __builtin_cpu_init(); return !!__builtin_cpu_supports("sse4.2");
+}
+#define NVJ_CRC_NAME "x86-sse4.2"
+#elif defined(NVJ_ARM_CRC)
+#ifdef __clang__
+__attribute__((target("crc")))
+#else
+__attribute__((target("+crc")))
+#endif
+static uint32_t crc_accelerated(const void *buf,size_t len) {
+    const unsigned char *p=buf; uint32_t c=~0u;
+    while(len>=8) {
+        uint64_t word; memcpy(&word,p,sizeof(word));
+        c=__crc32cd(c,word); p+=8; len-=8;
+    }
+    while(len--) c=__crc32cb(c,*p++);
+    return ~c;
+}
+static int crc_cpu_supported(void) {
+#ifdef __APPLE__
+    int enabled=0; size_t n=sizeof(enabled);
+    return !sysctlbyname("hw.optional.armv8_crc32",&enabled,&n,NULL,0) && enabled;
+#else
+    return !!(getauxval(AT_HWCAP)&HWCAP_CRC32);
+#endif
+}
+#define NVJ_CRC_NAME "arm-crc32"
+#endif
+static pthread_once_t crc_once=PTHREAD_ONCE_INIT;
+static uint32_t (*crc_impl)(const void *,size_t)=crc_software;
+static const char *crc_name="software";
+static int crc_policy_error;
+static void crc_initialize(void) {
+    const char *mode=getenv("NVFUSE_JOURNAL_CRC");
+    if(mode && strcmp(mode,"auto") && strcmp(mode,"software")) {
+        crc_policy_error=-EINVAL; crc_name="invalid-policy"; return;
+    }
+    if(mode && !strcmp(mode,"software")) return;
+#if defined(NVJ_X86_CRC) || defined(NVJ_ARM_CRC)
+    if(crc_cpu_supported()) { crc_impl=crc_accelerated; crc_name=NVJ_CRC_NAME; }
+#endif
+}
+const char *nvj_crc_backend(void) {
+    pthread_once(&crc_once,crc_initialize); return crc_name;
+}
+static int crc_policy(void) {
+    pthread_once(&crc_once,crc_initialize); return crc_policy_error;
+}
+static uint32_t crc(const void *buf,size_t len) {
+    pthread_once(&crc_once,crc_initialize); return crc_impl(buf,len);
 }
 static void seal(unsigned char *b) { put32(b+CHECKSUM,crc(b,CHECKSUM)); }
 static int valid(const unsigned char *b,uint64_t magic) { return get64(b)==magic && get32(b+CHECKSUM)==crc(b,CHECKSUM); }
@@ -182,6 +311,26 @@ static int transfer(struct nvj *j,uint32_t b,void *p,int write_op,const char *ph
     event(j,"before-io",b);
     int rc=physical(j,(uint64_t)b*NVJ_BLOCK,NVJ_BLOCK,p,write_op);
     if(!rc) event(j,phase,b);
+    return rc;
+}
+/* Only contiguous addresses AND contiguous images may be coalesced. A batch
+ * can tear or fail partway; existing certificates/flushes still govern replay.
+ * Keep per-block hook/fault semantics for diagnostic users. */
+static unsigned run_limit(struct nvj *j) {
+    return j->batch_io && !j->hook && !j->fault ? 32u : 1u;
+}
+static int write_run(struct nvj *j,uint32_t block,unsigned count,void *buf,const char *phase) {
+    if(count==1) return transfer(j,block,buf,1,phase);
+    return physical(j,(uint64_t)block*NVJ_BLOCK,(size_t)count*NVJ_BLOCK,buf,1);
+}
+static int write_log(struct nvj *j,unsigned slot,unsigned count,unsigned char *buf,const char *phase) {
+    int rc=0;
+    for(unsigned i=0;i<count && !rc;) {
+        uint32_t block=log_block(j,slot+i);
+        unsigned n=1;
+        while(n<run_limit(j) && i+n<count && log_block(j,slot+i+n)==block+n) n++;
+        rc=write_run(j,block,n,buf+(size_t)i*NVJ_BLOCK,phase); i+=n;
+    }
     return rc;
 }
 static int barrier(struct nvj *j,const char *phase) {
@@ -231,7 +380,9 @@ static int replay(struct nvj *j,const unsigned char *cert) {
     if(!rc) j->stats.replays++;
     free(d); free(images); return rc;
 }
-int nvj_format_sized(const struct nvj_ops *ops,uint64_t bytes,int metadata_only,unsigned blocks) {
+int nvj_format_version(const struct nvj_ops *ops,uint64_t bytes,int metadata_only,unsigned blocks,unsigned version) {
+    if(crc_policy()) return -EINVAL;
+    if(version!=2 && version!=3) return -EINVAL;
     if(bytes<(uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK || bytes/NVJ_BLOCK>UINT32_MAX ||
        bytes%((uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK) || (metadata_only!=0 && metadata_only!=1)) return -EINVAL;
     struct nvj j={.ops=*ops,.bytes=bytes};
@@ -251,8 +402,8 @@ int nvj_format_sized(const struct nvj_ops *ops,uint64_t bytes,int metadata_only,
     for(unsigned i=j.blocks-2;i<j.blocks;i++) {
         int rc=transfer(&j,log_block(&j,i),b,1,"format-commit"); if(rc) return rc;
     }
-    int rc=controls(&j,RETIRED); if(rc) return rc;
-    memset(b,0,sizeof(b)); put64(b,ANCHOR); put32(b+8,VERSION); put32(b+12,(uint32_t)metadata_only);
+    int rc=version==3?v3_format(&j):controls(&j,RETIRED); if(rc) return rc;
+    memset(b,0,sizeof(b)); put64(b,ANCHOR); put32(b+8,version); put32(b+12,(uint32_t)metadata_only);
     put64(b+16,bytes); memcpy(b+24,j.uuid,16); put32(b+40,j.start); put32(b+44,j.blocks); seal(b);
     /* The stable anchor is published last, after initialized home metadata. */
     rc=barrier(&j,"format-flush");
@@ -260,18 +411,22 @@ int nvj_format_sized(const struct nvj_ops *ops,uint64_t bytes,int metadata_only,
     if(!rc) rc=barrier(&j,"anchor-flush");
     return rc;
 }
+int nvj_format_sized(const struct nvj_ops *ops,uint64_t bytes,int metadata_only,unsigned blocks) {
+    return nvj_format_version(ops,bytes,metadata_only,blocks,VERSION);
+}
 int nvj_format(const struct nvj_ops *ops,uint64_t bytes,int metadata_only) {
     return nvj_format_sized(ops,bytes,metadata_only,NVJ_BLOCKS);
 }
 /* Discover the volume bound without trusting mutable superblock bytes. */
 int nvj_probe(const struct nvj_ops *ops,uint64_t device_bytes,uint64_t *volume_bytes,int metadata_only) {
+    if(crc_policy()) return -EINVAL;
     if(device_bytes<(uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK) return -EINVAL;
     unsigned char a[NVJ_BLOCK];
     int rc=ops->transfer(ops->context,(uint64_t)NVJ_START*NVJ_BLOCK,NVJ_BLOCK,a,0);
     if(rc) return rc;
     if(get64(a)!=ANCHOR) return -ENOENT;
     uint64_t bytes=get64(a+16);
-    if(!valid(a,ANCHOR) || (get32(a+8)!=1u && get32(a+8)!=VERSION) || get32(a+12)!=(unsigned)metadata_only ||
+    if(!valid(a,ANCHOR) || (get32(a+8)<1u || get32(a+8)>3u) || get32(a+12)!=(unsigned)metadata_only ||
        bytes>device_bytes ||
        bytes<(uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK || bytes/NVJ_BLOCK>UINT32_MAX ||
        bytes%((uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK)) return -EINVAL;
@@ -281,17 +436,22 @@ int nvj_probe(const struct nvj_ops *ops,uint64_t device_bytes,uint64_t *volume_b
 }
 int nvj_open(struct nvj **out,const struct nvj_ops *ops,uint64_t bytes,int metadata_only) {
     *out=NULL;
+    if(crc_policy()) return -EINVAL;
+    const char *reset=getenv("NVFUSE_JOURNAL_SPARSE_RESET");
+    if(reset && strcmp(reset,"0") && strcmp(reset,"1")) return -EINVAL;
     if(bytes<(uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK || bytes/NVJ_BLOCK>UINT32_MAX ||
        bytes%((uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK) || (metadata_only!=0 && metadata_only!=1)) return -EINVAL;
     struct nvj *j=calloc(1,sizeof(*j)); if(!j) return -ENOMEM;
-    j->ops=*ops; j->bytes=bytes;
+    j->ops=*ops; j->bytes=bytes; j->compare_reads=1;
+    j->sparse_reset=!reset || strcmp(reset,"0");
     unsigned char a[NVJ_BLOCK],c[2][NVJ_BLOCK],cert[2][NVJ_BLOCK];
     int rc=transfer(j,NVJ_START,a,0,"anchor-read");
-    if(!rc && (!valid(a,ANCHOR) || (get32(a+8)!=1u && get32(a+8)!=VERSION) || get32(a+12)!=(unsigned)metadata_only ||
+    if(!rc && (!valid(a,ANCHOR) || (get32(a+8)<1u || get32(a+8)>3u) || get32(a+12)!=(unsigned)metadata_only ||
        get64(a+16)!=bytes)) rc=-EINVAL;
     if(!rc) rc=geometry(j,get32(a+8),get32(a+40),get32(a+44));
     if(rc) { free(j); return rc; }
     j->version=get32(a+8); memcpy(j->uuid,a+24,16);
+    if(j->version==3) goto memory;
     int pick=-1;
     for(unsigned i=0;i<2;i++) {
         rc=transfer(j,log_block(j,1+i),c[i],0,"control-read"); if(rc) break;
@@ -315,6 +475,7 @@ int nvj_open(struct nvj **out,const struct nvj_ops *ops,uint64_t bytes,int metad
         else if(!rc) rc=controls(j,RETIRED);
         if(rc) { free(j); return rc; }
     }
+memory: ;
     int memory_error=reserve(&j->metadata,64);
     unsigned index_capacity=16384;
     while(index_capacity/2<j->capacity) index_capacity*=2;
@@ -323,9 +484,10 @@ int nvj_open(struct nvj **out,const struct nvj_ops *ops,uint64_t bytes,int metad
     j->entries=calloc(j->allocated,sizeof(*j->entries));
     j->images=malloc((size_t)j->allocated*NVJ_BLOCK);
     if(memory_error || !j->images || !j->entries) { nvj_close(j); return -ENOMEM; }
+    if(j->version==3 && (rc=v3_open(j))) { nvj_close(j); return rc; }
     *out=j; return 0;
 }
-void nvj_close(struct nvj *j) { if(j) { wait_checkpoint(j); free(j->metadata.buckets); free(j->index.buckets); free(j->images); free(j->entries); free(j); } }
+void nvj_close(struct nvj *j) { if(j) { wait_checkpoint(j); v3_close(j); free(j->metadata.buckets); free(j->index.buckets); free(j->images); free(j->entries); free(j); } }
 void nvj_mark_filesystem_metadata(struct nvj *j) {
     if(j) j->filesystem_metadata=1;
 }
@@ -383,11 +545,50 @@ int nvj_begin(struct nvj *j,int full,unsigned budget) {
     return 0;
 }
 static void discard(struct nvj *j) {
-    if(j->count) memset(j->index.buckets,0,(size_t)j->index.capacity*sizeof(*j->index.buckets));
+    if(j->count && j->sparse_reset && j->count<j->index.capacity/8) {
+        /* Discard the entire set, with no lookup or insertion interleaved.
+         * Earlier removals leave holes in probe chains: deliberately search
+         * THROUGH those holes until the remaining known key is found. A
+         * normal lookup would stop early and leave stale transaction images.
+         * Dense transactions retain the linear memset path. */
+        unsigned mask=j->index.capacity-1;
+        for(unsigned n=0;n<j->count;n++) {
+            unsigned slot=hash_block(j->entries[n].home)&mask,probes=0;
+            while((!j->index.buckets[slot].value ||
+                   j->index.buckets[slot].block!=j->entries[n].home) &&
+                  probes<j->index.capacity) { slot=(slot+1)&mask; probes++; }
+            if(probes==j->index.capacity) {
+                /* Also clear safely if an internal invariant is violated. */
+                memset(j->index.buckets,0,(size_t)j->index.capacity*sizeof(*j->index.buckets));
+                break;
+            }
+            j->index.buckets[slot]=(struct bucket){0};
+        }
+    } else if(j->count) memset(j->index.buckets,0,(size_t)j->index.capacity*sizeof(*j->index.buckets));
     j->index.used=0; j->data_dirty=0;
     j->count=0; j->active=0; j->error=0;
 }
 void nvj_discard(struct nvj *j) { wait_checkpoint(j); discard(j); }
+int nvj_needs_overlay(struct nvj *j,uint64_t offset,size_t bytes,int write_op) {
+    wait_checkpoint(j);
+    if(!j || j->failed || j->classification_error || offset>j->bytes || bytes>j->bytes-offset) return 1;
+    /* Most steady reads have no staged images. Skip per-block hashing while
+     * still rejecting any overlap with the reserved journal extent. */
+    if(!write_op && !j->index.used && !j->v3)
+        return bytes && offset < (uint64_t)NVJ_GROUP_BLOCKS*NVJ_BLOCK &&
+               offset+bytes > (uint64_t)j->start*NVJ_BLOCK;
+    while(bytes) {
+        uint32_t block=(uint32_t)(offset/NVJ_BLOCK);
+        size_t n=NVJ_BLOCK-offset%NVJ_BLOCK; if(n>bytes) n=bytes;
+        if((block>=j->start && block<NVJ_GROUP_BLOCKS) || (j->index.used && lookup(&j->index,block)->value) ||
+           (j->v3 && v3_image(j,block)) ||
+           (write_op && (j->full || (j->filesystem_metadata && block%NVJ_GROUP_BLOCKS<4100) ||
+                         lookup(&j->metadata,block)->value))) return 1;
+        offset+=n; bytes-=n;
+    }
+    return 0;
+}
+void nvj_note_data_write(struct nvj *j) { if(j) j->data_dirty=1; }
 int nvj_transfer(struct nvj *j,uint64_t offset,size_t bytes,void *buf,int write_op) {
     wait_checkpoint(j);
     if(write_op && j->failed) return -EIO;
@@ -400,16 +601,24 @@ int nvj_transfer(struct nvj *j,uint64_t offset,size_t bytes,void *buf,int write_
         size_t n=NVJ_BLOCK-within; if(n>bytes) n=bytes;
         if(block>=j->start && block<NVJ_GROUP_BLOCKS) return -EPERM;
         unsigned slot=lookup(&j->index,block)->value;
+        const unsigned char *committed=j->v3?v3_image(j,block):NULL;
         int meta=(j->filesystem_metadata && block%NVJ_GROUP_BLOCKS<4100) ||
                  lookup(&j->metadata,block)->value;
-        if(write_op && (meta || (j->active && j->full) || slot)) {
+        if(write_op && (meta || (j->active && j->full) || slot || committed)) {
             if(!j->active) return -EPERM;
             if(!slot) {
-                if(!within && n==NVJ_BLOCK) {
+                if(j->compare_reads && !committed && !within && n==NVJ_BLOCK) {
                     unsigned char old[NVJ_BLOCK];
+                    uint64_t start=profile_start(j);
                     int rc=transfer(j,block,old,0,"compare-read");
+                    int equal=!rc && !memcmp(old,p,NVJ_BLOCK);
+                    if(j->profile) {
+                        j->stats.compare_reads++;
+                        j->stats.compare_equal+=(unsigned)equal;
+                        j->stats.compare_ns+=profile_start(j)-start;
+                    }
                     if(rc) return j->error=rc;
-                    if(!memcmp(old,p,NVJ_BLOCK)) {
+                    if(equal) {
                         offset+=n; p+=n; bytes-=n; continue;
                     }
                 }
@@ -433,13 +642,18 @@ int nvj_transfer(struct nvj *j,uint64_t offset,size_t bytes,void *buf,int write_
                 j->count++;
                 j->entries[slot-1]=(struct entry){.home=block,.kind=(uint32_t)meta};
                 if(within || n!=NVJ_BLOCK) {
-                    int rc=transfer(j,block,j->images+(size_t)(slot-1)*NVJ_BLOCK,0,"stage-read");
+                    uint64_t start=profile_start(j);
+                    int rc=0;
+                    if(committed) memcpy(j->images+(size_t)(slot-1)*NVJ_BLOCK,committed,NVJ_BLOCK);
+                    else rc=transfer(j,block,j->images+(size_t)(slot-1)*NVJ_BLOCK,0,"stage-read");
+                    if(j->profile) j->stats.stage_read_ns+=profile_start(j)-start;
                     if(rc) return j->error=rc;
                 }
                 if(j->count>j->stats.peak_blocks) j->stats.peak_blocks=j->count;
             }
             memcpy(j->images+(size_t)(slot-1)*NVJ_BLOCK+within,p,n);
         } else if(!write_op && slot) memcpy(p,j->images+(size_t)(slot-1)*NVJ_BLOCK+within,n);
+        else if(!write_op && committed) memcpy(p,committed+within,n);
         else {
             int rc=physical(j,offset,n,p,write_op);
             if(rc) { if(j->active) j->error=rc; return rc; }
@@ -451,9 +665,33 @@ int nvj_transfer(struct nvj *j,uint64_t offset,size_t bytes,void *buf,int write_
 }
 static int checkpoint(struct nvj *j) {
     int rc=0;
-    for(unsigned i=0;i<j->count && !rc;i++) rc=transfer(j,j->entries[i].home,j->images+(size_t)i*NVJ_BLOCK,1,"checkpoint-write");
+    uint64_t start=profile_start(j);
+    for(unsigned i=0;i<j->count && !rc;) {
+        if(j->home_writer && j->batch_io && !j->hook && !j->fault) {
+            struct nvj_home_write writes[NVJ_HOME_BATCH_BLOCKS];
+            unsigned end=i+NVJ_HOME_BATCH_BLOCKS, count=0;
+            if(end>j->count) end=j->count;
+            while(i<end) {
+                unsigned n=1;
+                while(i+n<end && j->entries[i+n].home==j->entries[i].home+n) n++;
+                writes[count++]=(struct nvj_home_write){
+                    (uint64_t)j->entries[i].home*NVJ_BLOCK,
+                    (size_t)n*NVJ_BLOCK, j->images+(size_t)i*NVJ_BLOCK};
+                i+=n;
+            }
+            rc=j->home_writer(j->home_context,writes,count);
+            j->stats.home_batches++; j->stats.home_requests+=count;
+            continue;
+        }
+        unsigned n=1;
+        while(n<run_limit(j) && i+n<j->count && j->entries[i+n].home==j->entries[i].home+n) n++;
+        rc=write_run(j,j->entries[i].home,n,j->images+(size_t)i*NVJ_BLOCK,"checkpoint-write"); i+=n;
+    }
+    profile_end(j,NVJ_P_HOME_WRITE,start); start=profile_start(j);
     if(!rc) rc=barrier(j,"checkpoint-flush");
+    profile_end(j,NVJ_P_HOME_FLUSH,start); start=profile_start(j);
     if(!rc) rc=controls(j,RETIRED);
+    profile_end(j,NVJ_P_RETIRE,start);
     if(!rc) {
         j->stats.commits++; j->stats.journal_bytes+=(uint64_t)(j->descriptors+j->count+6)*NVJ_BLOCK;
         j->stats.home_bytes+=(uint64_t)j->count*NVJ_BLOCK; discard(j);
@@ -467,6 +705,7 @@ int nvj_set_async_checkpoint(struct nvj *j,int enabled) {
     wait_checkpoint(j);
     if(!j || j->failed) return -EIO;
     if(enabled!=0 && enabled!=1) return -EINVAL;
+    if(j->version==3 && enabled) return -ENOTSUP;
     if(j->active) return -EBUSY;
     j->async_checkpoint=enabled; return 0;
 }
@@ -475,32 +714,68 @@ int nvj_commit(struct nvj *j) {
     if(!j || !j->active) return -EINVAL;
     if(j->classification_error) return j->classification_error;
     if(j->error) return j->error;
+    if(j->version==3) return v3_commit(j);
     if(!j->count) {
         int rc=j->data_dirty?barrier(j,"ordered-data-flush"):0;
         if(rc) j->failed=1;
         else discard(j);
         return rc;
     }
-    unsigned char *d=calloc(j->descriptors,NVJ_BLOCK);
+    uint64_t start=profile_start(j);
+    /* Joining the boundary saves one owner/reactor round trip only when the
+     * final payload run fits alongside the descriptors. Keep the existing
+     * independent-write path otherwise, avoiding copying with no I/O gain.
+     * No certificate is published until the same payload flush completes. */
+    unsigned limit=run_limit(j), prefix=0;
+    if(j->log_join && j->descriptors<limit && j->count%limit &&
+       j->count%limit<=limit-j->descriptors) {
+        prefix=limit-j->descriptors;
+        if(prefix>j->count) prefix=j->count;
+    }
+    unsigned char *d=calloc(j->descriptors+prefix,NVJ_BLOCK);
     if(!d) return -ENOMEM;
+    uint64_t allocated_at=profile_start(j);
+    for(unsigned i=0;i<j->count;i++)
+        j->entries[i].checksum=crc(j->images+(size_t)i*NVJ_BLOCK,NVJ_BLOCK);
+    uint64_t crc_at=profile_start(j);
     j->id++;
     identity(j,d,DESCRIPTOR); put32(d+32,j->count); put32(d+36,(uint32_t)j->full);
     for(unsigned i=0;i<j->count;i++) {
         unsigned char *e=d+HEADER+i*16;
         put32(e,j->entries[i].home); put32(e+4,j->entries[i].kind);
-        put32(e+8,crc(j->images+(size_t)i*NVJ_BLOCK,NVJ_BLOCK));
+        put32(e+8,j->entries[i].checksum);
     }
+    if(prefix) memcpy(d+(size_t)j->descriptors*NVJ_BLOCK,j->images,(size_t)prefix*NVJ_BLOCK);
+    uint64_t encoded_at=profile_start(j);
+    if(j->profile) {
+        j->stats.descriptor_alloc_ns+=allocated_at-start;
+        j->stats.payload_crc_ns+=crc_at-allocated_at;
+        j->stats.descriptor_encode_ns+=encoded_at-crc_at;
+        j->stats.profile_ns[NVJ_P_DESCRIPTOR]+=encoded_at-start;
+    }
+    start=encoded_at;
     int rc=barrier(j,"ordered-data-flush");
+    profile_end(j,NVJ_P_ORDERED,start); start=profile_start(j);
     if(!rc) rc=controls(j,PREPARED);
-    for(unsigned i=0;i<j->descriptors && !rc;i++) rc=transfer(j,log_block(j,3+i),d+i*NVJ_BLOCK,1,"descriptor-write");
-    for(unsigned i=0;i<j->count && !rc;i++) rc=transfer(j,log_block(j,j->payload+i),j->images+(size_t)i*NVJ_BLOCK,1,"payload-write");
+    profile_end(j,NVJ_P_PREPARE,start); start=profile_start(j);
+    if(!rc) {
+        if(prefix) { j->stats.log_join_commits++; j->stats.log_join_blocks+=prefix; }
+        rc=write_log(j,3,j->descriptors+prefix,d,"descriptor-write");
+    }
+    if(!rc) rc=write_log(j,j->payload+prefix,j->count-prefix,
+                         j->images+(size_t)prefix*NVJ_BLOCK,"payload-write");
+    profile_end(j,NVJ_P_LOG_WRITE,start); start=profile_start(j);
     if(!rc) rc=barrier(j,"payload-flush");
+    profile_end(j,NVJ_P_PAYLOAD_FLUSH,start); start=profile_start(j);
+    uint64_t cert_start=profile_start(j);
     unsigned char cert[NVJ_BLOCK]; identity(j,cert,COMMIT);
     put32(cert+32,j->count); put32(cert+36,crc(d,(size_t)j->descriptors*NVJ_BLOCK)); put32(cert+40,(uint32_t)j->full); seal(cert);
+    if(j->profile) j->stats.certificate_crc_ns+=profile_start(j)-cert_start;
     for(unsigned i=0;i<2 && !rc;i++) {
         rc=transfer(j,log_block(j,j->blocks-2+i),cert,1,"commit-write");
         if(!rc) rc=barrier(j,"commit-flush");
     }
+    profile_end(j,NVJ_P_CERTIFICATE,start);
     free(d);
     if(rc) { j->failed=1; return rc; }
     if(j->async_checkpoint) {
@@ -518,6 +793,12 @@ int nvj_flush(struct nvj *j) {
     else if(j->active) j->error=rc;
     return rc;
 }
+int nvj_checkpoint(struct nvj *j) {
+    wait_checkpoint(j);
+    if(!j || j->failed) return -EIO;
+    if(j->active) return -EBUSY;
+    return j->v3?v3_checkpoint(j):0;
+}
 int nvj_error(const struct nvj *j) { wait_checkpoint((struct nvj *)j); return j? (j->failed?-EIO:(j->classification_error?j->classification_error:j->error)):0; }
 void nvj_fail(struct nvj *j,int error) { wait_checkpoint(j); if(j && error<0 && !j->error) j->error=error; }
 void nvj_require_recovery(struct nvj *j) { wait_checkpoint(j); if(j) j->failed=1; }
@@ -526,7 +807,7 @@ int nvj_recovery_required(const struct nvj *j) { wait_checkpoint((struct nvj *)j
 const struct nvj_stats *nvj_stats(const struct nvj *j) { wait_checkpoint((struct nvj *)j); return &j->stats; }
 size_t nvj_memory_bytes(const struct nvj *j) {
     return sizeof(*j)+(size_t)(j->metadata.capacity+j->index.capacity)*sizeof(struct bucket)+
-        (size_t)j->allocated*(NVJ_BLOCK+sizeof(struct entry));
+        (size_t)j->allocated*(NVJ_BLOCK+sizeof(struct entry))+v3_memory_bytes(j);
 }
 void nvj_set_hook(struct nvj *j,nvj_hook h,void *arg) { wait_checkpoint(j); j->hook=h; j->hook_arg=arg; }
 
@@ -538,3 +819,5 @@ unsigned nvj_journal_start(const struct nvj *j) { return j?j->start:0; }
 void nvj_set_io_fault_hook(struct nvj *j,nvj_io_fault hook,void *arg) {
     wait_checkpoint(j);j->fault=hook;j->fault_arg=arg;
 }
+
+#include "nvfuse_journal_v3.inc"

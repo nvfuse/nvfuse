@@ -86,3 +86,12 @@ s32 nvfuse_set_xattr(struct nvfuse_handle *nvh, const char *path, const char *na
 s32 nvfuse_remove_xattr(struct nvfuse_handle *nvh, const char *path, const char *name);
 s32 nvfuse_get_xattr(struct nvfuse_handle *nvh, const char *path, const char *name, char *buffer, size_t buf_size);
 s32 nvfuse_list_xattr(struct nvfuse_handle *nvh, const char *path, char *buffer, size_t buffer_size);
+
+/* Binary-safe standalone journal API. Size queries use size=0. Values consume
+ * the inode's shared 3972-byte inline area; no resource-fork overflow storage. */
+#define NVFUSE_XATTR_CREATE 1u
+#define NVFUSE_XATTR_REPLACE 2u
+int nvfuse_setxattr(struct nvfuse_handle *,const char *,const char *,const void *,size_t,unsigned);
+int nvfuse_getxattr(struct nvfuse_handle *,const char *,const char *,void *,size_t);
+int nvfuse_listxattr(struct nvfuse_handle *,const char *,char *,size_t);
+int nvfuse_removexattr(struct nvfuse_handle *,const char *,const char *);

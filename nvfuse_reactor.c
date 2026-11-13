@@ -21,23 +21,47 @@
 #include <rte_config.h>
 #include <rte_mempool.h>
 #include <rte_lcore.h>
+#include <semaphore.h>
 
 #include "spdk/bdev.h"
+#include "spdk/version.h"
+#if SPDK_VERSION_MAJOR < 20
 #include "spdk/copy_engine.h"
+#endif
 #include "spdk/endian.h"
 #include "spdk/env.h"
 #include "spdk/event.h"
 #include "spdk/log.h"
 #include "spdk/util.h"
+#if SPDK_VERSION_MAJOR >= 20
+#include "spdk/thread.h"
+#else
 #include "spdk/io_channel.h"
+#endif
 #include "nvfuse_config.h"
 #include "nvfuse_debug.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_reactor.h"
+#ifdef NVFUSE_PRIMARY_JOURNAL
+#include "nvfuse_primary_journal.h"
+#endif
 
 #define REACTOR_LCORE	0
 struct io_target *head[RTE_MAX_LCORE];
 static int g_target_count = 0;
+
+#if SPDK_VERSION_MAJOR >= 20
+static void reactor_bdev_event(enum spdk_bdev_event_type type,
+			      struct spdk_bdev *bdev, void *arg)
+{
+	struct io_target *target = arg;
+	(void)bdev;
+	if (type == SPDK_BDEV_EVENT_REMOVE)
+		target->is_draining = true;
+}
+#endif
+
+static void reactor_task_disable_polling(struct io_target *, struct reactor_task *);
 
 #ifndef NVFUSE_USE_CEPH_SPDK
 void reactor_bio_cb(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
@@ -93,6 +117,11 @@ inline int reactor_cq_is_empty(struct reactor_task *task)
 
 inline int reactor_sq_size(struct reactor_task *task)
 {
+    if (task->polling) {
+        int head = __atomic_load_n(&task->sq_head, __ATOMIC_ACQUIRE);
+        int tail = __atomic_load_n(&task->sq_tail, __ATOMIC_ACQUIRE);
+        return head >= tail ? head - tail : task->qdepth - tail + head;
+    }
 	if (task->sq_tail <= task->sq_head)
 		return task->sq_head - task->sq_tail;
 	else
@@ -109,6 +138,11 @@ inline int reactor_cq_is_full(struct reactor_task *task)
 
 inline int reactor_cq_size(struct reactor_task *task)
 {
+    if (task->polling) {
+        int head = __atomic_load_n(&task->cq_head, __ATOMIC_ACQUIRE);
+        int tail = __atomic_load_n(&task->cq_tail, __ATOMIC_ACQUIRE);
+        return head >= tail ? head - tail : task->qdepth - tail + head;
+    }
 	int size;
 	if (task->cq_tail <= task->cq_head)
 		size = task->cq_head - task->cq_tail;
@@ -122,12 +156,24 @@ inline int reactor_cq_size(struct reactor_task *task)
 
 struct io_job *reactor_sq_get_req(struct reactor_task *task)
 {
+    if (task->polling) {
+        int tail = __atomic_load_n(&task->sq_tail, __ATOMIC_RELAXED);
+        int head = __atomic_load_n(&task->sq_head, __ATOMIC_ACQUIRE);
+        if (head == tail) return NULL;
+        struct io_job *req = task->sq[tail];
+        __atomic_store_n(&task->sq_tail, (tail + 1) % task->qdepth, __ATOMIC_RELEASE);
+        return req;
+    }
 	struct io_job *req = NULL;
 
 	pthread_mutex_lock(&task->sq_mutex);
 
-	if (reactor_sq_is_empty(task))
+	if (reactor_sq_is_empty(task)) {
+		/* Clear under the producer's lock so an enqueue cannot lose its
+		 * wakeup when this drain returns. */
+		task->sq_scheduled = 0;
 		goto UNLOCK;
+	}
 
 	req = task->sq[task->sq_tail];
 	task->sq[task->sq_tail] = NULL;
@@ -143,6 +189,7 @@ UNLOCK:
 
 int reactor_sq_put_req(struct reactor_task *task, struct io_job *req)
 {
+    if (task->polling) return reactor_submit_reqs(task->target, task, &req, 1);
 	int res = 0;
 
 	pthread_mutex_lock(&task->sq_mutex);
@@ -165,6 +212,16 @@ UNLOCK:
 
 int reactor_cq_put_req(struct reactor_task *task, struct io_job *req)
 {
+    if (task->polling) {
+        int head = __atomic_load_n(&task->cq_head, __ATOMIC_RELAXED);
+        int tail = __atomic_load_n(&task->cq_tail, __ATOMIC_ACQUIRE);
+        int next = (head + 1) % task->qdepth;
+        assert(next != tail);
+        if (next == tail) return -1;
+        task->cq[head] = req;
+        __atomic_store_n(&task->cq_head, next, __ATOMIC_RELEASE);
+        return 0;
+    }
 	int res = 0;
 
 	pthread_mutex_lock(&task->cq_mutex);
@@ -208,6 +265,7 @@ struct reactor_task *reactor_alloc_task(struct io_target *target, int32_t qdepth
 
 	/* init task */
 	task->target = target;
+    task->polling = 0; task->poll_next = NULL;
 	task->qdepth = qdepth + 1;
 
 	for (i = 0;i < qdepth; i++) {
@@ -215,6 +273,8 @@ struct reactor_task *reactor_alloc_task(struct io_target *target, int32_t qdepth
 	}
 	task->sq_head = 0;
 	task->sq_tail = 0;
+	task->sq_scheduled = 0;
+	task->sq_batches = task->sq_notifications = 0;
 	pthread_mutex_init(&task->sq_mutex, NULL);
 	pthread_cond_init(&task->sq_cond, NULL);
 
@@ -232,6 +292,14 @@ struct reactor_task *reactor_alloc_task(struct io_target *target, int32_t qdepth
 
 void reactor_free_task(struct io_target *target, struct reactor_task *task)
 {
+    if (task->polling) reactor_task_disable_polling(target, task);
+	if (task->qdepth > 2 && task->sq_batches)
+		printf("NVFUSE_REACTOR batches=%lu notifications=%lu\n",
+		       task->sq_batches, task->sq_notifications);
+	pthread_mutex_destroy(&task->sq_mutex);
+	pthread_cond_destroy(&task->sq_cond);
+	pthread_mutex_destroy(&task->cq_mutex);
+	pthread_cond_destroy(&task->cq_cond);
 	rte_mempool_put(target->task_pool, task);
 }
 
@@ -246,6 +314,7 @@ struct io_job *reactor_make_single_req(struct io_target *target, uint64_t offset
 
 	req->offset = offset;
 	req->bytes = bytes;
+	req->buf = buf;
 	req->iov[0].iov_base = buf;
 	req->iov[0].iov_len = bytes;
 	req->iovcnt = 1;
@@ -272,12 +341,55 @@ void reactor_free_reqs(struct io_target *target, struct io_job **reqs, int count
 	rte_mempool_put_bulk(target->req_pool, (void **)(reqs), count);
 }
 
+#if SPDK_VERSION_MAJOR >= 20
+static void reactor_submit_on_thread(void *arg)
+{
+	struct reactor_task *task = arg;
+	reactor_submit_on_core(task->target, task);
+}
+#endif
+
 int32_t reactor_submit_reqs(struct io_target *target, struct reactor_task *task, struct io_job **reqs, int count)
 {
+#if SPDK_VERSION_MAJOR < 20
 	struct spdk_event *event;
+#endif
 	struct io_job *req;
-	int i;
+	int i, head, rc = 0;
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    for (int n = 0; n < count; n++) {
+        int error = nvfuse_primary_journal_stage(target, reqs[n]);
+        if (error) {
+            fprintf(stderr, "NVFUSE_JOURNAL staging failed: %d; recovery required\n", error);
+            abort(); /* Legacy writeback cannot safely unwind partial failures. */
+        }
+    }
+#endif
+
+    if (task->polling) {
+        int head = __atomic_load_n(&task->sq_head, __ATOMIC_RELAXED);
+        int tail = __atomic_load_n(&task->sq_tail, __ATOMIC_ACQUIRE);
+        int used = head >= tail ? head - tail : task->qdepth - tail + head;
+        if (count < 0 || count > task->qdepth - 1 - used) return -1;
+        for (int n = 0; n < count; n++) {
+            reqs[n]->task = task; task->sq[head] = reqs[n];
+            head = (head + 1) % task->qdepth;
+        }
+        __atomic_store_n(&task->sq_head, head, __ATOMIC_RELEASE);
+        if (count) task->sq_batches++;
+        return 0;
+    }
+
+	/* Publish the entire batch or none: callers may release all jobs on
+	 * failure. Hold the lock through notification so a failed send can
+	 * roll back before the I/O thread consumes any part of this batch. */
+	pthread_mutex_lock(&task->sq_mutex);
+	if (count < 0 || count > task->qdepth - 1 - reactor_sq_size(task)) {
+		pthread_mutex_unlock(&task->sq_mutex);
+		return -1;
+	}
+	head = task->sq_head;
 	for (i = 0; i < count; i++) {
 
 		req = reqs[i];
@@ -285,20 +397,33 @@ int32_t reactor_submit_reqs(struct io_target *target, struct reactor_task *task,
 
 		//dprintf_info(REACTOR, " req = %p blkno %ld type %d\n", req, req->offset, req->req_type);
 
-		if (reactor_sq_put_req(task, req) < 0) {
-			dprintf_error(REACTOR, " SQ is full\n");
-			return -1;
-		}
+		task->sq[task->sq_head] = req;
+		task->sq_head = (task->sq_head + 1) % task->qdepth;
 	}
 
-	assert(target->lcore == REACTOR_LCORE);
 	/* enqueue reqs and alloc event */
+#if SPDK_VERSION_MAJOR >= 20
+	if (count && !task->sq_scheduled) {
+		task->sq_scheduled = 1;
+		rc = spdk_thread_send_msg(target->io_thread, reactor_submit_on_thread, task);
+		if (rc) {
+			task->sq_head = head;
+			task->sq_scheduled = 0;
+		} else {
+			task->sq_notifications++;
+		}
+	}
+	if (!rc && count) task->sq_batches++;
+#else
 	event = spdk_event_allocate(target->lcore, reactor_submit_on_core,
 					target, task);
 	spdk_event_call(event);
+	(void)head;
+#endif
+	pthread_mutex_unlock(&task->sq_mutex);
 
 	//dprintf_info(REACTOR, " wait lcore = %d\n", rte_lcore_id());
-	return 0;
+	return rc;
 }
 
 int reactor_cq_get_reqs(struct reactor_task *task, struct io_job **reqs, int min_reqs, int max_reqs)
@@ -306,8 +431,8 @@ int reactor_cq_get_reqs(struct reactor_task *task, struct io_job **reqs, int min
 	int i;
 	int n;
 
-	if (min_reqs == 0) {
-		dprintf_error(REACTOR, " min_reqs (%d) is invalid.\n", min_reqs);
+	if (min_reqs < 0 || max_reqs < min_reqs) {
+		dprintf_error(REACTOR, " invalid completion range %d..%d\n", min_reqs, max_reqs);
 		return 0;
 	}
 
@@ -316,6 +441,20 @@ int reactor_cq_get_reqs(struct reactor_task *task, struct io_job **reqs, int min
 		assert(0);
 		return 0;
 	}
+
+    if (task->polling) {
+        int available;
+        while ((available = reactor_cq_size(task)) < min_reqs) {
+            __atomic_signal_fence(__ATOMIC_ACQ_REL);
+        }
+        int count = available < max_reqs ? available : max_reqs;
+        int tail = __atomic_load_n(&task->cq_tail, __ATOMIC_RELAXED);
+        for (int n = 0; n < count; n++) {
+            reqs[n] = task->cq[tail]; tail = (tail + 1) % task->qdepth;
+        }
+        __atomic_store_n(&task->cq_tail, tail, __ATOMIC_RELEASE);
+        return count;
+    }
 
 	pthread_mutex_lock(&task->cq_mutex);
 
@@ -344,6 +483,11 @@ int reactor_cq_get_reqs(struct reactor_task *task, struct io_job **reqs, int min
 
 int reactor_sync_read_blk(struct io_target *target, long block, int count, void *buf)
 {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (nvfuse_primary_journal_sync(target, (int64_t)block * NV_BLOCK_SIZE,
+            (size_t)count * NV_BLOCK_SIZE, buf, SPDK_BDEV_IO_TYPE_READ))
+        return block ? 0 : nvfuse_primary_journal_read_header(target, buf, (size_t)count * NV_BLOCK_SIZE);
+#endif
 	struct reactor_task *task;
 	struct io_job *req;
 	int num_reqs = 1;
@@ -370,11 +514,19 @@ int reactor_sync_read_blk(struct io_target *target, long block, int count, void 
 	reactor_free_reqs(target, &req, ptr);
 	reactor_free_task(target, task);
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (!ret && !block)
+        ret = nvfuse_primary_journal_read_header(target, buf, (size_t)count * NV_BLOCK_SIZE);
+#endif
 	return ret;
 }
 
 int reactor_sync_write_blk(struct io_target *target, long block, int count, void *buf)
 {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (nvfuse_primary_journal_sync(target, (int64_t)block * NV_BLOCK_SIZE,
+            (size_t)count * NV_BLOCK_SIZE, buf, SPDK_BDEV_IO_TYPE_WRITE)) return 0;
+#endif
 	struct reactor_task *task;
 	struct io_job *req;
 	int num_reqs = 1;
@@ -406,6 +558,9 @@ int reactor_sync_write_blk(struct io_target *target, long block, int count, void
 
 int reactor_sync_flush(struct io_target *target)
 {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (nvfuse_primary_journal_sync(target, 0, NV_BLOCK_SIZE, NULL, SPDK_BDEV_IO_TYPE_FLUSH)) return 0;
+#endif
 	struct reactor_task *task;
 	struct io_job *req;
 	int num_reqs = 1;
@@ -441,6 +596,11 @@ struct io_target *reactor_construct_targets(void)
 
 	bdev = spdk_bdev_first();
 	while (bdev != NULL) {
+		const char *selected = getenv("NVFUSE_SPDK_BDEV");
+		if (selected && strcmp(selected, spdk_bdev_get_name(bdev))) {
+			bdev = spdk_bdev_next(bdev);
+			continue;
+		}
 
 #if 0
 		if (!spdk_bdev_claim(bdev, NULL, NULL)) {
@@ -451,7 +611,7 @@ struct io_target *reactor_construct_targets(void)
 
 		printf(" bdev name = %p \n", bdev);
 
-		target = malloc(sizeof(struct io_target));
+		target = calloc(1, sizeof(struct io_target));
 		if (!target) {
 			fprintf(stderr, "Unable to allocate memory for new target.\n");
 			/* Return immediately because all mallocs will presumably fail after this */
@@ -460,14 +620,19 @@ struct io_target *reactor_construct_targets(void)
 
 		target->bdev = bdev;
 
+#if SPDK_VERSION_MAJOR >= 20
+		rc = spdk_bdev_open_ext(spdk_bdev_get_name(bdev), true,
+				       reactor_bdev_event, target, &target->desc);
+#else
 		rc = spdk_bdev_open(target->bdev, true, NULL, NULL, &target->desc);
+#endif
 		if (rc) {
 			SPDK_ERRLOG("Unable to open bdev\n");
 			free(target);
 			return NULL;
 		}
 		/* Mapping each target to lcore */
-		index = g_target_count % spdk_env_get_core_count();
+		index = spdk_env_get_first_core();
 		target->next = head[index];
 		target->lcore = index;
 		target->io_completed = 0;
@@ -487,6 +652,26 @@ struct io_target *reactor_construct_targets(void)
 						   sizeof(struct io_job),
 						   32, 0, NULL, NULL, NULL, NULL,
 						   SOCKET_ID_ANY, 0);
+		if (!target->task_pool || !target->req_pool) {
+			rte_mempool_free(target->task_pool);
+			rte_mempool_free(target->req_pool);
+			spdk_bdev_close(target->desc);
+			free(target);
+			return NULL;
+		}
+#if SPDK_VERSION_MAJOR >= 20
+		struct spdk_cpuset cpuset;
+		spdk_cpuset_zero(&cpuset);
+		spdk_cpuset_set_cpu(&cpuset, target->lcore, true);
+		target->io_thread = spdk_thread_create("nvfuse_io", &cpuset);
+		if (!target->io_thread) {
+			rte_mempool_free(target->task_pool);
+			rte_mempool_free(target->req_pool);
+			spdk_bdev_close(target->desc);
+			free(target);
+			return NULL;
+		}
+#endif
 
 		head[index] = target;
 		g_target_count++;
@@ -500,14 +685,167 @@ struct io_target *reactor_construct_targets(void)
 	return NULL;
 }
 
+#if SPDK_VERSION_MAJOR >= 20
+static int reactor_poll_data_queues(void *arg)
+{
+    struct io_target *target = arg;
+    int work = 0;
+    for (struct reactor_task *task = target->poll_tasks; task; task = task->poll_next) {
+        if (reactor_sq_size(task)) {
+            reactor_submit_on_core(target, task); work = 1;
+        }
+    }
+    return work ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
+}
+struct poll_control { struct io_target *target; struct reactor_task *task; sem_t done; int enable, result; };
+static void reactor_poll_control(void *arg)
+{
+    struct poll_control *control = arg;
+    struct io_target *target = control->target;
+    struct reactor_task *task = control->task;
+    if (control->enable) {
+        if (!target->queue_poller)
+            target->queue_poller = spdk_poller_register(reactor_poll_data_queues, target, 0);
+        if (!target->queue_poller) { control->result = -ENOMEM; goto done; }
+        task->polling = 1;
+        task->poll_next = target->poll_tasks; target->poll_tasks = task;
+    } else {
+        struct reactor_task **link = &target->poll_tasks;
+        while (*link && *link != task) link = &(*link)->poll_next;
+        assert(*link && !reactor_sq_size(task) && !reactor_cq_size(task));
+        *link = task->poll_next;
+        task->polling = 0; task->poll_next = NULL;
+        if (!target->poll_tasks) spdk_poller_unregister(&target->queue_poller);
+    }
+done:
+    sem_post(&control->done);
+}
+static int reactor_set_polling(struct io_target *target, struct reactor_task *task, int enable)
+{
+    struct poll_control control = {.target = target, .task = task, .enable = enable};
+    if (spdk_get_thread() == target->io_thread) return -EINVAL;
+    if (sem_init(&control.done, 0, 0)) return -errno;
+    int rc = spdk_thread_send_msg(target->io_thread, reactor_poll_control, &control);
+    if (!rc) {
+        while (sem_wait(&control.done) && errno == EINTR) {}
+        rc = control.result;
+    }
+    sem_destroy(&control.done);
+    return rc;
+}
+#endif
+int reactor_task_enable_polling(struct io_target *target, struct reactor_task *task)
+{
+#if SPDK_VERSION_MAJOR >= 20
+    if (task->polling || task->sq_batches) return -EINVAL;
+    return reactor_set_polling(target, task, 1);
+#else
+    (void)target; (void)task; return -ENOTSUP;
+#endif
+}
+static void reactor_task_disable_polling(struct io_target *target, struct reactor_task *task)
+{
+#if SPDK_VERSION_MAJOR >= 20
+    if (reactor_set_polling(target, task, 0)) abort();
+#else
+    (void)target; (void)task; abort();
+#endif
+}
+
+static void reactor_idle_done(void *arg1, void *arg2)
+{
+    (void)arg2;
+    sem_post(arg1);
+}
+#if SPDK_VERSION_MAJOR >= 20
+static void reactor_idle_on_thread(void *arg)
+{
+    reactor_idle_done(arg, NULL);
+}
+#endif
+void reactor_wait_idle(struct io_target *target)
+{
+    sem_t done;
+    if (sem_init(&done, 0, 0)) abort();
+#if SPDK_VERSION_MAJOR >= 20
+    if (spdk_get_thread() == target->io_thread ||
+        spdk_thread_send_msg(target->io_thread, reactor_idle_on_thread, &done)) abort();
+#else
+    if (rte_lcore_id() == target->lcore) abort();
+    spdk_event_call(spdk_event_allocate(target->lcore, reactor_idle_done, &done, NULL));
+#endif
+    int rc;
+    do { rc = sem_wait(&done); } while (rc && errno == EINTR);
+    if (rc) abort();
+    sem_destroy(&done);
+}
+
+static void reactor_release_channel(void *arg1, void *arg2)
+{
+	struct io_target *target = arg1;
+	if (target->ch) {
+		spdk_put_io_channel(target->ch);
+		target->ch = NULL;
+	}
+	sem_post(arg2);
+}
+
+#if SPDK_VERSION_MAJOR >= 20
+struct channel_release { struct io_target *target; sem_t *done; };
+static void reactor_release_on_thread(void *arg)
+{
+	struct channel_release *release = arg;
+	reactor_release_channel(release->target, release->done);
+	spdk_thread_exit(spdk_get_thread());
+}
+#endif
+
+void reactor_destroy_target(struct io_target *target)
+{
+	sem_t done;
+	if (!target)
+		return;
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    nvfuse_primary_journal_release(target);
+#endif
+	sem_init(&done, 0, 0);
+#if SPDK_VERSION_MAJOR >= 20
+	struct channel_release release = {target, &done};
+	if (spdk_thread_send_msg(target->io_thread, reactor_release_on_thread, &release))
+		abort();
+#else
+	if (rte_lcore_id() == target->lcore)
+		reactor_release_channel(target, &done);
+	else
+		spdk_event_call(spdk_event_allocate(target->lcore,
+				 reactor_release_channel, target, &done));
+#endif
+	while (sem_wait(&done) && errno == EINTR) {}
+	sem_destroy(&done);
+	spdk_bdev_close(target->desc);
+	rte_mempool_free(target->req_pool);
+	rte_mempool_free(target->task_pool);
+	head[target->lcore] = NULL;
+	g_target_count--;
+	free(target);
+}
+
 void reactor_get_opts(const char *config_file, const char *cpumask, struct spdk_app_opts *opts)
 {
 	assert(opts != NULL);
 
+#if SPDK_VERSION_MAJOR >= 20
+	spdk_app_opts_init(opts, sizeof(*opts));
+#else
 	spdk_app_opts_init(opts);
+#endif
 
 	opts->name = "bdevtest";
+#if SPDK_VERSION_MAJOR >= 20
+	opts->json_config_file = config_file;
+#else
 	opts->config_file = config_file;
+#endif
 	opts->reactor_mask = cpumask;
 }
 
@@ -531,7 +869,8 @@ void reactor_submit_on_core(void *arg1, void *arg2)
 #endif
 
 #ifndef NVFUSE_USE_CEPH_SPDK
-	target->ch = spdk_bdev_get_io_channel(target->desc);
+	if (!target->ch)
+		target->ch = spdk_bdev_get_io_channel(target->desc);
 #else
 	target->ch = spdk_bdev_get_io_channel(target->desc, SPDK_IO_PRIORITY_DEFAULT);
 #endif
@@ -541,6 +880,13 @@ void reactor_submit_on_core(void *arg1, void *arg2)
 		req = reactor_sq_get_req(task);
 		if (req == NULL)
 			return;
+#ifdef NVFUSE_PRIMARY_JOURNAL
+        if (req->journal_staged) {
+            reactor_cq_put_req(task, req);
+            continue;
+        }
+#endif
+		target->current_queue_depth++;
 
 		//dprintf_info(REACTOR, " rx offset = %ld\n", req->offset);
 		assert(req->iovcnt);

@@ -56,12 +56,14 @@
 #endif
 
 #include "nvfuse_core.h"
+#include "nvfuse_dep.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_indirect.h"
+#include "nvfuse_inode_cache.h"
 #include "nvfuse_debug.h"
 #include "nvfuse_malloc.h"
 
@@ -245,7 +247,14 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	}
 
 	bg_id = inode->i_ino / sb->sb_no_of_inodes_per_bg;
-	if (bg_id != sb->sb_last_allocated_bgid && inode->i_ino == sb->sb_last_allocated_bgid_by_ino) {
+	if (sb->sb_last_allocated_bgid >= 0 && sb->sb_last_allocated_bgid < sb->sb_bg_num &&
+	    bg_id != sb->sb_last_allocated_bgid &&
+	    (inode->i_ino == sb->sb_last_allocated_bgid_by_ino ||
+	     (nvfuse_process_model_is_standalone() && !nvfuse_get_free_blocks(sb, bg_id)))) {
+		/* Prefer inode locality while that group has space. In standalone
+		 * mode a full local group can use the global hint even for a new inode,
+		 * avoiding repeated cold walks over full groups. The circular search
+		 * below still visits every group if the hint has become stale. */
 		bg_id = sb->sb_last_allocated_bgid;
 	}
 
@@ -591,6 +600,76 @@ static void nvfuse_splice_branch(struct nvfuse_superblock *sb, struct nvfuse_ino
 * return = 0, if plain lookup failed.
 * return < 0, error case.
 */
+#ifndef NVFUSE_FILE_BACKEND
+/* 1: resolved (possibly a hole), 0: cold metadata, negative: invalid request. */
+static s32 nvfuse_lookup_cached_blocks(struct nvfuse_superblock *sb, const u32 *blocks,
+                                      s32 lblock, u32 maxblocks, u32 *count, u32 *physical)
+{
+    u32 offsets[INDIRECT_BLOCKS_LEVEL], boundary, value, mapped = 0;
+    int depth;
+    *count = *physical = 0;
+    if (!maxblocks) return -EINVAL;
+    depth = nvfuse_block_to_path(lblock, offsets, &boundary);
+    if (!depth) return -EINVAL;
+    if (maxblocks > boundary + 1) maxblocks = boundary + 1;
+    value = blocks[offsets[0]];
+    if (depth == 1) {
+        mapped = value ? 1 : 0;
+        while (mapped && mapped < maxblocks &&
+               blocks[offsets[0] + mapped] == value + mapped) mapped++;
+    } else {
+        for (int level = 1; level < depth; level++) {
+            if (!value) return 1; /* A hole needs the existing allocation path. */
+            if (!nvfuse_cached_indirect_lookup(sb, value, offsets[level],
+                    level == depth - 1 ? maxblocks : 1, &value, &mapped))
+                return 0;
+        }
+    }
+    *physical = value; *count = mapped;
+    return 1;
+}
+
+/* Resolve existing mappings directly from the authoritative metadata cache.
+ * Cold entries retain the ordinary read/allocate/refcount machinery. */
+s32 nvfuse_get_block_cached(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                           s32 lblock, u32 maxblocks, u32 *count, u32 *physical)
+{
+    assert(rte_spinlock_is_locked(&ictx->ictx_lock));
+    assert(test_bit(&ictx->ictx_status, INODE_STATE_LOCK));
+    int rc = nvfuse_lookup_cached_blocks(sb, ictx->ictx_inode->i_blocks,
+                                         lblock, maxblocks, count, physical);
+    if (!rc) return nvfuse_get_block(sb, ictx, lblock, maxblocks, count, physical, 0);
+    return rc < 0 ? rc : 0;
+}
+
+/* A read-only fast path for a complete contiguous cached extent. All inode
+ * and tree fields remain protected by the same inode lock as ordinary AIO.
+ * A cold block, hole, EOF or fragmented extent falls back without data I/O. */
+int nvfuse_try_cached_read_mapping(struct nvfuse_superblock *sb, inode_t ino,
+                                  s64 offset, u32 bytes, u32 *physical)
+{
+    u32 blocks[TINDIRECT_BLOCKS + 1], count = 0, first = 0;
+    s64 size;
+    int hit = 0;
+    if (ino < ROOT_INO || offset < 0 || !bytes ||
+        offset % CLUSTER_SIZE || bytes % CLUSTER_SIZE) return 0;
+    struct nvfuse_inode_ctx *ictx = nvfuse_get_ictx(sb, ino);
+    if (!ictx) return 0;
+    assert(!ictx->ictx_ref && !ictx->ictx_bh);
+    ictx->ictx_ref++;
+    if (nvfuse_cached_inode_lookup(sb, ino, &size, blocks) &&
+        offset <= size && bytes <= size - offset &&
+        nvfuse_lookup_cached_blocks(sb, blocks, offset / CLUSTER_SIZE,
+                                    bytes / CLUSTER_SIZE, &count, &first) == 1 &&
+        first && count == bytes / CLUSTER_SIZE) {
+        *physical = first;
+        hit = 1;
+    }
+    nvfuse_release_ictx(sb, ictx, NVF_CLEAN);
+    return hit;
+}
+#endif
+
 s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 lblock,
 		     u32 maxblocks, u32 *num_alloc_blocks, u32 *pblock, u32 create)
 {

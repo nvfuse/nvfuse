@@ -193,7 +193,8 @@ struct nvfuse_inode_ctx *nvfuse_get_ictx(struct nvfuse_superblock *sb, inode_t i
 	/* ictx already in the ictx cache */
 
 	/* cache move to mru position */
-	list_move(&ictx->ictx_cache_list, &ictxc->ictxc_list[ictx->ictx_type]);
+	if (ictxc->ictxc_list[ictx->ictx_type].next != &ictx->ictx_cache_list)
+		list_move(&ictx->ictx_cache_list, &ictxc->ictxc_list[ictx->ictx_type]);
 
 	/* type and count debug */
 	if (ictx->ictx_type == BUFFER_TYPE_CLEAN && (ictx->ictx_data_dirty_count ||
@@ -219,22 +220,26 @@ void nvfuse_move_ictx_list(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx
 
 	SPINLOCK_LOCK(&ictxc->ictxc_lock);
 
-	list_del(&ictx->ictx_cache_list);
-	ictxc->ictxc_list_count[ictx->ictx_type]--;
-
-	ictx->ictx_type = desired_type;
-
-	list_add(&ictx->ictx_cache_list, &ictxc->ictxc_list[ictx->ictx_type]);
-	ictxc->ictxc_list_count[ictx->ictx_type]++;
-
-	hlist_del(&ictx->ictx_hash);
-	if (desired_type == BUFFER_TYPE_UNUSED) {
-		hlist_add_head(&ictx->ictx_hash, &ictxc->ictxc_hash[HASH_NUM]);
-		ictxc->ictxc_hash_count[HASH_NUM]++;
-	} else {
-		hlist_add_head(&ictx->ictx_hash, &ictxc->ictxc_hash[ictx->ictx_ino % HASH_NUM]);
-		ictxc->ictxc_hash_count[ictx->ictx_ino % HASH_NUM]++;
-	}
+    /* State changes do not change an inode's hash key. Only UNUSED entries
+     * belong to the special bucket; same-state MRU touches change no counts. */
+    s32 old_type = ictx->ictx_type;
+    u32 old_bucket = old_type == BUFFER_TYPE_UNUSED ? HASH_NUM : ictx->ictx_ino % HASH_NUM;
+    u32 new_bucket = desired_type == BUFFER_TYPE_UNUSED ? HASH_NUM : ictx->ictx_ino % HASH_NUM;
+    if (old_type != desired_type) {
+        list_del(&ictx->ictx_cache_list);
+        ictxc->ictxc_list_count[old_type]--;
+        ictx->ictx_type = desired_type;
+        list_add(&ictx->ictx_cache_list, &ictxc->ictxc_list[desired_type]);
+        ictxc->ictxc_list_count[desired_type]++;
+    } else if (ictxc->ictxc_list[old_type].next != &ictx->ictx_cache_list) {
+        list_move(&ictx->ictx_cache_list, &ictxc->ictxc_list[old_type]);
+    }
+    if (old_bucket != new_bucket) {
+        hlist_del(&ictx->ictx_hash);
+        ictxc->ictxc_hash_count[old_bucket]--;
+        hlist_add_head(&ictx->ictx_hash, &ictxc->ictxc_hash[new_bucket]);
+        ictxc->ictxc_hash_count[new_bucket]++;
+    }
 
 	SPINLOCK_UNLOCK(&ictxc->ictxc_lock);
 }

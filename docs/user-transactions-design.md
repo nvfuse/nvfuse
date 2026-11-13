@@ -2,7 +2,7 @@
 
 Date: 2026-11-12
 
-Status: Implemented bounded standalone API, with optional background file-image checkpointing; see [current validation](roadmap-validation.md).
+Status: Implemented bounded standalone API, with optional background file-image checkpointing.
 
 NVFUSE must preserve its own metadata consistency without an application transaction API. This API adds an optional application boundary around several filesystem operations. It builds on [metadata journaling](metadata-journaling-design.md); it does not replace or enable the filesystem's ordinary crash protection.
 
@@ -192,46 +192,6 @@ Metadata mode recovery may expose data overwrites that occurred before the metad
 
 The original journal design covers recovery of internal metadata updates. Adding data mode requires record coverage flags, capacity accounting for payload blocks, verification of regular-file replay targets, and data-mode fault tests. Changing the transaction record format requires a new compatible version or an explicit incompatible feature.
 
-## Implementation Sequence
-
-1. Implement and verify automatic internal metadata transactions without user API calls.
-2. Add explicit metadata boundaries using the same engine, including abort and capacity failure.
-3. Add optional full-data staging and replay, including partial and repeated overwrites.
-4. Integrate the supported standalone SPDK path and reject bypass paths.
-5. Measure correctness-preserving batching and then consider asynchronous checkpointing.
-
-The synchronous reference path is intentional: its result becomes the baseline for later optimizations. A separate application API is not evidence that the underlying filesystem has crash consistency.
-
-## Tests
-
-- Run create, rename, unlink, allocation, and remount without begin; verify automatic metadata consistency.
-- Commit and abort a multi-operation namespace group; compare names, indexes, bitmaps, inodes, and counters with an independent expected state.
-- In metadata mode, demonstrate explicitly that existing file-data overwrites are not rolled back.
-- In data mode, verify rollback and commit of partial, overlapping, repeated, and multi-file writes against a byte-level shadow model.
-- Combine replacement rename, deletion, file extension, truncate, indirect boundaries, and cache eviction.
-- Inject failures at each payload, commit, checkpoint, control, and retirement write/flush boundary; reopen the same image without formatting.
-- Model lost and reordered unflushed writes and partial-sector persistence, rather than relying only on process termination.
-- Crash during recovery, repeat replay, and verify no duplicate allocation or resource leak.
-- Exercise invalid modes, nested begin, wrong ownership, sync during TX, abort-only state, budget exhaustion, and descriptor invalidation.
-- Verify transaction slot reuse, image-format separation, corruption rejection, and post-recovery mutations.
-
-Retain failing images, seeds, operation traces, and persistence traces. Report local file-backend results, VM/SPDK results, and physical-device results separately.
-
-## Performance Evaluation
-
-Measure modes with equivalent durability requirements and the same operation sequence, payload, seed, filesystem size, build, cache state, and backend.
-
-| Case | Purpose |
-| --- | --- |
-| Automatic internal metadata transactions | Baseline with crash consistency and durable operation boundaries |
-| Explicit metadata batches of several sizes | Measure amortization of commit and flush overhead |
-| Explicit data batches at the same operation counts | Measure the cost of file-data atomicity |
-| Clean-only legacy backend where available | Diagnostic overhead reference with weaker guarantees; not an equivalent competitor |
-
-Record throughput, per-operation latency, commit latency at p50/p95/p99, bytes written to journal and home locations, flush count, peak staged bytes, abort cost, and recovery time. State whether batched per-operation latency includes waiting for commit. Publish individual samples or machine-readable reports along with workload parameters.
-
-Compare ext4 and XFS only on a suitable Linux environment, matching file-data durability and sync behavior. Their ordinary POSIX operations do not directly implement this multi-operation user API; do not compare stronger NVFUSE atomicity against weaker grouping without labeling the difference. Local image benchmarks alone cannot establish an NVMe or filesystem-wide superiority claim.
-
 ## Current implementation and limits
 
 - The underlying handle has one owner thread. The new bounded submission queue
@@ -268,4 +228,6 @@ Compare ext4 and XFS only on a suitable Linux environment, matching file-data du
   no unlimited streaming user TX, physical multi-queue filesystem execution or
   automatic in-place format conversion.
 
-The tests above describe both implemented checks and future coverage targets. Consult [the current validation report](roadmap-validation.md) for the exact executed matrix rather than treating the entire checklist as completed.
+This contract describes the bounded standalone API. The primary API/SPDK
+adapter has a separate ownership and durability contract and does not expose
+these optional application transaction features.

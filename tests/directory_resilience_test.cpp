@@ -29,6 +29,15 @@ int main(int argc,char **argv) {
     if(mode=="collision") {
         auto names=collisions();std::vector<bool> live(names.size(),true);
         for(const auto &n:names){CHECK(!model_create(h,("/arena/"+n).c_str()));}
+        /* Rename to an absent name with the SAME saturated hash, persist,
+         * then rename back. The index count and every survivor must agree. */
+        CHECK(!model_unlink(h,("/arena/"+names.back()).c_str()));
+        CHECK(!model_rename(h,("/arena/"+names[0]).c_str(),("/arena/"+names.back()).c_str()));
+        CHECK(!model_close(h));h=model_open(argv[1],0,1);CHECK(h);
+        for(unsigned k=1;k<names.size();k++)exists(h,"/arena/"+names[k]);
+        {uint64_t n;unsigned l;CHECK(model_stat(h,("/arena/"+names[0]).c_str(),&n,&l)<0);}
+        CHECK(!model_rename(h,("/arena/"+names.back()).c_str(),("/arena/"+names[0]).c_str()));
+        CHECK(!model_create(h,("/arena/"+names.back()).c_str()));
         CHECK(!model_rename(h,("/arena/"+names[0]).c_str(),"/arena/temporary"));
         CHECK(!model_rename(h,"/arena/temporary",("/arena/"+names[0]).c_str()));
         CHECK(!model_rename(h,("/arena/"+names[0]).c_str(),("/arena/"+names[1]).c_str()));
@@ -48,7 +57,8 @@ int main(int argc,char **argv) {
         }
     } else if(mode=="names") {
         std::string max="/arena/"+std::string(115,'x'),over="/arena/"+std::string(116,'x');
-        CHECK(!model_create(h,max.c_str()));exists(h,max);CHECK(model_create(h,over.c_str())<0);exists(h,max);CHECK(!model_unlink(h,max.c_str()));
+        CHECK(!model_create(h,max.c_str()));exists(h,max);CHECK(model_create(h,over.c_str())<0);exists(h,max);
+        CHECK(model_rename(h,max.c_str(),over.c_str())<0);exists(h,max);CHECK(!model_unlink(h,max.c_str()));
         CHECK(model_create(h,("/arena/"+std::string(4097,'z')).c_str())<0);
         CHECK(model_create(h,("/"+std::string(116,'z')+"/leaf").c_str())<0);
         CHECK(!model_create(h,"arena/./relative"));exists(h,"/arena/./relative");

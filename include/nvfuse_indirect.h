@@ -16,6 +16,12 @@
 #ifndef __NVFUSE_INDIRECT_H__
 #define __NVFUSE_INDIRECT_H__
 int nvfuse_block_to_path(s32 block, u32 offsets[4], u32 *boundary);
+/* Return 1 only for a complete cached read mapping; 0 uses ordinary AIO. */
+int nvfuse_try_cached_read_mapping(struct nvfuse_superblock *sb, inode_t ino,
+                                  s64 offset, u32 bytes, u32 *physical);
+/* Caller owns inode lock; no allocation, cold metadata falls back normally. */
+s32 nvfuse_get_block_cached(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                           s32 lblock, u32 maxblocks, u32 *count, u32 *physical);
 s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 lblock,
 		     u32 max_blocks, u32 *num_alloc_blks, u32 *pblock, u32 create);
 

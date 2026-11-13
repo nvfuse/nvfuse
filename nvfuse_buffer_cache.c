@@ -29,7 +29,7 @@
 #include <assert.h>
 
 #include "nvfuse_core.h"
-#ifdef NVFUSE_FILE_BACKEND
+#if defined(NVFUSE_FILE_BACKEND) || defined(NVFUSE_PRIMARY_JOURNAL)
 #include "nvfuse_journal.h"
 #endif
 #include "nvfuse_dep.h"
@@ -183,6 +183,73 @@ struct nvfuse_buffer_cache *nvfuse_hash_lookup(struct nvfuse_buffer_manager *bm,
 	return NULL;
 }
 
+#ifndef NVFUSE_FILE_BACKEND
+/* Read only the mapping fields; the caller keeps the inode context locked.
+ * No pointer into this evictable cache entry survives the bounded copy. */
+int nvfuse_cached_inode_lookup(struct nvfuse_superblock *sb, inode_t ino,
+                               s64 *size, u32 *blocks)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    struct nvfuse_buffer_cache *bc;
+    u64 key;
+    nvfuse_make_pbno_key(ITABLE_INO, ino / INODE_ENTRY_NUM, &key, NVFUSE_BP_TYPE_DATA);
+    SPINLOCK_LOCK(&bm->bm_lock);
+    bc = nvfuse_hash_lookup(bm, key);
+    if (!bc) { SPINLOCK_UNLOCK(&bm->bm_lock); return 0; }
+    SPINLOCK_LOCK(&bc->bc_lock);
+    const struct nvfuse_inode *inode = (const struct nvfuse_inode *)bc->bc_buf +
+                                     ino % INODE_ENTRY_NUM;
+    if (!bc->bc_load || inode->i_ino != ino) {
+        SPINLOCK_UNLOCK(&bc->bc_lock);
+        SPINLOCK_UNLOCK(&bm->bm_lock);
+        return 0;
+    }
+    *size = inode->i_size;
+    memcpy(blocks, inode->i_blocks, sizeof(inode->i_blocks));
+    list_del(&bc->bc_list);
+    list_add(&bc->bc_list, &bm->bm_list[bc->bc_list_type]);
+    bm->bm_cache_ref++; bm->bm_cache_hit++;
+    SPINLOCK_UNLOCK(&bc->bc_lock);
+    SPINLOCK_UNLOCK(&bm->bm_lock);
+    return 1;
+}
+
+/* Copy pointers while both cache locks are held: no buffer-head lifetime or
+ * temporary REF-list membership is needed. Caller owns the inode lock. */
+int nvfuse_cached_indirect_lookup(struct nvfuse_superblock *sb, u32 physical,
+                                u32 index, u32 maxblocks, u32 *first, u32 *count)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    struct nvfuse_buffer_cache *bc;
+    u64 key;
+    if (index >= PTRS_PER_BLOCK || !maxblocks) return 0;
+    nvfuse_make_pbno_key(BLOCK_IO_INO, physical, &key, NVFUSE_BP_TYPE_DATA);
+    SPINLOCK_LOCK(&bm->bm_lock);
+    bc = nvfuse_hash_lookup(bm, key);
+    if (!bc) { SPINLOCK_UNLOCK(&bm->bm_lock); return 0; }
+    SPINLOCK_LOCK(&bc->bc_lock);
+    if (!bc->bc_load || bc->bc_pno != physical) {
+        SPINLOCK_UNLOCK(&bc->bc_lock);
+        SPINLOCK_UNLOCK(&bm->bm_lock);
+        return 0;
+    }
+    const u32 *pointers = (const u32 *)bc->bc_buf;
+    *first = pointers[index];
+    *count = *first ? 1 : 0;
+    if (maxblocks > PTRS_PER_BLOCK - index) maxblocks = PTRS_PER_BLOCK - index;
+    while (*count && *count < maxblocks &&
+           pointers[index + *count] == *first + *count) (*count)++;
+    /* Same final MRU placement as acquiring and releasing a clean/dirty BH;
+     * the manager lock prevents replacement throughout the copy. */
+    list_del(&bc->bc_list);
+    list_add(&bc->bc_list, &bm->bm_list[bc->bc_list_type]);
+    bm->bm_cache_ref++; bm->bm_cache_hit++;
+    SPINLOCK_UNLOCK(&bc->bc_lock);
+    SPINLOCK_UNLOCK(&bm->bm_lock);
+    return 1;
+}
+#endif
+
 struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key, lbno_t lblock)
 {
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;
@@ -197,12 +264,10 @@ struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key
 		/* in case of cache hit */
 		assert(bc->bc_lbno == lblock);
 
-		// cache move to mru position
+		/* Reordering within the same list does not change its count.
+		 * bm_lock already protects the list links and membership. */
 		list_del(&bc->bc_list);
-		rte_atomic32_dec(&bm->bm_list_count[bc->bc_list_type]);
-
 		list_add(&bc->bc_list, &bm->bm_list[bc->bc_list_type]);
-		rte_atomic32_inc(&bm->bm_list_count[bc->bc_list_type]);
 		bm->bm_cache_hit++;
 
 		//printf(" hit count = %d, inode = %d, hit rate = %f \n", bc->bc_hit, bc->bc_ino,
@@ -388,7 +453,7 @@ struct nvfuse_buffer_head *_nvfuse_get_bh(struct nvfuse_superblock *sb,
 	bh->bh_ictx = ictx ? ictx : NULL;
 
 FOUND_BH:
-#ifdef NVFUSE_FILE_BACKEND
+#if defined(NVFUSE_FILE_BACKEND) || defined(NVFUSE_PRIMARY_JOURNAL)
     if (sb->target->journal && (is_meta ||
         (ictx && ictx->ictx_inode && S_ISLNK(ictx->ictx_inode->i_mode))))
         nvj_mark_metadata(sb->target->journal, bc->bc_pno);

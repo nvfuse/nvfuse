@@ -477,8 +477,8 @@ s32 nvfuse_format(struct nvfuse_handle *nvh)
 	nvfuse_sb_disk->sb_bg_num = NVFUSE_BG_NUM(nvfuse_sb_disk->sb_no_of_blocks,
 					 bg_size_bits - CLUSTER_SIZE_BITS);
 
-	nvfuse_sb_disk->sb_no_of_blocks = (nvfuse_sb_disk->sb_bg_num) * bg_p_clu;
-	nvfuse_sb_disk->sb_no_of_sectors = (nvfuse_sb_disk->sb_bg_num) * bg_p_clu *
+	nvfuse_sb_disk->sb_no_of_blocks = (u64)nvfuse_sb_disk->sb_bg_num * bg_p_clu;
+	nvfuse_sb_disk->sb_no_of_sectors = (u64)nvfuse_sb_disk->sb_bg_num * bg_p_clu *
 					   (CLUSTER_SIZE / SECTOR_SIZE);
 
 	nvfuse_sb_disk->sb_state = FS_STATE_FORMATTED;
