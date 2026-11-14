@@ -15,12 +15,16 @@
 
 #include <sys/stat.h>
 #include "nvfuse_config.h"
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include <rte_spinlock.h>
+#endif
 
 #ifndef __NVFUSE_TYPES_H
 #define __NVFUSE_TYPES_H
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+#if NVFUSE_OS == NVFUSE_OS_LINUX || NVFUSE_OS == NVFUSE_OS_DARWIN
 
 /* Note: unsigned char differs from signed char ??? */
 typedef			char			s8;
@@ -132,6 +136,11 @@ struct statvfs {
 	unsigned long  f_namemax;  /* Maximum filename length */
 };
 #	endif
+
+#ifndef O_DIRECT
+/* Internal NVFUSE flag; never passed to host open(). */
+#define O_DIRECT 0200000
+#endif
 
 typedef s64	nvfuse_off_t;
 //typedef u32	nvfuse_poff_t;

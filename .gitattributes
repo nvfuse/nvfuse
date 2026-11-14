@@ -1,0 +1,7 @@
+# Keep git-archive source releases free of local/generated material.
+/build export-ignore
+/docs/research export-ignore
+/output export-ignore
+/tmp export-ignore
+/.DS_Store export-ignore
+/tests/run_nvme_soak.py export-ignore

@@ -1,0 +1,27 @@
+# Optional compatibility frontend using the existing synchronous NVMe transport.
+SPDK_ROOT_DIR ?= $(HOME)/src/spdk
+NVFUSE_ROOT_DIR := $(abspath ../..)
+NVFUSE_BUILD ?= $(NVFUSE_ROOT_DIR)/build/fuse-spdk
+APP = nvfuse-fuse-spdk
+include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
+include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
+C_SRCS = nvfuse_fuse.c
+CFLAGS += -D_GNU_SOURCE -DDEBUG -DNVFUSE_FILE_BACKEND -DNVFUSE_SPDK_TRANSPORT -DMAX_OPEN_FILE=1024 -I$(NVFUSE_ROOT_DIR)/include $(shell pkg-config --cflags fuse3)
+SYS_LIBS += $(shell pkg-config --libs fuse3)
+LIBS += $(NVFUSE_BUILD)/nvfuse.a $(NVFUSE_BUILD)/nvfuse_nvme_transport.o -lpthread -lm
+SPDK_LIB_LIST += $(SOCK_MODULES_LIST) nvme
+include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
+
+$(APP): nvfuse-core $(NVFUSE_BUILD)/nvfuse_nvme_transport.o
+.PHONY: nvfuse-core backend-test
+nvfuse-core:
+	$(MAKE) -C $(NVFUSE_ROOT_DIR) -f Makefile.local LOCAL_BUILD=$(NVFUSE_BUILD) LOCAL_CPPFLAGS="-DNVFUSE_SPDK_TRANSPORT -DMAX_OPEN_FILE=1024" $(NVFUSE_BUILD)/nvfuse.a
+
+$(NVFUSE_BUILD)/nvfuse_nvme_transport.o: $(NVFUSE_ROOT_DIR)/src/nvfuse_nvme_transport.c $(NVFUSE_ROOT_DIR)/include/nvfuse_nvme_transport.h
+	@mkdir -p $(NVFUSE_BUILD)
+	$(CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(SPDK_ROOT_DIR)/include -I$(NVFUSE_ROOT_DIR)/include -c $< -o $@
+
+# Reuse the same public API test with this linked SPDK core. There is no test
+# hook or QEMU restriction in the public opener; the VM runner guards its device.
+backend-test: nvfuse-core $(NVFUSE_BUILD)/nvfuse_nvme_transport.o
+	$(CC) $(CFLAGS) $(LDFLAGS) $(NVFUSE_ROOT_DIR)/tests/backend_test.c $(LIBS) $(ENV_LDFLAGS) $(SYS_LIBS) -o $(NVFUSE_BUILD)/backend_test

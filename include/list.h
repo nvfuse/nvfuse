@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
+ * Adapted from Linux include/linux/list.h; matching reference: v2.6.39.
+ * https://github.com/torvalds/linux/blob/v2.6.39/include/linux/list.h
+ * List node declarations also come from that tree's include/linux/types.h.
+ * NVFUSE adaptations include userspace includes, C++ identifier compatibility,
+ * container_of, prefetch choices and poison-pointer casts. See NOTICE.
+ */
 #include "poison.h"
 
 #ifndef _LINUX_LIST_H
@@ -359,8 +367,13 @@ static inline void list_splice_tail_init(struct list_head *list,
 #undef container_of
 #endif
 
+#ifdef NVFUSE_FILE_BACKEND
+#define container_of(ptr, type, member) \
+	((type *)((char *)(ptr) - __builtin_offsetof(type, member)))
+#else
 #define container_of(ptr, type, member) \
 	((type *)((char *)(ptr)-(unsigned long)(&((type *)0)->member)))
+#endif
 
 /**
  * list_entry - get the struct for this entry

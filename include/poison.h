@@ -1,3 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
+ * Adapted from Linux include/linux/poison.h; matching reference: v2.6.39.
+ * https://github.com/torvalds/linux/blob/v2.6.39/include/linux/poison.h
+ * NVFUSE uses NULL list poison pointers on non-Linux hosts. See NOTICE.
+ */
 #ifndef _LINUX_POISON_H
 #define _LINUX_POISON_H
 

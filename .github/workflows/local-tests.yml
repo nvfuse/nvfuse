@@ -1,0 +1,66 @@
+name: Local file backend tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-test:
+    name: File backend smoke test
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Show build environment
+        run: |
+          uname -sm
+          clang --version
+          python3 --version
+
+      - name: Build and test file backend
+        run: make local-test local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-roadmap-test
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: build/test-results
+
+  rocky9-test:
+    name: Rocky Linux 9 file backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test Rocky Linux 9 container
+        env:
+          NVFUSE_DOCKER_CONTEXT: default
+        run: sh scripts/test-rocky9.sh
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocky9-test-results
+          path: build/test-results

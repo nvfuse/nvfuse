@@ -33,7 +33,8 @@ CFLAGS += -march=native -m64
 CFLAGS += $(WARNING_OPTION) -fPIC
 
 
-OBJS=$(SRCS:.c=.o)
+LEGACY_BUILD = build/legacy
+OBJS=$(addprefix $(LEGACY_BUILD)/,$(SRCS))
 
 CC=gcc
 
@@ -41,10 +42,11 @@ CC=gcc
 
 # .PHONY: all clean
 
-.c.o:
+$(LEGACY_BUILD)/%.o: src/%.c
+	@mkdir -p $(dir $@)
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) $(OPTIMIZATION) $(CEPH_COMPILE) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ -ldl $<
+	$(CC) $(OPTIMIZATION) $(CEPH_COMPILE) $(DEBUG) -MMD -MP -c -D_GNU_SOURCE $(CFLAGS) -o $@ -ldl $<
 
 all:  $(LIB_NVFUSE) xattr_test reactor helloworld libfuse regression_test perf control_plane_proc fsync_test create_1m_files mkfs #fio_plugin 
 
@@ -85,6 +87,7 @@ control_plane_proc:
 	make -C examples/control_plane_proc
 
 clean:
+	rm -rf $(LEGACY_BUILD)
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
 	make -C examples/fio_plugin/ clean
 	make -C examples/reactor/ clean
@@ -99,6 +102,7 @@ clean:
 	make -C examples/xattr_test/ clean	
 
 distclean:
+	rm -rf $(LEGACY_BUILD)
 	rm -f Makefile.bak *.o *.a *~ .depend $(LIB_NVFUSE)
 install: 
 	chmod 755 $(LIB_NVFUSE)
@@ -108,13 +112,58 @@ uninstall:
 	rm -f ../bin/$(LIB_NVFUSE)
 dep:    depend
 
-depend:
-	$(CC) -MM $(CFLAGS) $(SRCS) 1>.depend
+depend: $(OBJS)
 
 #
 # include dependency files if they exist
 #
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include $(OBJS:.o=.d)
 
+
+# Native file-image development targets, separate from the SPDK build.
+.PHONY: fuse fuse-adapter-test fuse-test fuse-extended-test
+fuse fuse-adapter-test fuse-test fuse-extended-test:
+	$(MAKE) -f Makefile.fuse $@
+
+.PHONY: fuse-spdk
+fuse-spdk:
+	$(MAKE) -C examples/fuse3 -f Makefile.spdk
+
+REGRESSION_REPEAT ?= 3
+.PHONY: backend-regression backend-regression-qemu
+backend-regression:
+	python3 tests/run_backend_regression.py --profile portable --repeat "$(REGRESSION_REPEAT)" --sanitize
+backend-regression-qemu:
+	python3 scripts/test-fuse-qemu.py --backends --repeat "$(REGRESSION_REPEAT)" --sanitize
+
+.PHONY: local-roadmap-test local local-test local-sanitize local-framework local-journal-test local-limit-test local-boundary-test local-stress-test local-resilience-test local-chaos-test
+local:
+	$(MAKE) -f Makefile.local all
+local-roadmap-test:
+	$(MAKE) -f Makefile.local roadmap-test
+
+local-test:
+	$(MAKE) -f Makefile.local test
+local-resilience-test:
+	$(MAKE) -f Makefile.local resilience-test
+local-chaos-test:
+	$(MAKE) -f Makefile.local chaos-test
+local-stress-test:
+	$(MAKE) -f Makefile.local stress-test
+local-boundary-test:
+	$(MAKE) -f Makefile.local boundary-suite
+local-limit-test:
+	$(MAKE) -f Makefile.local limit-test
+local-journal-test:
+	$(MAKE) -f Makefile.local journal-test
+local-framework:
+	$(MAKE) -f Makefile.local framework-test
+local-sanitize:
+	UBSAN_OPTIONS=halt_on_error=1 $(MAKE) -f Makefile.local LOCAL_BUILD=build/asan LOCAL_CFLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" test journal-test limit-test boundary-suite stress-test resilience-test
+
+# Current SPDK primary reactor and FIO API engine (separate object directory).
+.PHONY: spdk-primary spdk-fio
+spdk-primary:
+	$(MAKE) -f Makefile.spdk all
+spdk-fio:
+	$(MAKE) -f Makefile.spdk fio

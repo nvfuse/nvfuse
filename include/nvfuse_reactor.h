@@ -12,8 +12,12 @@
 * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
 * more details.
 */
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "spdk/bdev.h"
 #include "spdk/event.h"
+#endif
 
 #ifndef __NVFUSE_REACTOR__
 #define __NVFUSE_REACTOR__
@@ -22,9 +26,51 @@
 #define REACTOR_BUFFER_IOVS 4
 
 struct io_target {
+#ifdef NVFUSE_FILE_BACKEND
+    int fd;
+    uint64_t size_bytes;
+    int metadata_only;
+    unsigned journal_blocks;
+    uint64_t payload_bytes_discarded;
+    void *spdk_transport;
+    struct nvj *journal;
+    int tx_user, tx_depth, tx_rollback, tx_mounted, tx_restoring;
+    unsigned tx_queues;
+    int tx_keyed;
+    unsigned char tx_key[16];
+    void *tx_snapshot;
+    pthread_t tx_thread;
+#else
+    /* Owned by the serialized filesystem thread; I/O reactor never uses it. */
+    struct nvj *journal;
+    void *journal_dma;
+    struct reactor_task *journal_home_task;
+    struct reactor_task *journal_raw_task;
+    struct reactor_task *journal_dirty_task; /* Serialized cache writeback. */
+    unsigned journal_raw, journal_aio;
+    unsigned journal_owner_collect;
+    unsigned journal_dirty_iov;
+    uint64_t journal_dirty_blocks, journal_dirty_requests;
+    unsigned journal_flush_fast;
+    unsigned buffered_alloc_batch;
+    unsigned buffered_map_cache;
+    unsigned buffered_bc_direct;
+    unsigned buffered_alloc_account;
+    unsigned buffered_alloc_fused;
+    unsigned buffered_alloc_cached;
+    unsigned buffered_write_hit;
+    unsigned buffered_fast_append;
+    uint64_t buffered_fast_append_calls, buffered_fast_append_hits;
+    uint64_t journal_flush_elided;
+    int journal_mounting, journal_dirty;
+    int journal_profile;
+    uint64_t journal_collect_ns;
+    uint64_t journal_dirty_ns, journal_super_ns;
+#endif
 	struct spdk_bdev	*bdev;
 	struct spdk_bdev_desc	*desc;
 	struct spdk_io_channel	*ch;
+	struct spdk_thread	*io_thread;
 	struct io_target	*next;
 	unsigned		lcore;
 	int			io_completed;
@@ -36,15 +82,21 @@ struct io_target {
 	struct spdk_poller	*reset_timer;
 	struct rte_mempool *task_pool;
 	struct rte_mempool *req_pool;
+    struct reactor_task *poll_tasks;
+    struct spdk_poller *queue_poller;
 };
 
 struct reactor_task {
     struct io_target    *target;
     int                 qdepth;
+    int                 polling; /* Immutable while requests are outstanding. */
+    struct reactor_task *poll_next;
 
     struct io_job *sq[REACTOR_MAX_REQUEST];
     int32_t             sq_head;
     int32_t             sq_tail;
+    int                 sq_scheduled; /* Protected by sq_mutex. */
+    uint64_t            sq_batches, sq_notifications;
     pthread_mutex_t     sq_mutex;
     pthread_cond_t      sq_cond;
 
@@ -58,6 +110,10 @@ struct reactor_task {
 struct io_job;
 
 int32_t reactor_submit_reqs(struct io_target *target, struct reactor_task *task, struct io_job **reqs, int count);
+/* One producer/consumer only. Enable before first submit; min_nr=0 is preferred. */
+int reactor_task_enable_polling(struct io_target *target, struct reactor_task *task);
+/* Owner has consumed all completions; wait for I/O-thread queue drains to return. */
+void reactor_wait_idle(struct io_target *target);
 int reactor_cq_get_reqs(struct reactor_task *task, struct io_job **reqs, int min_reqs, int max_reqs);
 void reactor_make_reqs(struct io_target *target, struct io_job **reqs, int count);
 #ifndef NVFUSE_USE_CEPH_SPDK
@@ -85,6 +141,7 @@ int reactor_sync_read_blk(struct io_target *target, long block, int count, void 
 int reactor_sync_write_blk(struct io_target *target, long block, int count, void *buf);
 int reactor_sync_flush(struct io_target *target);
 struct io_target * reactor_construct_targets(void);
+void reactor_destroy_target(struct io_target *target);
 void reactor_get_opts(const char *config_file, const char *cpumask, struct spdk_app_opts *opts);
 void blockdev_heads_init(void);
 void reactor_submit_on_core(void *arg1, void *arg2);

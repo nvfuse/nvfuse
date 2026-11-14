@@ -1,0 +1,48 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
+/* Implementation aliases; include before public declarations. */
+#ifdef NVFUSE_FILE_BACKEND
+#define nvfuse_opendir nvfuse_opendir_impl
+#define nvfuse_openfile nvfuse_openfile_impl
+#define nvfuse_openfile_path nvfuse_openfile_path_impl
+#define nvfuse_openfile_ino nvfuse_openfile_ino_impl
+#define nvfuse_closefile nvfuse_closefile_impl
+#define nvfuse_readfile nvfuse_readfile_impl
+#define nvfuse_readfile_aio nvfuse_readfile_aio_impl
+#define nvfuse_readfile_aio_directio nvfuse_readfile_aio_directio_impl
+#define nvfuse_writefile nvfuse_writefile_impl
+#define nvfuse_writefile_directio_prepare nvfuse_writefile_directio_prepare_impl
+#define nvfuse_createfile nvfuse_createfile_impl
+#define nvfuse_rmfile nvfuse_rmfile_impl
+#define nvfuse_rmfile_path nvfuse_rmfile_path_impl
+#define nvfuse_unlink nvfuse_unlink_impl
+#define nvfuse_rmdir nvfuse_rmdir_impl
+#define nvfuse_rmdir_path nvfuse_rmdir_path_impl
+#define nvfuse_mkdir nvfuse_mkdir_impl
+#define nvfuse_rename nvfuse_rename_impl
+#define nvfuse_rename_path nvfuse_rename_path_impl
+#define nvfuse_hardlink nvfuse_hardlink_impl
+#define nvfuse_hardlink_path nvfuse_hardlink_path_impl
+#define nvfuse_mknod nvfuse_mknod_impl
+#define nvfuse_mkdir_path nvfuse_mkdir_path_impl
+#define nvfuse_truncate_path nvfuse_truncate_path_impl
+#define nvfuse_ftruncate nvfuse_ftruncate_impl
+#define nvfuse_symlink nvfuse_symlink_impl
+#define nvfuse_symlink_path nvfuse_symlink_path_impl
+#define nvfuse_readlink_ino nvfuse_readlink_ino_impl
+#define nvfuse_getattr nvfuse_getattr_impl
+#define nvfuse_fgetattr nvfuse_fgetattr_impl
+#define nvfuse_access nvfuse_access_impl
+#define nvfuse_readlink nvfuse_readlink_impl
+#define nvfuse_statvfs nvfuse_statvfs_impl
+#define nvfuse_chmod_path nvfuse_chmod_path_impl
+#define nvfuse_chown nvfuse_chown_impl
+#define nvfuse_utimens nvfuse_utimens_impl
+#define nvfuse_fdatasync nvfuse_fdatasync_impl
+#define nvfuse_fsync nvfuse_fsync_impl
+#define nvfuse_sync nvfuse_sync_impl
+#define nvfuse_fallocate nvfuse_fallocate_impl
+#define nvfuse_truncate nvfuse_truncate_impl
+#define nvfuse_truncate_ino nvfuse_truncate_ino_impl
+#define nvfuse_chmod nvfuse_chmod_impl
+#endif

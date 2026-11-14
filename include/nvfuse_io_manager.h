@@ -23,7 +23,7 @@
 #ifndef __IO_MANAGER__
 #define __IO_MANAGER__
 
-#if NVFUSE_OS == NVFUSE_OS_LINUX
+#if NVFUSE_OS == NVFUSE_OS_LINUX && !defined(NVFUSE_FILE_BACKEND)
 #include <libaio.h>
 #endif
 #ifndef _NVFUSE_IO_H
@@ -35,7 +35,12 @@
 //#define USE_NVFUSE_TRACE 0
 //#define USE_BUFFER_POOL 0
 
-#ifndef __USE_FUSE__
+#ifdef NVFUSE_FILE_BACKEND
+#define USE_RAMDISK 0
+#define USE_FILEDISK 0
+#define USE_BLKDEVIO 0
+#define USE_SPDK 0
+#elif !defined(__USE_FUSE__)
 #if NVFUSE_OS == NVFUSE_OS_LINUX
 #	define USE_RAMDISK  0
 #	define USE_FILEDISK 0
@@ -82,6 +87,7 @@ struct io_job {
 	size_t ret; //return value of pread or pwrite
 
 	int complete;
+	int journal_staged; /* Owner prepared overlay result; I/O thread posts CQ. */
 	void *tag1;
 	void *tag2;
 };

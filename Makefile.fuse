@@ -1,0 +1,32 @@
+# Optional Linux frontend; native local and SPDK builds do not include this.
+LOCAL_BUILD ?= build/fuse
+LOCAL_CPPFLAGS += -DMAX_OPEN_FILE=1024
+include Makefile.local
+.DEFAULT_GOAL := fuse
+
+FUSE_CFLAGS ?= $(shell pkg-config --cflags fuse3 2>/dev/null)
+FUSE_LIBS ?= $(shell pkg-config --libs fuse3 2>/dev/null)
+FRONTEND = examples/fuse3/nvfuse_fuse.c
+
+.PHONY: fuse fuse-check fuse-adapter-test fuse-test fuse-extended-test
+fuse-check:
+	@test "$$(uname -s)" = Linux || { echo 'The FUSE frontend requires Linux; use the QEMU guest'; exit 1; }
+	@pkg-config --exists fuse3 || { echo 'Install fuse3, fuse3-devel and pkgconf-pkg-config'; exit 1; }
+
+fuse: fuse-check $(LOCAL_BUILD)/nvfuse-fuse
+$(LOCAL_BUILD)/nvfuse-fuse: $(FRONTEND) $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(CPPFLAGS) $(FUSE_CFLAGS) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $< $(LOCAL_BUILD)/nvfuse.a $(FUSE_LIBS) -lpthread -lm -o $@
+
+$(LOCAL_BUILD)/fuse_adapter_test: tests/fuse_adapter_test.c $(FRONTEND) $(LOCAL_BUILD)/nvfuse.a
+	$(CC) $(CPPFLAGS) $(FUSE_CFLAGS) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $< $(LOCAL_BUILD)/nvfuse.a $(FUSE_LIBS) -lpthread -lm -o $@
+
+fuse-adapter-test: fuse-check $(LOCAL_BUILD)/fuse_adapter_test
+	python3 tests/run_fuse_adapter.py $(LOCAL_BUILD)/fuse_adapter_test
+
+# /dev/fuse and fusermount3 must be available; fail rather than silently skip.
+fuse-test: fuse
+	python3 tests/run_fuse.py --binary $(LOCAL_BUILD)/nvfuse-fuse
+
+FSX ?= $(HOME)/src/fs-reference/xfstests/ltp/fsx
+fuse-extended-test: fuse
+	python3 tests/run_fuse_extended.py --binary $(LOCAL_BUILD)/nvfuse-fuse --fsx "$(FSX)"

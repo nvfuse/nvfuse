@@ -1,0 +1,37 @@
+# Primary reactor build for SPDK 26.09. No portable/file backend objects.
+SPDK_ROOT_DIR ?= $(HOME)/src/spdk
+FIO_SOURCE_DIR ?= $(HOME)/src/fio
+SPDK_BUILD ?= build/spdk-primary
+SPDK_CFLAGS = -I$(SPDK_ROOT_DIR)/include -I$(SPDK_ROOT_DIR)/dpdk/build/include -Iinclude -DSPDK_ENABLED -DNVFUSE_PRIMARY_JOURNAL -D_GNU_SOURCE
+PRIMARY_SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
+ nvfuse_gettimeofday.c nvfuse_bp_tree.c nvfuse_dirhash.c nvfuse_misc.c \
+ nvfuse_mkfs.c nvfuse_malloc.c nvfuse_indirect.c nvfuse_api.c nvfuse_aio.c \
+ rbtree.c nvfuse_ipc_ring.c nvfuse_control_plane.c nvfuse_dep.c \
+ nvfuse_flushwork.c nvfuse_reactor.c nvfuse_xattr.c nvfuse_journal.c nvfuse_primary_journal.c nvfuse_spdk_runtime.c
+PRIMARY_SOURCES := $(addprefix src/,$(PRIMARY_SOURCES))
+PRIMARY_OBJECTS = $(patsubst src/%.c,$(SPDK_BUILD)/%.o,$(PRIMARY_SOURCES))
+CC ?= gcc
+PRIMARY_CFLAGS = -std=gnu11 -O3 -g -DDEBUG -march=native -fPIC -Wall -Werror -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-sign-compare
+.DEFAULT_GOAL := all
+.PHONY: all fio queue-test inode-cache-test journal-test-tool metadata-bench clean
+all: $(SPDK_BUILD)/nvfuse.a
+$(SPDK_BUILD)/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(SPDK_CFLAGS) $(PRIMARY_CFLAGS) -MMD -MP -c $< -o $@
+$(SPDK_BUILD)/nvfuse.a: $(PRIMARY_OBJECTS)
+	$(AR) rcs $@ $^
+fio: $(SPDK_BUILD)/nvfuse.a
+	$(MAKE) -C examples/fio_plugin/modern SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) FIO_SOURCE_DIR=$(abspath $(FIO_SOURCE_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
+queue-test: $(SPDK_BUILD)/nvfuse.a
+	$(MAKE) -C tests/spdk -f Makefile.queue SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
+	tests/spdk/reactor_poll_queue_test
+inode-cache-test: $(SPDK_BUILD)/nvfuse.a
+	$(MAKE) -C tests/spdk -f Makefile.queue APP=inode_cache_test C_SRCS=../inode_cache_test.c SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
+	tests/spdk/inode_cache_test
+journal-test-tool: $(SPDK_BUILD)/nvfuse.a
+	$(MAKE) -C tests/spdk -f Makefile.tools SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
+metadata-bench: $(SPDK_BUILD)/nvfuse.a
+	$(MAKE) -C tests/spdk -f Makefile.tools APP=metadata_bench SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
+clean:
+	rm -rf $(SPDK_BUILD)
+-include $(PRIMARY_OBJECTS:.o=.d)

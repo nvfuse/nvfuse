@@ -13,8 +13,13 @@
 * more details.
 */
 
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "rte_spinlock.h"
 #include "rte_atomic.h"
+#endif
+
 #include "nvfuse_config.h"
 #include "nvfuse_core.h"
 #include "list.h"
@@ -173,6 +178,13 @@ struct nvfuse_buffer_cache *nvfuse_get_bc(struct nvfuse_superblock *sb, struct n
 struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb,
 											struct nvfuse_inode_ctx *ictx, 
 											inode_t ino, lbno_t lblock, s32 is_meta);
+/* Caller owns inode lock. Copy mapping fields, never a cache data pointer. */
+int nvfuse_cached_inode_lookup(struct nvfuse_superblock *sb, inode_t ino,
+                               s64 *size, u32 *blocks);
+/* Primary AIO only: copy a cached indirect extent under manager+buffer locks.
+ * Return 0 on a cold/missing cache entry; never return a pointer to cache data. */
+int nvfuse_cached_indirect_lookup(struct nvfuse_superblock *sb, u32 physical, u32 index,
+                                u32 maxblocks, u32 *first, u32 *count);
 /* find out buffer cache (bc) associated with key and lblock */
 struct nvfuse_buffer_cache *nvfuse_find_bc(struct nvfuse_superblock *sb, u64 key, lbno_t lblock);
 /* replace the buffer cahce located at the end of the LRU list*/
@@ -183,6 +195,7 @@ void nvfuse_move_buffer_list(struct nvfuse_superblock *sb, struct nvfuse_buffer_
 /* move buffer cache (bc) to another list with no spinlock */
 void nvfuse_move_buffer_list_nolock(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc,
 							 s32 buffer_type, s32 tail);
+void nvfuse_invalidate_inode_suffix(struct nvfuse_superblock *, inode_t, u32);
 void nvfuse_move_bc_to_unused_list(struct nvfuse_superblock *sb, u64 key);
 /* return the number of dirty buffer caches (e.g., 4K dirty buffers) */
 s32 nvfuse_get_dirty_count(struct nvfuse_superblock *sb);

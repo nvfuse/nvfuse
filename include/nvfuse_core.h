@@ -17,7 +17,11 @@
 #include "nvfuse_types.h"
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_stat.h"
+#ifdef NVFUSE_FILE_BACKEND
+#include "nvfuse_portable.h"
+#else
 #include "rte_spinlock.h"
+#endif
 #include "list.h"
 #include "rbtree.h"
 
@@ -135,7 +139,14 @@
 
 /* # OF MAX OPEN FILE */
 #define START_OPEN_FILE	3 /* STDIN, STDOUT, STDERR*/
+#ifndef MAX_OPEN_FILE
+#ifdef NVFUSE_PRIMARY_JOURNAL
+/* All primary core, runtime and application objects must use the same limit. */
+#define MAX_OPEN_FILE 1024
+#else
 #define MAX_OPEN_FILE	16
+#endif
+#endif
 
 #define NVFUSE_BP_TYPE_DATA 0
 #define NVFUSE_BP_TYPE_DIR 1
@@ -400,7 +411,7 @@ struct nvfuse_inode {
 	u16	i_uid;		/* Low 16 bits of Owner Uid */	//56
 	u16	i_mode;		/* File mode */ //58
 	u16	resv0;	//60
-	u32 resv1[1]; //64
+	inode_t i_parent; /* Directory parent; formerly reserved, zero on legacy images. */ //64
 	u32 i_blocks[TINDIRECT_BLOCKS + 1]; //120
 	u32 resv2[1]; // 124
 	u8	xattr[3972]; //4096
@@ -515,6 +526,10 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino);
 void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 dirty);
 s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+int nvfuse_append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                               lbno_t block, const s8 *data, u32 bytes);
+#endif
 void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx);
 void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size);
 u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 last_ino);
@@ -529,7 +544,9 @@ s32 nvfuse_inode_has_dirty(struct nvfuse_inode_ctx *ictx);
 s32 nvfuse_set_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, u32 offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset);
 s32 nvfuse_get_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset);
-s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename);
+s32 nvfuse_del_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename,
+		struct nvfuse_inode_ctx *ictx, struct nvfuse_buffer_head *held1, struct nvfuse_buffer_head *held2);
+s32 nvfuse_set_directory_parent(struct nvfuse_superblock *, struct nvfuse_inode_ctx *, inode_t);
 s32 nvfuse_update_dir_indexing(struct nvfuse_superblock *sb, struct nvfuse_inode *inode, s8 *filename, bitem_t *offset);
 void nvfuse_dir_hash(s8 *filename, u32 *hash, u32 *hash2);
 
@@ -547,6 +564,7 @@ s32 nvfuse_mount(struct nvfuse_handle *nvh);
 s32 nvfuse_umount(struct nvfuse_handle *nvh);
 struct nvfuse_superblock *nvfuse_read_super(struct nvfuse_handle *nvh);
 s32 nvfuse_scan_superblock(struct nvfuse_handle *nvh, struct nvfuse_superblock *cur_sb);
+s32 nvfuse_sync_superblock(struct nvfuse_superblock *sb);
 void nvfuse_release_super(struct nvfuse_superblock *sb);
 void nvfuse_copy_mem_sb_to_disk_sb(struct nvfuse_superblock *disk, struct nvfuse_superblock *memory);
 void nvfuse_copy_disk_sb_to_sb(struct nvfuse_superblock *memory, struct nvfuse_superblock *disk);

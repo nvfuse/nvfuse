@@ -1,0 +1,68 @@
+name: Periodic filesystem validation
+
+on:
+  schedule:
+    - cron: '23 18 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: periodic-filesystem-validation
+  cancel-in-progress: false
+
+jobs:
+  soak-chaos:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Build and run bounded regressions
+        run: make local-test local-journal-test local-resilience-test local-stress-test local-roadmap-test
+      - name: Run independent long mixed oracle
+        run: python3 tests/run_stress.py --sections mixed --rounds 1000000 --verify-every 1000 --remount-every 10000 --command-timeout 5400 --seeds 314159265 271828183 --report-dir build/test-results/periodic-soak
+      - name: Run crash continuation campaign
+        run: python3 tests/run_chaos.py --cycles 10 --segment-rounds 10000 --report-dir build/test-results/periodic-chaos
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: periodic-file-evidence
+          path: build/test-results
+          retention-days: 30
+
+  qemu:
+    # Never run untrusted pull-request code on a device-capable runner.
+    # Enable only after provisioning the dedicated disposable VM described in docs.
+    if: vars.NVFUSE_QEMU_ENABLED == 'true'
+    runs-on: [self-hosted, nvfuse-qemu-arm64]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify dedicated VM configuration
+        env:
+          NVFUSE_QEMU_VM_DIR: ${{ vars.NVFUSE_QEMU_VM_DIR }}
+        run: |
+          test -n "$NVFUSE_QEMU_VM_DIR"
+          test -f "$NVFUSE_QEMU_VM_DIR/start_vm.sh"
+      - name: Inject NVMe faults and verify original image
+        env:
+          NVFUSE_QEMU_VM_DIR: ${{ vars.NVFUSE_QEMU_VM_DIR }}
+        run: python3 tests/run_framework.py --profile integration-faults --near-full-faults --seeds 42 --vm-dir "$NVFUSE_QEMU_VM_DIR" --report-dir build/test-results/periodic-qemu-faults
+      - name: Kill VM and verify recovery
+        env:
+          NVFUSE_QEMU_VM_DIR: ${{ vars.NVFUSE_QEMU_VM_DIR }}
+        run: python3 tests/run_framework.py --profile integration-powercuts --seeds 42 --vm-dir "$NVFUSE_QEMU_VM_DIR" --report-dir build/test-results/periodic-qemu-powercuts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: periodic-qemu-evidence
+          path: build/test-results
+          retention-days: 30
