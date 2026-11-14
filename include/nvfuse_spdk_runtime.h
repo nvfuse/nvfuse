@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_SPDK_RUNTIME_H
 #define NVFUSE_SPDK_RUNTIME_H
 #include <stddef.h>

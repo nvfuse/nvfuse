@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Standalone buffered-data writeback. The exclusive fs_gate is
  * held throughout these functions. Only the existing I/O reactor executes
  * bdev requests. Metadata and journal transaction boundaries are unchanged. */

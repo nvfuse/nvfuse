@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Independent durability oracle. Writes may persist arbitrary sectors before
  * flush, including a tail/header before its body. Every acknowledged commit
  * must survive, and an interrupted transaction must replay atomically. */

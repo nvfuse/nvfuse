@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include "spdk/stdinc.h"
 #include "spdk/env.h"
 #include "spdk/nvme.h"

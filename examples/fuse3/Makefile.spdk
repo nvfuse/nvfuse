@@ -17,7 +17,7 @@ $(APP): nvfuse-core $(NVFUSE_BUILD)/nvfuse_nvme_transport.o
 nvfuse-core:
 	$(MAKE) -C $(NVFUSE_ROOT_DIR) -f Makefile.local LOCAL_BUILD=$(NVFUSE_BUILD) LOCAL_CPPFLAGS="-DNVFUSE_SPDK_TRANSPORT -DMAX_OPEN_FILE=1024" $(NVFUSE_BUILD)/nvfuse.a
 
-$(NVFUSE_BUILD)/nvfuse_nvme_transport.o: $(NVFUSE_ROOT_DIR)/nvfuse_nvme_transport.c $(NVFUSE_ROOT_DIR)/include/nvfuse_nvme_transport.h
+$(NVFUSE_BUILD)/nvfuse_nvme_transport.o: $(NVFUSE_ROOT_DIR)/src/nvfuse_nvme_transport.c $(NVFUSE_ROOT_DIR)/include/nvfuse_nvme_transport.h
 	@mkdir -p $(NVFUSE_BUILD)
 	$(CC) -std=gnu11 -O1 -g -Wall -Wextra -Werror -I$(SPDK_ROOT_DIR)/include -I$(NVFUSE_ROOT_DIR)/include -c $< -o $@
 

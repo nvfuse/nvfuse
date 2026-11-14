@@ -13,22 +13,22 @@ import re
 import shutil
 
 FUNCTIONS = {
-    'nvfuse_api.c': ['nvfuse_openfile_path', 'nvfuse_openfile', 'nvfuse_closefile',
+    'src/nvfuse_api.c': ['nvfuse_openfile_path', 'nvfuse_openfile', 'nvfuse_closefile',
         'nvfuse_path_resolve', 'nvfuse_lookup', 'nvfuse_lookup_bptree',
         'nvfuse_lookup_linear', 'nvfuse_set_directory_parent', 'nvfuse_createfile',
         'nvfuse_make_first_directory', 'nvfuse_mkdir_path', 'nvfuse_mkdir',
         'nvfuse_rename_path', 'nvfuse_unlink', 'nvfuse_rmdir_path'],
-    'nvfuse_core.c': ['nvfuse_alloc_new_inode', 'nvfuse_find_free_inode',
+    'src/nvfuse_core.c': ['nvfuse_alloc_new_inode', 'nvfuse_find_free_inode',
         'nvfuse_scan_free_ibitmap', 'nvfuse_find_empty_dentry', 'nvfuse_read_inode',
         'nvfuse_release_inode', 'nvfuse_set_dir_indexing', 'nvfuse_get_dir_indexing',
         'nvfuse_check_flush_dirty', 'nvfuse_create_bptree', 'nvfuse_get_free_blocks',
         'nvfuse_alloc_dbitmap'],
-    'nvfuse_indirect.c': ['nvfuse_get_block', 'nvfuse_alloc_free_block'],
-    'nvfuse_inode_cache.c': ['nvfuse_alloc_ictx', 'nvfuse_get_ictx'],
-    'nvfuse_buffer_cache.c': ['_nvfuse_get_bh', 'nvfuse_alloc_buffer_head',
+    'src/nvfuse_indirect.c': ['nvfuse_get_block', 'nvfuse_alloc_free_block'],
+    'src/nvfuse_inode_cache.c': ['nvfuse_alloc_ictx', 'nvfuse_get_ictx'],
+    'src/nvfuse_buffer_cache.c': ['_nvfuse_get_bh', 'nvfuse_alloc_buffer_head',
         'nvfuse_get_bc', 'nvfuse_hash_lookup', 'nvfuse_release_bh'],
-    'nvfuse_bp_tree.c': ['bp_find_key', 'bp_insert_key_tree', 'bp_alloc_inode_and_master'],
-    'nvfuse_reactor.c': ['reactor_sync_read_blk', 'reactor_sync_write_blk'],
+    'src/nvfuse_bp_tree.c': ['bp_find_key', 'bp_insert_key_tree', 'bp_alloc_inode_and_master'],
+    'src/nvfuse_reactor.c': ['reactor_sync_read_blk', 'reactor_sync_write_blk'],
 }
 
 
@@ -36,9 +36,9 @@ def instrument(source, output):
     source, output = source.resolve(), output.resolve()
     if output.exists():
         raise ValueError('output directory must be new')
-    files = list(source.glob('*.c')) + [source / 'Makefile.spdk']
+    files = list((source / 'src').glob('*.c')) + [source / 'Makefile.spdk']
     files += list((source / 'include').glob('*.h'))
-    files += list(source.glob('*.inc')) + list((source / 'spdk_runtime').glob('*'))
+    files += list((source / 'src').glob('*.inc')) + list((source / 'src/spdk_runtime').glob('*'))
     files += [p for p in (source / 'examples/fio_plugin/modern').iterdir()
               if p.suffix in ('.c', '.h', '.map') or p.name == 'Makefile']
     files += [source / 'tests/spdk' / n for n in

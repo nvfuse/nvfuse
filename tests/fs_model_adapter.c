@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"

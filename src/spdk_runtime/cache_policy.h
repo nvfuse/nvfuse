@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_FIO_CACHE_POLICY_H
 #define NVFUSE_FIO_CACHE_POLICY_H
 #include <stdint.h>

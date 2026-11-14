@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Capacity-end coverage complements the sector/crash matrix in the C suite. */
 extern "C" {
 #include "nvfuse_journal.h"

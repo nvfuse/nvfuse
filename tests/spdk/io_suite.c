@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Direct SPDK tests, independent of NVFUSE's legacy SPDK adapter. */
 #include "spdk/stdinc.h"
 #include "spdk/env.h"

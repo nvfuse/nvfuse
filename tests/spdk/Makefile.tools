@@ -16,4 +16,4 @@ LIBS += $(NVFUSE_ARCHIVE) -lm -lpthread -laio -luuid
 SPDK_LIB_LIST += event $(EVENT_BDEV_SUBSYSTEM) $(KEYRING_MODULES_LIST) $(BLOCKDEV_MODULES_LIST) $(SOCK_MODULES_LIST) bdev
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
 $(APP): $(NVFUSE_ARCHIVE)
-api_cache_runtime.o: ../../nvfuse_spdk_runtime.c ../../include/nvfuse_spdk_runtime.h $(wildcard ../../spdk_runtime/*.h ../../spdk_runtime/*.inc)
+api_cache_runtime.o: ../../src/nvfuse_spdk_runtime.c ../../include/nvfuse_spdk_runtime.h $(wildcard ../../src/spdk_runtime/*.h ../../src/spdk_runtime/*.inc)

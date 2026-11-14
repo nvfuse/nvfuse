@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Single-writer redo journal. The disk ABI uses explicit little-endian fields.
  * Home writes follow TWO independently flushed commit certificates. Controls
  * are retired in both copies before the next slot can overwrite payload. */

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include "nvfuse_backend.h"
 #include <errno.h>
 #include <fcntl.h>

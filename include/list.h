@@ -1,3 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ *
+ * Adapted from Linux include/linux/list.h; matching reference: v2.6.39.
+ * https://github.com/torvalds/linux/blob/v2.6.39/include/linux/list.h
+ * List node declarations also come from that tree's include/linux/types.h.
+ * NVFUSE adaptations include userspace includes, C++ identifier compatibility,
+ * container_of, prefetch choices and poison-pointer casts. See NOTICE.
+ */
 #include "poison.h"
 
 #ifndef _LINUX_LIST_H

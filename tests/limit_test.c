@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Exhaust real inode/block resources without storing regular-file payload. */
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"

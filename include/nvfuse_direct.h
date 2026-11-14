@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_DIRECT_H
 #define NVFUSE_DIRECT_H
 #include <stdint.h>

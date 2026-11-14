@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Fail each journal allocation, including reopen/replay and overlay growth. */
 #include "nvfuse_journal.h"
 #include <assert.h>
@@ -20,7 +22,7 @@ static int memory_pthread_create(pthread_t *thread,const pthread_attr_t *attr,vo
 #define malloc memory_malloc
 #define calloc memory_calloc
 #define realloc memory_realloc
-#include "../nvfuse_journal.c"
+#include "../src/nvfuse_journal.c"
 #undef pthread_create
 #undef malloc
 #undef calloc

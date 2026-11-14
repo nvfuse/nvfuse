@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Persistent zero-link files. All callers use the standalone owner thread. */
 #include "nvfuse_portable.h"
 #include "nvfuse_core.h"

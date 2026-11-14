@@ -99,4 +99,4 @@ replace it with a newly formatted fixture.
 
 See the [primary journal adapter](spdk-primary-journaling.md) for owner/AIO
 fencing, runtime options and the SPDK flush-policy guard. The compact engine is
-implemented in [`nvfuse_journal_v3.inc`](../nvfuse_journal_v3.inc).
+implemented in [`src/nvfuse_journal_v3.inc`](../src/nvfuse_journal_v3.inc).

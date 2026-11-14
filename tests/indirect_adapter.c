@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Storage-only adapter for the real nvfuse_indirect.c, linked without the rest
  * of the filesystem. C++ supplies blocks/accounting; C supplies core ABI types. */
 #include "nvfuse_portable.h"

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_INODE_SPACE_ADAPTER_H
 #define NVFUSE_INODE_SPACE_ADAPTER_H
 #include <stdint.h>

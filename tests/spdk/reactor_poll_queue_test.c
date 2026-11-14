@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Exercise the real primary reactor SPSC entry points without device I/O. */
 #include "spdk/stdinc.h"
 #include "nvfuse_core.h"

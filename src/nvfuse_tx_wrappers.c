@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Public standalone operation boundaries. Nested implementation calls use
  * the same transaction through nvfuse_tx_dispatch.h. */
 #include "nvfuse_portable.h"

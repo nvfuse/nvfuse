@@ -10,16 +10,20 @@ SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
  nvfuse_mkfs.c nvfuse_malloc.c nvfuse_indirect.c nvfuse_api.c nvfuse_aio.c \
  rbtree.c nvfuse_dep.c nvfuse_ipc_ring.c nvfuse_control_plane.c nvfuse_xattr.c \
  nvfuse_portable.c nvfuse_file.c nvfuse_journal.c nvfuse_tx.c nvfuse_tx_wrappers.c nvfuse_orphan.c nvfuse_xattr_journal.c nvfuse_resize.c nvfuse_receipt.c nvfuse_direct.c nvfuse_queue.c
-OBJECTS = $(SOURCES:%.c=$(LOCAL_BUILD)/%.o)
+SOURCES := $(addprefix src/,$(SOURCES))
+OBJECTS = $(patsubst src/%.c,$(LOCAL_BUILD)/%.o,$(SOURCES))
 .DEFAULT_GOAL := all
 .PHONY: api-completion-test
-$(LOCAL_BUILD)/api_completion_test: tests/api_completion_test.c spdk_runtime/completion.h spdk_runtime/api_queue.h
+$(LOCAL_BUILD)/api_completion_test: tests/api_completion_test.c src/spdk_runtime/completion.h src/spdk_runtime/api_queue.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $< -lpthread -o $@
 api-completion-test: $(LOCAL_BUILD)/api_completion_test
 	$(LOCAL_BUILD)/api_completion_test
 .PHONY: all test framework-test clean
 all: $(LOCAL_BUILD)/local_test $(LOCAL_BUILD)/framework_test
+$(LOCAL_BUILD)/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 $(LOCAL_BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
@@ -50,12 +54,12 @@ clean:
 	rm -rf $(LOCAL_BUILD)
 -include $(OBJECTS:.o=.d) $(LOCAL_BUILD)/tests/local_test.d $(LOCAL_BUILD)/tests/framework_test.d $(LOCAL_BUILD)/tests/transaction_test.d $(LOCAL_BUILD)/tests/journal_bench.d $(LOCAL_BUILD)/tests/limit_test.d $(LOCAL_BUILD)/tests/metadata_check.d
 
-$(LOCAL_BUILD)/journal_engine_test: tests/journal_engine_test.c nvfuse_journal.c nvfuse_journal_v3.inc include/nvfuse_journal.h
+$(LOCAL_BUILD)/journal_engine_test: tests/journal_engine_test.c src/nvfuse_journal.c src/nvfuse_journal_v3.inc include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_engine_test.c nvfuse_journal.c -o $@
-$(LOCAL_BUILD)/journal_v3_test: tests/journal_v3_test.c nvfuse_journal.c nvfuse_journal_v3.inc include/nvfuse_journal.h
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_engine_test.c src/nvfuse_journal.c -o $@
+$(LOCAL_BUILD)/journal_v3_test: tests/journal_v3_test.c src/nvfuse_journal.c src/nvfuse_journal_v3.inc include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_v3_test.c nvfuse_journal.c -lpthread -o $@
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_v3_test.c src/nvfuse_journal.c -lpthread -o $@
 .PHONY: journal-v3-test
 journal-v3-test: $(LOCAL_BUILD)/journal_v3_test
 	$(LOCAL_BUILD)/journal_v3_test
@@ -115,7 +119,7 @@ BOUNDARY_GC = -Wl,-dead_strip
 else
 BOUNDARY_GC = -Wl,--gc-sections
 endif
-$(LOCAL_BUILD)/inode_core.o: nvfuse_core.c
+$(LOCAL_BUILD)/inode_core.o: src/nvfuse_core.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -ffunction-sections -fdata-sections -MMD -MP -c $< -o $@
 $(LOCAL_BUILD)/tests/inode_space_adapter.o: tests/inode_space_adapter.c tests/inode_space_adapter.h
@@ -125,7 +129,7 @@ $(LOCAL_BUILD)/inode_space_test: tests/inode_space_test.cpp $(LOCAL_BUILD)/tests
 	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $(BOUNDARY_GC) $< $(filter %.o,$^) -o $@
 -include $(LOCAL_BUILD)/inode_core.d $(LOCAL_BUILD)/tests/inode_space_adapter.d
 
-$(LOCAL_BUILD)/inode_dep.o: nvfuse_dep.c
+$(LOCAL_BUILD)/inode_dep.o: src/nvfuse_dep.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -ffunction-sections -fdata-sections -c $< -o $@
 
@@ -140,7 +144,7 @@ $(LOCAL_BUILD)/resilience_test: $(LOCAL_BUILD)/tests/resilience_test.o $(LOCAL_B
 $(LOCAL_BUILD)/directory_resilience_test: tests/directory_resilience_test.cpp $(LOCAL_BUILD)/tests/fs_model_adapter.o $(LOCAL_BUILD)/nvfuse.a tests/fs_model_adapter.h
 	$(CXX) -std=c++17 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Itests $< $(filter %.o %.a,$^) -lpthread -lm -o $@
 
-$(LOCAL_BUILD)/journal_memory_test: tests/journal_memory_test.c nvfuse_journal.c include/nvfuse_journal.h
+$(LOCAL_BUILD)/journal_memory_test: tests/journal_memory_test.c src/nvfuse_journal.c include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< -o $@
 
@@ -158,15 +162,15 @@ roadmap-test: $(LOCAL_BUILD)/queue_test $(LOCAL_BUILD)/journal_async_test $(LOCA
 	$(LOCAL_BUILD)/journal_async_test
 	python3 tests/run_roadmap.py --build-dir $(LOCAL_BUILD)
 
-$(LOCAL_BUILD)/journal_async_test: tests/journal_async_test.c nvfuse_journal.c include/nvfuse_journal.h
+$(LOCAL_BUILD)/journal_async_test: tests/journal_async_test.c src/nvfuse_journal.c include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_async_test.c nvfuse_journal.c -lpthread -o $@
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_async_test.c src/nvfuse_journal.c -lpthread -o $@
 
 $(LOCAL_BUILD)/queue_test: $(LOCAL_BUILD)/tests/queue_test.o $(LOCAL_BUILD)/nvfuse.a
 	$(CC) $(LOCAL_CFLAGS) $^ -lpthread -lm -o $@
 -include $(LOCAL_BUILD)/tests/queue_test.d
 
-$(LOCAL_BUILD)/journal_crc_test: tests/journal_crc_test.c nvfuse_journal.c include/nvfuse_journal.h
+$(LOCAL_BUILD)/journal_crc_test: tests/journal_crc_test.c src/nvfuse_journal.c include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< -lpthread -o $@
 .PHONY: journal-crc-test

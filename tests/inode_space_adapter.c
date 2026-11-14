@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Only storage callbacks are replaced. Link dead-strips unused core routines. */
 #include "nvfuse_portable.h"
 #include "nvfuse_core.h"

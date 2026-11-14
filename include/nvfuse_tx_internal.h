@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_TX_INTERNAL_H
 #define NVFUSE_TX_INTERNAL_H
 #include "nvfuse_tx.h"

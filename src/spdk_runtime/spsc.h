@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_FIO_SPSC_H
 #define NVFUSE_FIO_SPSC_H
 #include <stdatomic.h>

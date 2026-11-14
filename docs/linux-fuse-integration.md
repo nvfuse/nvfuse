@@ -1,7 +1,5 @@
 # Optional Linux FUSE 3 Frontend
 
-Date: 2026-11-12
-
 Status: Implemented optional Linux frontend for image files, kernel block
 devices and SPDK NVMe. See the [backend matrix](backend-matrix.md) for the
 primary API/SPDK performance path and compatibility build boundaries.
@@ -30,10 +28,10 @@ flowchart TB
 | Linux mounted development | Kernel FUSE API through libfuse 3 | Image file | Optional `make fuse` |
 | Linux mounted NVMe access | Kernel FUSE API through libfuse 3 | SPDK NVMe | Optional `make fuse-spdk` |
 
-The first mounted configuration runs entirely inside the QEMU Linux guest. It
+Image-file mounts run on Linux hosts or inside a Linux VM. A VM-based setup
 does not require a macOS filesystem extension. Native macOS mounting is outside
 this implementation. FUSE-to-SPDK mounting is available as a separate
-compatibility build and has been tested on the dedicated QEMU NVMe fixture. It uses the synchronous
+compatibility build. It uses the synchronous
 standalone transport; the original performance reactor remains separate.
 
 The adapter is [`examples/fuse3/nvfuse_fuse.c`](../examples/fuse3/nvfuse_fuse.c).
@@ -48,8 +46,8 @@ retain their NUL-terminated read-buffer convention.
 
 ## Setup and commands
 
-Use the existing dedicated QEMU VM described in the [README](../README.md).
-The VM must have `/dev/fuse` available. Inside its Rocky Linux guest:
+For a host or guest setup from scratch, start with the [user guide](user-guide.md#linux-fuse-mounts).
+The Linux environment must have `/dev/fuse` available. On Rocky Linux:
 
 ```sh
 sudo dnf install fuse3 fuse3-devel pkgconf-pkg-config clang make python3
@@ -63,7 +61,8 @@ separate 1024-entry open-file table. Local and SPDK builds keep their defaults
 and require no FUSE headers or libraries. The old `examples/libfuse` FUSE 2/SPDK
 example remains a separate legacy example.
 
-From the Mac checkout, build and test through the VM's pinned-key SSH helper:
+For a Mac checkout with an already prepared dedicated QEMU VM and pinned-key SSH
+helper (local prerequisites, not included in a fresh clone):
 
 ```sh
 python3 scripts/test-fuse-qemu.py

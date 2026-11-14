@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Exercise the caller cache against owner mutations, eviction and AIO. */
 #include "spdk/stdinc.h"
 #include "nvfuse_core.h"

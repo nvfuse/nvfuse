@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_INDIRECT_TEST_ADAPTER_H
 #define NVFUSE_INDIRECT_TEST_ADAPTER_H
 #include <stdint.h>

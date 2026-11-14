@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 // Full production geometry, compressed metadata only, no regular-file payload.
 #include "indirect_adapter.h"
 #include <algorithm>

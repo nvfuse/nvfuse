@@ -1,9 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include <assert.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
-#include "../spdk_runtime/completion.h"
-#include "../spdk_runtime/api_queue.h"
+#include "../src/spdk_runtime/completion.h"
+#include "../src/spdk_runtime/api_queue.h"
 struct request { struct nvfio_call_link link; struct nvfio_completion completion; unsigned input, result, producer; };
 static struct nvfio_call_queue pending;
 static atomic_int stopping;

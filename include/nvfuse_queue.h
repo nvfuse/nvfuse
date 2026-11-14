@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_QUEUE_H
 #define NVFUSE_QUEUE_H
 #include <stdint.h>

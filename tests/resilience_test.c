@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Stored payload durability and supported concurrency, using ordinary APIs. */
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"

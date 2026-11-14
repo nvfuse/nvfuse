@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Independent volatile/durable storage oracle: an unflushed write can be lost,
  * persist entirely, or persist one sector. Crashes discard the volatile view. */
 #include "nvfuse_journal.h"

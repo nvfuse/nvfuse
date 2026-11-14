@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_TEST_BACKEND_H
 #define NVFUSE_TEST_BACKEND_H
 #include "nvfuse_file.h"

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_FS_MODEL_ADAPTER_H
 #define NVFUSE_FS_MODEL_ADAPTER_H
 #include <stddef.h>

@@ -1,0 +1,140 @@
+NVFUSE licensing and third-party notices
+======================================
+
+NVFUSE's project license remains the GNU General Public License, version 2
+only (GPL-2.0-only), except where a file carries a different explicit notice.
+COPYING contains the complete GPL version 2 text. Existing third-party
+copyright and license notices remain applicable and must be preserved.
+This notice does not transfer copyright to NVFUSE, its maintainer, or an
+employer, and does not change the permissions of previous releases.
+
+Maintainer contact and copyright attribution
+-------------------------------------------
+
+Current project maintainer: Yongseok Oh <yongseok.oh@linecorp.com>.
+
+The current maintainer address is the project contact. Historical email
+addresses, dates, and contributor names in copyright notices are retained
+as attribution records. A change of contact address or employer does not
+replace those records or identify a new copyright holder.
+
+Copyright remains with the respective rights holders. This distribution
+does not assert that the maintainer's current employer owns earlier code,
+or that an individual owns work whose rights belong to an employer.
+Notices for new contributions must reflect their actual rights holder and
+the applicable employment and contribution terms. Existing notices must
+not be replaced by a blanket project-wide name or date range.
+
+Directory-entry hashing
+-----------------------
+
+Files: src/nvfuse_dirhash.c and the accompanying include/nvfuse_dirhash.h interface.
+Implementation source: e2fsprogs v1.43, lib/ext2fs/dirhash.c.
+https://github.com/tytso/e2fsprogs/blob/v1.43/lib/ext2fs/dirhash.c
+
+Copyright (c) 2001 Daniel Phillips
+Copyright (c) 2002 Theodore Ts'o.
+The TEA implementation also credits Jeremy Fitzhardinge (1998); that credit
+and its GPL notice are retained in the source.
+
+The identified upstream implementation is licensed under the GNU Library
+General Public License, version 2 (LGPL-2.0-only). Section 3 explicitly allows
+a given copy to be distributed under the ordinary GNU GPL, version 2. That
+option is exercised for this distribution, which uses GPL-2.0-only notices.
+COPYING.LIB supplies the original Library GPL text and the section 3 basis;
+it does not offer this converted copy under LGPL or change upstream's license.
+
+The hash implementation was checked against that upstream version. NVFUSE
+adaptations include its u32/s32 types and includes, returning zero for an
+unsupported hash version, and a redundant per-word padding reset. Hash
+algorithms, seeds, results and the public function signatures are unchanged
+by this licensing clarification, made on 2026-11-14. The upstream source is
+the basis for this copy; historical local GPL version 3/commercial notices
+are not being treated as permission to relicense someone else's GPLv3 code.
+
+CRC32C hardware helpers
+----------------------
+
+File: CRC32C portion of src/nvfuse_dirhash.c.
+Matching upstream helpers: Linux v2.6.32,
+arch/x86/crypto/crc32c-intel.c.
+https://github.com/torvalds/linux/blob/v2.6.32/arch/x86/crypto/crc32c-intel.c
+
+Copyright (C) 2008 Intel Corporation
+Authors: Austin Zhang <austin_zhang@linux.intel.com>
+         Kent Liu <kent.liu@intel.com>
+License: GNU GPL version 2 only.
+
+NVFUSE adapts the helpers for userspace, its initial all-ones accumulator,
+no final XOR, and local CPU probing; a portable software fallback is also
+present. The upstream attribution is retained alongside that source portion.
+
+Linux list and poison helpers
+-----------------------------
+
+Files: include/list.h and include/poison.h.
+Matching reference: Linux v2.6.39, include/linux/list.h,
+include/linux/poison.h and the list node declarations in include/linux/types.h.
+https://github.com/torvalds/linux/blob/v2.6.39/include/linux/list.h
+https://github.com/torvalds/linux/blob/v2.6.39/include/linux/poison.h
+https://github.com/torvalds/linux/blob/v2.6.39/include/linux/types.h
+
+These internal kernel headers are covered by that tree's GNU GPL version 2
+license; COPYING supplies the license text. The referenced headers do not
+contain individual copyright notices to reproduce. Existing comments remain.
+https://github.com/torvalds/linux/blob/v2.6.39/COPYING
+
+The poison header matches that reference apart from NVFUSE's non-Linux NULL
+list poison pointers. List adaptations include local type declarations and
+includes, new/new_first renamed for C++ compatibility, LIST_HEAD/container_of
+definitions, selected prefetch changes, casts, and formatting. These are
+matching upstream references, not a claim that the original import used that
+exact tag. Neither header is being relicensed from a different upstream grant.
+
+Bitmap helpers
+--------------
+
+File: src/nvfuse_dep.c, ext2fs_set_bit, ext2fs_clear_bit and ext2fs_test_bit.
+Matching implementation: e2fsprogs v1.43, lib/ext2fs/bitops.c.
+https://github.com/tytso/e2fsprogs/blob/v1.43/lib/ext2fs/bitops.c
+
+Copyright (C) 1993, 1994, 1995, 1996 Theodore Ts'o.
+C language equivalents written by Theodore Ts'o, 9/26/92.
+Modified by Pete A. Zaitcev 7/14/95 for big-endian and non-32-bit systems.
+
+The three implementations match after replacing upstream integer types with
+NVFUSE aliases and ignoring formatting. The original license is GNU Library
+GPL version 2. As for the directory hash copy, its section 3 option is exercised
+for GNU GPL version 2 only in this distribution; COPYING.LIB retains the
+original license. Existing NVFUSE author and date notices are preserved.
+
+The former fuse_ext2-labelled Windows major/minor/makedev macro block was
+removed during release preparation. It appeared after all functions, was used
+nowhere in that translation unit, and exported no definitions to other files.
+No fuse_ext2 implementation is retained in that block; this is not a claim
+that the original three macro definitions were traced to a particular revision.
+
+Other existing attributions
+--------------------------
+
+* src/nvfuse_indirect.c identifies its Linux ext2/minix ancestry and preserves
+  credits including Remy Card, Linus Torvalds, Stephen Tweedie, David S.
+  Miller, Jakub Jelinek and Al Viro. Its existing GPL version 2 notice remains.
+* src/rbtree.c and include/rbtree.h identify the Linux red-black tree adaptation
+  by Fu Haiping and preserve Andrea Arcangeli and David Woodhouse credits
+  where present. Their existing GPL version 2-or-later notices remain; the
+  version 2 option is compatible with this distribution's GPL version 2.
+* src/nvfuse_xattr.c preserves the credits for Hankeun Son, Yongseok Oh, and
+  James Morris / Red Hat Inc. Its existing GPL version 2 notice remains.
+
+The targeted list/poison/bitmap review identifies compatible upstream grants
+and required notices for those copies. It is not a legal clearance of all
+historical imports, linked binaries, or employer/contributor ownership.
+
+External dependencies
+---------------------
+
+SPDK, DPDK, fio, libfuse and other linked or test dependencies are separate
+projects with their own licenses. This project notice does not relicense
+them. When redistributing binaries or dependency sources, preserve the
+licenses and notices required by the actual artifacts included.

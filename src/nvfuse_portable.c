@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include "nvfuse_portable.h"
 #include <pthread.h>
 

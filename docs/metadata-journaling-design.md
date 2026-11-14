@@ -183,9 +183,9 @@ For authoritative format and architecture details, see the Linux kernel document
 
 ## Source references
 
-- [Journal engine and recovery](../nvfuse_journal.c), [disk constants and backend API](../include/nvfuse_journal.h).
-- [Backend, format and mount ordering](../nvfuse_file.c), [cache metadata classification](../nvfuse_buffer_cache.c).
-- [Automatic/user transaction boundaries](../nvfuse_tx.c), [public API wrappers](../nvfuse_tx_wrappers.c).
+- [Journal engine and recovery](../src/nvfuse_journal.c), [disk constants and backend API](../include/nvfuse_journal.h).
+- [Backend, format and mount ordering](../src/nvfuse_file.c), [cache metadata classification](../src/nvfuse_buffer_cache.c).
+- [Automatic/user transaction boundaries](../src/nvfuse_tx.c), [public API wrappers](../src/nvfuse_tx_wrappers.c).
 - [Independent persistence model](../tests/journal_engine_test.c), [filesystem TX oracle](../tests/transaction_test.c), [crash runner](../tests/run_transactions.py).
 
 

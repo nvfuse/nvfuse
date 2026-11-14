@@ -132,7 +132,7 @@ counters are nested in their parent stages; do not add overlapping timers.
 Inclusive sync time can contain bookkeeping not assigned to an individual stage.
 Store run-specific logs, latency samples and comparisons under `build/test-results/`.
 
-Implementation: [`nvfuse_primary_journal.c`](../nvfuse_primary_journal.c),
-[`nvfuse_journal.c`](../nvfuse_journal.c),
-[`nvfuse_journal_v3.inc`](../nvfuse_journal_v3.inc), and
+Implementation: [`src/nvfuse_primary_journal.c`](../src/nvfuse_primary_journal.c),
+[`src/nvfuse_journal.c`](../src/nvfuse_journal.c),
+[`src/nvfuse_journal_v3.inc`](../src/nvfuse_journal_v3.inc), and
 [`include/nvfuse_primary_journal.h`](../include/nvfuse_primary_journal.h).

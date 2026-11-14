@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 // Independent namespace and byte-content oracle over the real filesystem API.
 #include "fs_model_adapter.h"
 #include <algorithm>

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Single filesystem owner, existing SPDK I/O reactor. Async regular data stays
  * on the normal queues; protected blocks are staged by the owner and their
  * completions are published by the I/O thread, preserving SPSC ownership. */

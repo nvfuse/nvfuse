@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_NVME_TRANSPORT_H
 #define NVFUSE_NVME_TRANSPORT_H
 #include <stddef.h>

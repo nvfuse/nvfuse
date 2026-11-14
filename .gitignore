@@ -23,3 +23,12 @@ mkfs
 xattr_test
 
 /build/
+
+# Local research, run outputs and host-specific lab automation are not releases.
+.DS_Store
+__pycache__/
+*.pyc
+/docs/research/
+/output/
+/tmp/
+/tests/run_nvme_soak.py

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* File-image benchmark. Every measured group ends at a durable journal commit. */
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"

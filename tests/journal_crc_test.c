@@ -1,6 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Independent CRC oracle, including unaligned/tail inputs and process policy.
  * Include the engine to compare private implementations without exporting them. */
-#include "../nvfuse_journal.c"
+#include "../src/nvfuse_journal.c"
 #include <assert.h>
 #include <stdio.h>
 static uint32_t bitwise(const void *buf,size_t len) {

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* FIO adapter. No NVFUSE/SPDK internal types cross the runtime interface. */
 #include "config-host.h"
 #include "fio.h"

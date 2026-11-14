@@ -1,5 +1,9 @@
 # FIO through the primary NVFUSE SPDK API
 
+For prerequisites and a complete first-run walkthrough, start with the
+[user guide](user-guide.md#primary-apispdk-on-linux). This page is the engine
+configuration and workload reference.
+
 FIO can access files through NVFUSE's public asynchronous API without a FUSE mount. The modern engine uses the primary SPDK bdev reactor, not the synchronous compatibility transport or FIO's raw SPDK engine.
 
 ```

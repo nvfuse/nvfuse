@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #include "fs_model_adapter.h"
 #include <algorithm>
 #include <array>

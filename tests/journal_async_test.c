@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* A deterministic gate proves the commit response precedes checkpoint, while
  * all protected images remain owned until retirement or recovery. */
 #include "nvfuse_journal.h"

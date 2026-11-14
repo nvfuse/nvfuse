@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Linux x86_64 user-space IP sampler. No changes to the target executable. */
 #define _GNU_SOURCE
 #include <linux/perf_event.h>

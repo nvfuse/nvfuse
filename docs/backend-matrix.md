@@ -1,5 +1,8 @@
 # Interfaces and storage backends
 
+For a guided first build, format/reopen, and mount, see the [user guide](user-guide.md).
+For coverage and regression selection, see the [validation guide](testing-guide.md).
+
 **API + SPDK is the primary performance configuration.** The other combinations
 provide ordinary application access, compatibility, development and testing.
 Adding them must not introduce a common mutex, extra data copy, FUSE dependency,

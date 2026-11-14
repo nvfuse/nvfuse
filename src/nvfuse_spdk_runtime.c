@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Keep NVFUSE/SPDK and FIO headers in separate translation units: both embed
  * Linux-derived tree/list declarations with incompatible public names. */
 #include "spdk/stdinc.h"

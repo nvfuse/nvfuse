@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_PORTABLE_H
 #define NVFUSE_PORTABLE_H
 

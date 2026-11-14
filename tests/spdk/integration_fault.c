@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Reuse the seeded payload oracle; fault barriers exist only in test builds. */
 #define main framework_main
 #include "../framework_test.c"

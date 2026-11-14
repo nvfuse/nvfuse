@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Actual FUSE 3 callbacks and journaled images, without a system mount. */
 #define main nvfuse_fuse_main
 #include "../examples/fuse3/nvfuse_fuse.c"

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Reuse the namespace/payload recovery oracle; only this test executable links
  * the SPDK error-injection API. The failure occurs in actual bdev completions. */
 #define main primary_journal_test_main

@@ -8,11 +8,11 @@ the existing buffer cache, and journal v2/v3 recovery formats.
 ## Application entry points
 
 Include `nvfuse_spdk_runtime.h` from `include/` in a primary-runtime application.
-`make -f Makefile.spdk` includes `nvfuse_spdk_runtime.c` in
+`make -f Makefile.spdk` includes `src/nvfuse_spdk_runtime.c` in
 `build/spdk-primary/nvfuse.a`. Link this archive and the SPDK event/bdev
 libraries, as shown by `tests/spdk/Makefile.tools` and the fio engine Makefile;
 applications do not compile or include the runtime implementation. Private queue,
-cache-policy, statistics and writeback helpers live in `spdk_runtime/`. The fio
+cache-policy, statistics and writeback helpers live in `src/spdk_runtime/`. The fio
 example contains only the fio adapter. The cache-ordering test builds a separate
 `NVFIO_TEST` runtime; these hooks are absent from the ordinary archive.
 

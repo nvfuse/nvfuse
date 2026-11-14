@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Exercise the real list/hash transitions, including colliding inode keys. */
 #include "nvfuse_core.h"
 #include "nvfuse_inode_cache.h"

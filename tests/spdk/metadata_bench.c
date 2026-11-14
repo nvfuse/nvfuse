@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* A common workload for direct API/SPDK and POSIX references. This is a
  * purpose-built mdtest-style workload, not the mdtest or fs_mark executable. */
 #ifdef NVMETA_POSIX

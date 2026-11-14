@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Implementation aliases; include before public declarations. */
 #ifdef NVFUSE_FILE_BACKEND
 #define nvfuse_opendir nvfuse_opendir_impl

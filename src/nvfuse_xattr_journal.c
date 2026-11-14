@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Bounded parser for the existing inline length-prefixed xattr encoding. */
 #include "nvfuse_portable.h"
 #include "nvfuse_core.h"

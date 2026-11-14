@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Read-only, independent checker for the native file-image test format.
  * It never mounts, repairs, or calls the filesystem block-mapping routines. */
 #include "nvfuse_core.h"

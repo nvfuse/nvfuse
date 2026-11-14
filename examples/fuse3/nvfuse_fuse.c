@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Optional Linux FUSE 3 frontend. The filesystem and device logic stay in NVFUSE. */
 #define FUSE_USE_VERSION 31
 #include <fuse.h>

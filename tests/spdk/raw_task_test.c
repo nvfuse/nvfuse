@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Exercise persistent raw-task completion failures on disposable bdev images. */
 int primary_journal_test_main(int, char **);
 #define main primary_journal_test_main

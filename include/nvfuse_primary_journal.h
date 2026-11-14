@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_PRIMARY_JOURNAL_H
 #define NVFUSE_PRIMARY_JOURNAL_H
 #include "nvfuse_journal.h"

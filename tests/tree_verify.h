@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFUSE_TEST_TREE_VERIFY_H
 #define NVFUSE_TEST_TREE_VERIFY_H
 /* Walk the API namespace, including lazy empty directories, and read every

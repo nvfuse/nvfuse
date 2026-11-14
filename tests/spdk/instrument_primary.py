@@ -16,9 +16,9 @@ def instrument(source_dir, output_dir):
     if output_dir.exists():
         raise ValueError('output directory must be new')
     output_dir.mkdir(parents=True)
-    files = list(source_dir.glob('*.c')) + [source_dir / 'Makefile.spdk']
+    files = list((source_dir / 'src').glob('*.c')) + [source_dir / 'Makefile.spdk']
     files += list((source_dir / 'include').glob('*.h'))
-    files += list(source_dir.glob('*.inc')) + list((source_dir / 'spdk_runtime').glob('*'))
+    files += list((source_dir / 'src').glob('*.inc')) + list((source_dir / 'src/spdk_runtime').glob('*'))
     files += [p for p in (source_dir / 'examples/fio_plugin/modern').iterdir()
               if p.suffix in ('.c', '.h', '.map') or p.name == 'Makefile']
     manifest = {}
@@ -38,27 +38,27 @@ def instrument(source_dir, output_dir):
 
     patch('include/nvfuse_aio.h', '\tu64 submit_tsc;', '\tu64 *stage_tsc; /* diagnostic copy only */\n\tu64 submit_tsc;')
     patch('include/nvfuse_io_manager.h', 'struct io_job {', 'struct io_job {\n    uint64_t *stage_tsc; /* diagnostic copy only */')
-    patch('nvfuse_core.c', '\tres = rte_mempool_get_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);',
+    patch('src/nvfuse_core.c', '\tres = rte_mempool_get_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);',
           '\tres = rte_mempool_get_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);\n    if (!res) for (int i = 0; i < numjobs; i++) jobs[i]->stage_tsc = NULL;')
-    patch('nvfuse_reactor.c', '\treq->iovcnt = 1;', '\treq->stage_tsc = NULL;\n\treq->iovcnt = 1;')
-    patch('nvfuse_reactor.c', '\ttarget = task->target;\n', '\ttarget = task->target;\n    if (req->stage_tsc) req->stage_tsc[6] = spdk_get_ticks();\n')
-    patch('nvfuse_reactor.c', '\t\ttarget->current_queue_depth++;', '\t\tif (req->stage_tsc) req->stage_tsc[5] = spdk_get_ticks();\n\t\ttarget->current_queue_depth++;')
-    patch('nvfuse_aio.c', '\t\tjobs[job_count]->tag1 = (void *)areq;', '\t\tjobs[job_count]->tag1 = (void *)areq;\n        jobs[job_count]->stage_tsc = areq->stage_tsc;')
+    patch('src/nvfuse_reactor.c', '\treq->iovcnt = 1;', '\treq->stage_tsc = NULL;\n\treq->iovcnt = 1;')
+    patch('src/nvfuse_reactor.c', '\ttarget = task->target;\n', '\ttarget = task->target;\n    if (req->stage_tsc) req->stage_tsc[6] = spdk_get_ticks();\n')
+    patch('src/nvfuse_reactor.c', '\t\ttarget->current_queue_depth++;', '\t\tif (req->stage_tsc) req->stage_tsc[5] = spdk_get_ticks();\n\t\ttarget->current_queue_depth++;')
+    patch('src/nvfuse_aio.c', '\t\tjobs[job_count]->tag1 = (void *)areq;', '\t\tjobs[job_count]->tag1 = (void *)areq;\n        jobs[job_count]->stage_tsc = areq->stage_tsc;')
     inode_anchor = ('    if (!ictx && !fast_read) goto free_jobs;'
-                    if 'if (!ictx && !fast_read)' in (output_dir / 'nvfuse_aio.c').read_text()
+                    if 'if (!ictx && !fast_read)' in (output_dir / 'src/nvfuse_aio.c').read_text()
                     else '    if (!ictx) goto free_jobs;')
-    patch('nvfuse_aio.c', inode_anchor, inode_anchor + '\n    if (areq->stage_tsc) areq->stage_tsc[2] = spdk_get_ticks();')
+    patch('src/nvfuse_aio.c', inode_anchor, inode_anchor + '\n    if (areq->stage_tsc) areq->stage_tsc[2] = spdk_get_ticks();')
     # Mapping ends before overwrite timestamp/size accounting. Older sources
     # combined the write and size predicates; both use the same stage boundary.
     mapping_end = ('#ifndef NVFUSE_FILE_BACKEND\n    if (write) {'
                    if '#ifndef NVFUSE_FILE_BACKEND\n    if (write) {' in
-                   (output_dir / 'nvfuse_aio.c').read_text() else
+                   (output_dir / 'src/nvfuse_aio.c').read_text() else
                    '    if (write && ictx->ictx_inode->i_size < areq->offset + areq->bytes)')
-    patch('nvfuse_aio.c', mapping_end,
+    patch('src/nvfuse_aio.c', mapping_end,
           '    if (areq->stage_tsc) areq->stage_tsc[3] = spdk_get_ticks();\n' + mapping_end)
-    patch('nvfuse_aio.c', '\tres = reactor_submit_reqs(sb->target, aioq->task, jobs, job_count);',
+    patch('src/nvfuse_aio.c', '\tres = reactor_submit_reqs(sb->target, aioq->task, jobs, job_count);',
           '\tif (areq->stage_tsc) areq->stage_tsc[4] = spdk_get_ticks();\n\tres = reactor_submit_reqs(sb->target, aioq->task, jobs, job_count);')
-    runtime = 'nvfuse_spdk_runtime.c'
+    runtime = 'src/nvfuse_spdk_runtime.c'
     patch(runtime, '    struct nvfio_client *next;',
           '    uint64_t profile_sequence, profile_start, profile_count[2], profile_invalid[2];\n    uint64_t profile_sum[2][8], profile_max[2][8];\n    struct nvfio_client *next;')
     patch(runtime, 'struct nvfio_request { struct nvfuse_aio_req aio;',

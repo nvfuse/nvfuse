@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
 *	NVFUSE (NVMe based File System in Userspace)
 *	Copyright (C) 2017 Yongseok Oh <yongseok.oh@sk.com>
@@ -14,18 +15,22 @@
 */
 
 /*
- * Collection of some functions and codes which are dependent to license issue.
+ * ext2fs_set_bit, ext2fs_clear_bit and ext2fs_test_bit below match
+ * e2fsprogs v1.43, lib/ext2fs/bitops.c, with NVFUSE integer type aliases.
+ * Copyright (C) 1993, 1994, 1995, 1996 Theodore Ts'o.
+ *
+ * The original grant is GNU Library GPL version 2. Its section 3 option
+ * is exercised to distribute this copy under GNU GPL version 2 only.
+ * See COPYING, COPYING.LIB and NOTICE.
+ *
+ * For the benefit of those who are trying to port Linux to another
+ * architecture, here are some C-language equivalents.  You should
+ * recode these in the native assmebly language, if at all possible.
+ *
+ * C language equivalents written by Theodore Ts'o, 9/26/92.
+ * Modified by Pete A. Zaitcev 7/14/95 to be portable to big endian
+ * systems, as well as non-32 bit systems.
  */
-
-///*
-//* For the benefit of those who are trying to port Linux to another
-//* architecture, here are some C-language equivalents.  You should
-//* recode these in the native assmebly language, if at all possible.
-//*
-//* C language equivalents written by Theodore Ts'o, 9/26/92.
-//* Modified by Pete A. Zaitcev 7/14/95 to be portable to big endian
-//* systems, as well as non-32 bit systems.
-//*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,10 +97,3 @@ s32 fat_filename(const s8 *path, s8 *dest)
 	strcpy(dest, slash);
 	return 0;
 }
-
-/* ported from fuse_ext2 project */
-#if NVFUSE_OS == NVFUSE_OS_WINDOWS
-#define major(dev) ((int)(((unsigned int) (dev) >> 8) & 0xff))
-#define minor(dev) ((int)((dev) & 0xff))
-#define makedev(x, y) (x | y)
-#endif

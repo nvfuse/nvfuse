@@ -17,22 +17,22 @@ extern _Thread_local uint64_t *nvfuse_hot_profile;
 '''
     (output/'include/nvfuse_hot_profile.h').write_text(header)
     descriptors=[
-        ('nvfuse_core.c','nvfuse_read_inode','sb, ictx_given, ino',False),
-        ('nvfuse_inode_cache.c','nvfuse_get_ictx','sb, ino',False),
-        ('nvfuse_buffer_cache.c','nvfuse_find_bh_in_ictx','sb, ictx, ino, lbno',False),
-        ('nvfuse_buffer_cache.c','nvfuse_alloc_buffer_head','sb',False),
-        ('nvfuse_buffer_cache.c','nvfuse_get_bc','sb, ictx, ino, lblock, sync_read',False),
-        ('nvfuse_buffer_cache.c','nvfuse_hash_lookup','bm, key',False),
-        ('nvfuse_buffer_cache.c','nvfuse_move_buffer_list_nolock','sb, bc, desired_type, tail',True),
-        ('nvfuse_buffer_cache.c','nvfuse_release_bh','sb, bh, tail, dirty',True),
-        ('nvfuse_indirect.c','nvfuse_get_block','sb, ictx, lblock, maxblocks, num_alloc_blocks, pblock, create',False),
-        ('nvfuse_buffer_cache.c','_nvfuse_get_bh','sb, ictx, ino, lblock, sync_read, is_meta',False)]
-    if 'nvfuse_get_block_cached(' in (output/'nvfuse_indirect.c').read_text():
-        descriptors[8]=('nvfuse_indirect.c','nvfuse_get_block_cached','sb, ictx, lblock, maxblocks, count, physical',False)
-    if 'nvfuse_try_cached_read_mapping(' in (output/'nvfuse_indirect.c').read_text():
+        ('src/nvfuse_core.c','nvfuse_read_inode','sb, ictx_given, ino',False),
+        ('src/nvfuse_inode_cache.c','nvfuse_get_ictx','sb, ino',False),
+        ('src/nvfuse_buffer_cache.c','nvfuse_find_bh_in_ictx','sb, ictx, ino, lbno',False),
+        ('src/nvfuse_buffer_cache.c','nvfuse_alloc_buffer_head','sb',False),
+        ('src/nvfuse_buffer_cache.c','nvfuse_get_bc','sb, ictx, ino, lblock, sync_read',False),
+        ('src/nvfuse_buffer_cache.c','nvfuse_hash_lookup','bm, key',False),
+        ('src/nvfuse_buffer_cache.c','nvfuse_move_buffer_list_nolock','sb, bc, desired_type, tail',True),
+        ('src/nvfuse_buffer_cache.c','nvfuse_release_bh','sb, bh, tail, dirty',True),
+        ('src/nvfuse_indirect.c','nvfuse_get_block','sb, ictx, lblock, maxblocks, num_alloc_blocks, pblock, create',False),
+        ('src/nvfuse_buffer_cache.c','_nvfuse_get_bh','sb, ictx, ino, lblock, sync_read, is_meta',False)]
+    if 'nvfuse_get_block_cached(' in (output/'src/nvfuse_indirect.c').read_text():
+        descriptors[8]=('src/nvfuse_indirect.c','nvfuse_get_block_cached','sb, ictx, lblock, maxblocks, count, physical',False)
+    if 'nvfuse_try_cached_read_mapping(' in (output/'src/nvfuse_indirect.c').read_text():
         # This includes inode acquisition, mapping and inode-context release.
         names[8] = 'cached_read_total'
-        descriptors[8]=('nvfuse_indirect.c','nvfuse_try_cached_read_mapping','sb, ino, offset, bytes, physical',False)
+        descriptors[8]=('src/nvfuse_indirect.c','nvfuse_try_cached_read_mapping','sb, ino, offset, bytes, physical',False)
     for number,(filename,name,args,is_void) in enumerate(descriptors):
         p=output/filename;s=p.read_text()
         match=re.search(r'(?m)^([^\n;{}]*\b'+re.escape(name)+r'\([^;{}]*\))\n\{',s)
@@ -46,8 +46,8 @@ extern _Thread_local uint64_t *nvfuse_hot_profile;
         if '#include "nvfuse_hot_profile.h"' not in s:
             s=s.replace('#include "nvfuse_core.h"','#include "nvfuse_core.h"\n#include "nvfuse_hot_profile.h"',1)
         p.write_text(s)
-    p=output/'nvfuse_aio.c';s=p.read_text().replace('#include "nvfuse_core.h"','#include "nvfuse_core.h"\n#include "nvfuse_hot_profile.h"\n_Thread_local uint64_t *nvfuse_hot_profile;',1);p.write_text(s)
-    p=output/'nvfuse_spdk_runtime.c';s=p.read_text().replace('#include "spdk_runtime/spsc.h"','#include "spdk_runtime/spsc.h"\n#include "nvfuse_hot_profile.h"')
+    p=output/'src/nvfuse_aio.c';s=p.read_text().replace('#include "nvfuse_core.h"','#include "nvfuse_core.h"\n#include "nvfuse_hot_profile.h"\n_Thread_local uint64_t *nvfuse_hot_profile;',1);p.write_text(s)
+    p=output/'src/nvfuse_spdk_runtime.c';s=p.read_text().replace('#include "spdk_runtime/spsc.h"','#include "spdk_runtime/spsc.h"\n#include "nvfuse_hot_profile.h"')
     s=s.replace('uint64_t profile_sum[2][8], profile_max[2][8];','uint64_t profile_sum[2][8], profile_max[2][8], detail_sum[2][20];')
     s=s.replace('struct nvfio_request { uint64_t stage_tsc[9];','struct nvfio_request { uint64_t detail[20]; uint64_t stage_tsc[9];')
     s=s.replace('    int rc = nvfuse_aio_queue_submission(rt.handle, &lane->queue, &r->aio);', '''    nvfuse_hot_profile = r->aio.stage_tsc ? r->detail : NULL;

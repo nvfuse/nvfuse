@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 // Enumerate every inode bitmap slot of the maximum journal-format volume.
 #include "inode_space_adapter.h"
 #include <chrono>

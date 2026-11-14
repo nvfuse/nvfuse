@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Actual primary-reactor filesystem crash/reopen test, private fixtures only.
  * The independent journal persistence oracle covers torn/unflushed I/O; these
  * process exits validate the real adapter, allocator and namespace integration. */

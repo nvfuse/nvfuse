@@ -58,6 +58,40 @@ Test Script
 	+ Generating AIO workloads with measurements of bandwidth, iops, and latency
 	+ Sync workloads with measurements of bandwdith, iops and latency	
 
+Real-NVMe Stability Qualification
+================================
+	Primary path: API + SPDK. Compatibility path: FUSE + SPDK.
+	Validate through NVFUSE, not only raw-device I/O. Keep failed volumes and
+	logs; recovery checks must reopen the original volume without formatting.
+
+	[ ] Review the 24-hour soak launched on 2026-11-13 after it finishes.
+	    - Sequential API/FUSE ownership, journaling enabled, 95-97% usage.
+	    - Record completed fill/verify/delete cycles, peak usage, actual file
+	      and directory counts, sizes, bytes written/read, and all errors.
+	    - Confirm full API bulk-data verification, full small-file verification
+	      across both interfaces, and sampled FUSE bulk-data verification.
+	    - Check rename/hardlink/truncate, clean reopen/remount, and space/inode
+	      reclamation after deletion, accounting for retained audit roots.
+	    - Check memory/resource growth across cycles; add periodic process
+	      memory sampling if the existing logs do not establish this.
+	    - Confirm final driver/hugepage restoration and NVMe SMART health.
+	[ ] Inject process termination at journal commit/checkpoint boundaries;
+	    reopen without formatting and verify committed data and namespace.
+	[ ] Separately test actual power-loss/reset durability and recovery;
+	    clean remounts and process termination do not establish this.
+	[ ] Test complete block ENOSPC and inode exhaustion, including concurrent
+	    allocation, partial-write/error semantics, deletion, and space reuse.
+	    First replace primary-path exhaustion assertions with safe errors;
+	    the 95-97% soak reserve intentionally excludes complete exhaustion.
+	[ ] Inject I/O errors, completion delays/timeouts, and device loss during
+	    filesystem operations; verify error propagation and retained-volume
+	    recovery without silently retrying through a new format.
+	[ ] Stress concurrent mutation in the same directories, including name
+	    collisions, rename/unlink/link races, open-file deletion, and truncate
+	    versus I/O, with content, link-count, and exact-namespace checks.
+	[ ] Repeat long-duration qualification after fixes; a successful short
+	    smoke run or elapsed runtime alone is not a stability pass.
+
 Miscellaneous
 =============
 	+ Debug message print

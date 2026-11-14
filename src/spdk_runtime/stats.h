@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 #ifndef NVFIO_STATS_H
 #define NVFIO_STATS_H
 #include <stdint.h>

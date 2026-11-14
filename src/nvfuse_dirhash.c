@@ -1,25 +1,23 @@
-/*
- * dirhash.c -- Calculate the hash of a directory entry
+/* SPDX-License-Identifier: GPL-2.0-only
+ * Directory-entry hashing and NVFUSE CRC32C helpers.
  *
- * Copyright (c) 2001  Daniel Phillips
- *
+ * Copyright (c) 2001 Daniel Phillips
  * Copyright (c) 2002 Theodore Ts'o.
  *
- *   This program is free software.
- *   You can redistribute it and/or modify it under the terms of either
- *   (1) the GNU General Public License; either version 3 of the License,
- *   or (at your option) any later version as published by
- *   the Free Software Foundation; or (2) obtain a commercial license
- *   by contacting the Author.
+ * Hash implementation source: e2fsprogs v1.43, lib/ext2fs/dirhash.c.
+ * That upstream copy is available under the GNU Library GPL, version 2.
+ * For this distribution, its section 3 option is exercised to distribute
+ * this copy under the ordinary GNU GPL, version 2. See NOTICE and COPYING.
+ * This does not change the license of the upstream project or old releases.
  *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
  *
- *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See COPYING
+ * for the GNU General Public License, version 2.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -269,6 +267,14 @@ s32 ext2fs_dirhash(int version, const char *name, int len,
 	return 0;
 }
 
+/* CRC32C hardware helpers derived from Linux v2.6.32,
+ * arch/x86/crypto/crc32c-intel.c, licensed under GPL version 2.
+ * Copyright (C) 2008 Intel Corporation
+ * Authors: Austin Zhang <austin_zhang@linux.intel.com>
+ *          Kent Liu <kent.liu@intel.com>
+ * NVFUSE adaptations: userspace types/CPUID probing, fixed initial ~0U
+ * accumulator with no final XOR, and the portable software fallback.
+ */
 #if BITS_PER_LONG == 64
 #define REX_PRE "0x48, "
 #define SCALE_F 8

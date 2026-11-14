@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Same public API oracle on image files, Linux block devices and SPDK NVMe. */
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"

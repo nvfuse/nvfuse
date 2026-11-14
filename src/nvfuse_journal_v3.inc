@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+
 /* Experimental v3, included by the engine to share endian/CRC/I/O helpers.
  * Append-only within an epoch. A complete checksummed record plus a completed
  * flush commits a transaction. Home writes occur only at epoch reclamation.

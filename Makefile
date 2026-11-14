@@ -33,7 +33,8 @@ CFLAGS += -march=native -m64
 CFLAGS += $(WARNING_OPTION) -fPIC
 
 
-OBJS=$(SRCS:.c=.o)
+LEGACY_BUILD = build/legacy
+OBJS=$(addprefix $(LEGACY_BUILD)/,$(SRCS))
 
 CC=gcc
 
@@ -41,10 +42,11 @@ CC=gcc
 
 # .PHONY: all clean
 
-.c.o:
+$(LEGACY_BUILD)/%.o: src/%.c
+	@mkdir -p $(dir $@)
 	@echo "Compiling $< ..."
 	@$(RM) $@
-	$(CC) $(OPTIMIZATION) $(CEPH_COMPILE) $(DEBUG) -c -D_GNU_SOURCE $(CFLAGS) -o $@ -ldl $<
+	$(CC) $(OPTIMIZATION) $(CEPH_COMPILE) $(DEBUG) -MMD -MP -c -D_GNU_SOURCE $(CFLAGS) -o $@ -ldl $<
 
 all:  $(LIB_NVFUSE) xattr_test reactor helloworld libfuse regression_test perf control_plane_proc fsync_test create_1m_files mkfs #fio_plugin 
 
@@ -85,6 +87,7 @@ control_plane_proc:
 	make -C examples/control_plane_proc
 
 clean:
+	rm -rf $(LEGACY_BUILD)
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
 	make -C examples/fio_plugin/ clean
 	make -C examples/reactor/ clean
@@ -99,6 +102,7 @@ clean:
 	make -C examples/xattr_test/ clean	
 
 distclean:
+	rm -rf $(LEGACY_BUILD)
 	rm -f Makefile.bak *.o *.a *~ .depend $(LIB_NVFUSE)
 install: 
 	chmod 755 $(LIB_NVFUSE)
@@ -108,15 +112,12 @@ uninstall:
 	rm -f ../bin/$(LIB_NVFUSE)
 dep:    depend
 
-depend:
-	$(CC) -MM $(CFLAGS) $(SRCS) 1>.depend
+depend: $(OBJS)
 
 #
 # include dependency files if they exist
 #
-ifneq ($(wildcard .depend),)
-include .depend
-endif
+-include $(OBJS:.o=.d)
 
 
 # Native file-image development targets, separate from the SPDK build.
