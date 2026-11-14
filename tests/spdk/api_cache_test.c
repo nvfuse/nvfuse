@@ -3,7 +3,8 @@
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
-#include "runtime.h"
+#define NVFIO_TEST
+#include "nvfuse_spdk_runtime.h"
 #include "nvfuse_primary_journal.h"
 #define nvfio_execute nvfio_execute_serialized
 #include <stdatomic.h>
@@ -11,8 +12,6 @@
 #define BYTES (80 * CLUSTER_SIZE + 731)
 static int fd, direct_fd;
 static atomic_int failed, done, owner_held;
-extern int nvfio_test_api_pending(void);
-extern int nvfio_test_control_call(int (*)(struct nvfuse_handle *, void *), void *);
 static int hold_owner(struct nvfuse_handle *h, void *unused)
 {
     (void)h; (void)unused;
@@ -162,11 +161,6 @@ static unsigned wb_written;
 static uint64_t wb_overlap_at;
 static atomic_int wb_mutation_started;
 static atomic_int wb_mutation_done;
-extern int nvfio_test_buffered_wb_enabled(void);
-extern int nvfio_test_buffered_wb_pending(void);
-extern uint64_t nvfio_test_buffered_wb_offset(void);
-extern int nvfio_test_buffered_wb_entered(void);
-extern void nvfio_test_buffered_wb_pause(int);
 static char wb_pattern(unsigned i){return(char)(i*41+i/233+37);}
 static int wb_open(struct nvfuse_handle*h,void*arg)
 {

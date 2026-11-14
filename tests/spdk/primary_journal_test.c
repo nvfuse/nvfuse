@@ -7,7 +7,7 @@
 #include "nvfuse_inode_cache.h"
 #include "nvfuse_indirect.h"
 #include "nvfuse_primary_journal.h"
-#include "runtime.h"
+#include "nvfuse_spdk_runtime.h"
 #define nvfio_execute nvfio_execute_serialized
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL %d: %s\n", __LINE__, #x); return -EIO; } } while (0)
 static const char *phase;

@@ -1,5 +1,5 @@
-#ifndef NVFUSE_FIO_RUNTIME_H
-#define NVFUSE_FIO_RUNTIME_H
+#ifndef NVFUSE_SPDK_RUNTIME_H
+#define NVFUSE_SPDK_RUNTIME_H
 #include <stddef.h>
 #include <stdint.h>
 struct nvfio_client;

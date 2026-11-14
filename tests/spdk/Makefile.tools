@@ -4,11 +4,11 @@ NVFUSE_ARCHIVE ?= $(NVFUSE_ROOT_DIR)/build/spdk-primary/nvfuse.a
 APP ?= primary_journal_test
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
-C_SRCS = $(APP).c runtime_bridge.c
+C_SRCS = $(APP).c
 ifeq ($(APP),api_cache_test)
 C_SRCS = api_cache_test.c api_cache_runtime.c
 endif
-CFLAGS += -DDEBUG -DSPDK_ENABLED -DNVFUSE_PRIMARY_JOURNAL -D_GNU_SOURCE -I$(NVFUSE_ROOT_DIR)/include -I$(NVFUSE_ROOT_DIR)/examples/fio_plugin/modern -I$(SPDK_ROOT_DIR)/dpdk/build/include
+CFLAGS += -DDEBUG -DSPDK_ENABLED -DNVFUSE_PRIMARY_JOURNAL -D_GNU_SOURCE -I$(NVFUSE_ROOT_DIR)/include -I$(SPDK_ROOT_DIR)/dpdk/build/include
 ifneq (,$(filter $(APP),home_checkpoint_test raw_task_test))
 CFLAGS += -I$(SPDK_ROOT_DIR)
 endif
@@ -16,5 +16,4 @@ LIBS += $(NVFUSE_ARCHIVE) -lm -lpthread -laio -luuid
 SPDK_LIB_LIST += event $(EVENT_BDEV_SUBSYSTEM) $(KEYRING_MODULES_LIST) $(BLOCKDEV_MODULES_LIST) $(SOCK_MODULES_LIST) bdev
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
 $(APP): $(NVFUSE_ARCHIVE)
-runtime_bridge.o: ../../examples/fio_plugin/modern/runtime.c ../../examples/fio_plugin/modern/runtime.h ../../examples/fio_plugin/modern/completion.h ../../examples/fio_plugin/modern/api_queue.h ../../examples/fio_plugin/modern/buffered_wb.inc
-api_cache_runtime.o: ../../examples/fio_plugin/modern/runtime.c ../../examples/fio_plugin/modern/runtime.h ../../examples/fio_plugin/modern/completion.h ../../examples/fio_plugin/modern/api_queue.h ../../examples/fio_plugin/modern/buffered_wb.inc
+api_cache_runtime.o: ../../nvfuse_spdk_runtime.c ../../include/nvfuse_spdk_runtime.h $(wildcard ../../spdk_runtime/*.h ../../spdk_runtime/*.inc)

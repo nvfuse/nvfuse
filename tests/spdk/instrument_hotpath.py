@@ -47,7 +47,7 @@ extern _Thread_local uint64_t *nvfuse_hot_profile;
             s=s.replace('#include "nvfuse_core.h"','#include "nvfuse_core.h"\n#include "nvfuse_hot_profile.h"',1)
         p.write_text(s)
     p=output/'nvfuse_aio.c';s=p.read_text().replace('#include "nvfuse_core.h"','#include "nvfuse_core.h"\n#include "nvfuse_hot_profile.h"\n_Thread_local uint64_t *nvfuse_hot_profile;',1);p.write_text(s)
-    p=output/'examples/fio_plugin/modern/runtime.c';s=p.read_text().replace('#include "spsc.h"','#include "spsc.h"\n#include "nvfuse_hot_profile.h"')
+    p=output/'nvfuse_spdk_runtime.c';s=p.read_text().replace('#include "spdk_runtime/spsc.h"','#include "spdk_runtime/spsc.h"\n#include "nvfuse_hot_profile.h"')
     s=s.replace('uint64_t profile_sum[2][8], profile_max[2][8];','uint64_t profile_sum[2][8], profile_max[2][8], detail_sum[2][20];')
     s=s.replace('struct nvfio_request { uint64_t stage_tsc[9];','struct nvfio_request { uint64_t detail[20]; uint64_t stage_tsc[9];')
     s=s.replace('    int rc = nvfuse_aio_queue_submission(rt.handle, &lane->queue, &r->aio);', '''    nvfuse_hot_profile = r->aio.stage_tsc ? r->detail : NULL;

@@ -7,7 +7,7 @@ PRIMARY_SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
  nvfuse_gettimeofday.c nvfuse_bp_tree.c nvfuse_dirhash.c nvfuse_misc.c \
  nvfuse_mkfs.c nvfuse_malloc.c nvfuse_indirect.c nvfuse_api.c nvfuse_aio.c \
  rbtree.c nvfuse_ipc_ring.c nvfuse_control_plane.c nvfuse_dep.c \
- nvfuse_flushwork.c nvfuse_reactor.c nvfuse_xattr.c nvfuse_journal.c nvfuse_primary_journal.c
+ nvfuse_flushwork.c nvfuse_reactor.c nvfuse_xattr.c nvfuse_journal.c nvfuse_primary_journal.c nvfuse_spdk_runtime.c
 PRIMARY_OBJECTS = $(PRIMARY_SOURCES:%.c=$(SPDK_BUILD)/%.o)
 CC ?= gcc
 PRIMARY_CFLAGS = -std=gnu11 -O3 -g -DDEBUG -march=native -fPIC -Wall -Werror -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast -Wno-sign-compare

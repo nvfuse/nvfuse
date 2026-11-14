@@ -38,10 +38,11 @@ def instrument(source, output):
         raise ValueError('output directory must be new')
     files = list(source.glob('*.c')) + [source / 'Makefile.spdk']
     files += list((source / 'include').glob('*.h'))
+    files += list(source.glob('*.inc')) + list((source / 'spdk_runtime').glob('*'))
     files += [p for p in (source / 'examples/fio_plugin/modern').iterdir()
               if p.suffix in ('.c', '.h', '.map') or p.name == 'Makefile']
     files += [source / 'tests/spdk' / n for n in
-              ['metadata_bench.c', 'runtime_bridge.c', 'Makefile.tools']]
+              ['metadata_bench.c', 'Makefile.tools']]
     manifest = {}
     for p in files:
         rel = p.relative_to(source); dest = output / rel

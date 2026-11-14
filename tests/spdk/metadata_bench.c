@@ -19,7 +19,7 @@
 #include "nvfuse_core.h"
 #include "nvfuse_api.h"
 #include "nvfuse_journal.h"
-#include "runtime.h"
+#include "nvfuse_spdk_runtime.h"
 #endif
 #include <sys/resource.h>
 

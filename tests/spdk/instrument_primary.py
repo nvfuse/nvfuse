@@ -18,6 +18,7 @@ def instrument(source_dir, output_dir):
     output_dir.mkdir(parents=True)
     files = list(source_dir.glob('*.c')) + [source_dir / 'Makefile.spdk']
     files += list((source_dir / 'include').glob('*.h'))
+    files += list(source_dir.glob('*.inc')) + list((source_dir / 'spdk_runtime').glob('*'))
     files += [p for p in (source_dir / 'examples/fio_plugin/modern').iterdir()
               if p.suffix in ('.c', '.h', '.map') or p.name == 'Makefile']
     manifest = {}
@@ -57,7 +58,7 @@ def instrument(source_dir, output_dir):
           '    if (areq->stage_tsc) areq->stage_tsc[3] = spdk_get_ticks();\n' + mapping_end)
     patch('nvfuse_aio.c', '\tres = reactor_submit_reqs(sb->target, aioq->task, jobs, job_count);',
           '\tif (areq->stage_tsc) areq->stage_tsc[4] = spdk_get_ticks();\n\tres = reactor_submit_reqs(sb->target, aioq->task, jobs, job_count);')
-    runtime = 'examples/fio_plugin/modern/runtime.c'
+    runtime = 'nvfuse_spdk_runtime.c'
     patch(runtime, '    struct nvfio_client *next;',
           '    uint64_t profile_sequence, profile_start, profile_count[2], profile_invalid[2];\n    uint64_t profile_sum[2][8], profile_max[2][8];\n    struct nvfio_client *next;')
     patch(runtime, 'struct nvfio_request { struct nvfuse_aio_req aio;',

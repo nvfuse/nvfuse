@@ -11,12 +11,12 @@
 #include "nvfuse_aio.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_primary_journal.h"
-#include "runtime.h"
-#include "cache_policy.h"
-#include "spsc.h"
-#include "stats.h"
-#include "completion.h"
-#include "api_queue.h"
+#include "nvfuse_spdk_runtime.h"
+#include "spdk_runtime/cache_policy.h"
+#include "spdk_runtime/spsc.h"
+#include "spdk_runtime/stats.h"
+#include "spdk_runtime/completion.h"
+#include "spdk_runtime/api_queue.h"
 #include <sys/mman.h>
 #define CLIENT_QUEUES 4
 struct nvfio_lane { struct nvfuse_aio_queue queue; unsigned reserved; };
@@ -105,7 +105,7 @@ struct call {
     int (*work)(struct nvfuse_handle *, void *);
     void *argument;
 };
-#include "buffered_wb.inc"
+#include "spdk_runtime/buffered_wb.inc"
 static int service_clients(void *unused);
 static int publish_stats(void *unused)
 {

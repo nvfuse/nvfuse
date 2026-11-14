@@ -13,7 +13,7 @@ SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
 OBJECTS = $(SOURCES:%.c=$(LOCAL_BUILD)/%.o)
 .DEFAULT_GOAL := all
 .PHONY: api-completion-test
-$(LOCAL_BUILD)/api_completion_test: tests/api_completion_test.c examples/fio_plugin/modern/completion.h examples/fio_plugin/modern/api_queue.h
+$(LOCAL_BUILD)/api_completion_test: tests/api_completion_test.c spdk_runtime/completion.h spdk_runtime/api_queue.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $< -lpthread -o $@
 api-completion-test: $(LOCAL_BUILD)/api_completion_test

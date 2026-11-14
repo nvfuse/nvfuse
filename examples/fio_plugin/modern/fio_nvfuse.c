@@ -1,7 +1,7 @@
 /* FIO adapter. No NVFUSE/SPDK internal types cross the runtime interface. */
 #include "config-host.h"
 #include "fio.h"
-#include "runtime.h"
+#include "nvfuse_spdk_runtime.h"
 #define NVFIO_BLOCK_SIZE 4096U
 #define MAX_BIOS 2048U
 #define MAX_DEPTH 128U
