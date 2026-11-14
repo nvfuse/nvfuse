@@ -140,7 +140,12 @@
 /* # OF MAX OPEN FILE */
 #define START_OPEN_FILE	3 /* STDIN, STDOUT, STDERR*/
 #ifndef MAX_OPEN_FILE
+#ifdef NVFUSE_PRIMARY_JOURNAL
+/* All primary core, runtime and application objects must use the same limit. */
+#define MAX_OPEN_FILE 1024
+#else
 #define MAX_OPEN_FILE	16
+#endif
 #endif
 
 #define NVFUSE_BP_TYPE_DATA 0
@@ -521,6 +526,10 @@ inode_t nvfuse_alloc_new_inode(struct nvfuse_superblock *sb, struct nvfuse_inode
 struct nvfuse_inode_ctx *nvfuse_read_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino);
 void nvfuse_release_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s32 dirty);
 s32 nvfuse_relocate_delete_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx);
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+int nvfuse_append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                               lbno_t block, const s8 *data, u32 bytes);
+#endif
 void nvfuse_mark_inode_dirty(struct nvfuse_inode_ctx *ictx);
 void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size);
 u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, u32 last_ino);

@@ -12,6 +12,12 @@ SOURCES = nvfuse_buffer_cache.c nvfuse_inode_cache.c nvfuse_core.c \
  nvfuse_portable.c nvfuse_file.c nvfuse_journal.c nvfuse_tx.c nvfuse_tx_wrappers.c nvfuse_orphan.c nvfuse_xattr_journal.c nvfuse_resize.c nvfuse_receipt.c nvfuse_direct.c nvfuse_queue.c
 OBJECTS = $(SOURCES:%.c=$(LOCAL_BUILD)/%.o)
 .DEFAULT_GOAL := all
+.PHONY: api-completion-test
+$(LOCAL_BUILD)/api_completion_test: tests/api_completion_test.c examples/fio_plugin/modern/completion.h examples/fio_plugin/modern/api_queue.h
+	@mkdir -p $(dir $@)
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror $< -lpthread -o $@
+api-completion-test: $(LOCAL_BUILD)/api_completion_test
+	$(LOCAL_BUILD)/api_completion_test
 .PHONY: all test framework-test clean
 all: $(LOCAL_BUILD)/local_test $(LOCAL_BUILD)/framework_test
 $(LOCAL_BUILD)/%.o: %.c

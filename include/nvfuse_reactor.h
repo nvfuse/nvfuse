@@ -46,8 +46,22 @@ struct io_target {
     void *journal_dma;
     struct reactor_task *journal_home_task;
     struct reactor_task *journal_raw_task;
+    struct reactor_task *journal_dirty_task; /* Serialized cache writeback. */
     unsigned journal_raw, journal_aio;
     unsigned journal_owner_collect;
+    unsigned journal_dirty_iov;
+    uint64_t journal_dirty_blocks, journal_dirty_requests;
+    unsigned journal_flush_fast;
+    unsigned buffered_alloc_batch;
+    unsigned buffered_map_cache;
+    unsigned buffered_bc_direct;
+    unsigned buffered_alloc_account;
+    unsigned buffered_alloc_fused;
+    unsigned buffered_alloc_cached;
+    unsigned buffered_write_hit;
+    unsigned buffered_fast_append;
+    uint64_t buffered_fast_append_calls, buffered_fast_append_hits;
+    uint64_t journal_flush_elided;
     int journal_mounting, journal_dirty;
     int journal_profile;
     uint64_t journal_collect_ns;

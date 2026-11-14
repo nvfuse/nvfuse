@@ -12,4 +12,4 @@ LIBS += $(NVFUSE_ARCHIVE) -lm -lpthread -laio -luuid
 SPDK_LIB_LIST += event $(EVENT_BDEV_SUBSYSTEM) $(KEYRING_MODULES_LIST) $(BLOCKDEV_MODULES_LIST) $(SOCK_MODULES_LIST) bdev
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
 $(APP): Makefile exports.map $(NVFUSE_ARCHIVE)
-runtime.o: cache_policy.h spsc.h stats.h
+runtime.o: cache_policy.h spsc.h stats.h completion.h api_queue.h buffered_wb.inc

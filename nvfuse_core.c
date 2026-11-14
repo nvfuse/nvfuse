@@ -642,17 +642,10 @@ u32 nvfuse_get_curr_bg_id(struct nvfuse_superblock *sb, s32 is_inode)
 	return curr_bg_id;
 }
 
-void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
+/* The caller retains the block-group descriptor's cache lock/reference. */
+static void nvfuse_dec_free_blocks_held(struct nvfuse_superblock *sb,
+                                       struct nvfuse_bg_descriptor *bd, u32 cnt)
 {
-	struct nvfuse_bg_descriptor *bd = NULL;
-	struct nvfuse_buffer_head *bd_bh;
-	u32 bg_id;
-
-	bg_id = blockno / sb->sb_no_of_blocks_per_bg;
-	bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
-	bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
-	assert(bd->bd_id == bg_id);
-
 	SPINLOCK_LOCK(&sb->sb_lock);
 	//SPINLOCK_LOCK(&bd_bh->bh_lock);
 
@@ -671,6 +664,21 @@ void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
 
 	SPINLOCK_UNLOCK(&sb->sb_lock);
 	//SPINLOCK_UNLOCK(&bd_bh->bh_lock);
+}
+
+void nvfuse_dec_free_blocks(struct nvfuse_superblock *sb, u32 blockno, u32 cnt)
+{
+	struct nvfuse_bg_descriptor *bd = NULL;
+	struct nvfuse_buffer_head *bd_bh;
+	u32 bg_id;
+
+	bg_id = blockno / sb->sb_no_of_blocks_per_bg;
+	bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
+	bd = (struct nvfuse_bg_descriptor *)bd_bh->bh_buf;
+	assert(bd->bd_id == bg_id);
+
+	nvfuse_dec_free_blocks_held(sb, bd, cnt);
+
 	nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
 }
 
@@ -1075,16 +1083,50 @@ void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks)
 		count++;
 	}
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    /* The owner consumes the entire batch before returning its buffers to the
+     * clean list. Reuse its task and existing SPSC polling completion path. */
+    task = sb->target->journal ? sb->target->journal_dirty_task : NULL;
+    if (!task)
+#endif
 	task = reactor_alloc_task(sb->target, num_blocks);
 	//dprintf_info(REACTOR, " allocated task %p numblocks = %d \n", task, num_blocks);
 	assert(task);
 	assert(num_blocks);
 
-	reactor_submit_reqs(sb->target, task, jobs, num_blocks);
-
-	nvfuse_wait_aio_completion(sb, task, jobs, num_blocks);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (sb->target->journal_dirty_iov) {
+        struct io_job *vectors[AIO_MAX_QDEPTH], *done[AIO_MAX_QDEPTH];
+        int issued = 0, previous_direct = 0;
+        for (int i = 0; i < num_blocks; i++) {
+            struct io_job *job = jobs[i];
+            int direct = !nvj_needs_overlay(sb->target->journal, job->offset, job->bytes, 1);
+            struct io_job *previous = issued ? vectors[issued - 1] : NULL;
+            /* Only unprotected contiguous data may scatter across cache pages.
+             * Journal staging requires a contiguous image, so protected blocks
+             * retain their original individual requests and buffer pointers. */
+            if (direct && previous_direct && previous->iovcnt < REACTOR_BUFFER_IOVS &&
+                previous->offset + previous->bytes == job->offset) {
+                previous->iov[previous->iovcnt++] = job->iov[0];
+                previous->bytes += job->bytes;
+            } else vectors[issued++] = job;
+            previous_direct = direct;
+        }
+        sb->target->journal_dirty_blocks += num_blocks;
+        sb->target->journal_dirty_requests += issued;
+        reactor_submit_reqs(sb->target, task, vectors, issued);
+        nvfuse_wait_aio_completion(sb, task, done, issued);
+    } else
+#endif
+    {
+        reactor_submit_reqs(sb->target, task, jobs, num_blocks);
+        nvfuse_wait_aio_completion(sb, task, jobs, num_blocks);
+    }
 
 	nvfuse_release_jobs(sb, jobs, num_blocks);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (task != sb->target->journal_dirty_task)
+#endif
 	reactor_free_task(sb->target, task);
 #endif
 }
@@ -2525,6 +2567,222 @@ s32 nvfuse_seek(struct nvfuse_superblock *sb, struct nvfuse_file_table *of, s64 
 	return (NVFUSE_SUCCESS);
 }
 
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+/* One serialized allocation on already-loaded authoritative metadata pages.
+ * Preserve inode/BG/bitmap layout and accounting; cold, pinned or uncertain
+ * cache entries retain the ordinary BH path without any partial mutation. */
+static int nvfuse_alloc_cached_bitmap(struct nvfuse_superblock *sb, u32 bg_id,
+                                       u32 *blocks, u32 wanted, u32 *allocated)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    struct nvfuse_buffer_cache *bd_bc, *map_bc = NULL;
+    struct nvfuse_bg_descriptor *bd;
+    u64 bd_key, map_key;
+    u32 found = 0, scanned = 0, count = 0, map_physical = 0;
+    int handled = 0;
+    if (!wanted) return 0;
+    nvfuse_make_pbno_key(BD_INO, bg_id, &bd_key, NVFUSE_BP_TYPE_DATA);
+    nvfuse_make_pbno_key(DBITMAP_INO, bg_id, &map_key, NVFUSE_BP_TYPE_DATA);
+    SPINLOCK_LOCK(&bm->bm_lock);
+    bd_bc = nvfuse_hash_lookup(bm, bd_key);
+    if (!bd_bc || rte_atomic32_read(&bd_bc->bc_ref)) goto out;
+    SPINLOCK_LOCK(&bd_bc->bc_lock);
+    if (!bd_bc->bc_load || bd_bc->bc_flush || bd_bc->bc_locked ||
+        rte_atomic32_read(&bd_bc->bc_bh_count) ||
+        (bd_bc->bc_list_type != BUFFER_TYPE_CLEAN && bd_bc->bc_list_type != BUFFER_TYPE_DIRTY) ||
+        bd_bc->bc_pno != bg_id * sb->sb_no_of_blocks_per_bg + NVFUSE_BD_OFFSET) goto unlock_bd;
+    bd = (struct nvfuse_bg_descriptor *)bd_bc->bc_buf;
+    if (bd->bd_id != bg_id) goto unlock_bd;
+    if (!bd->bd_free_blocks) { handled = 1; goto unlock_bd; }
+    map_bc = nvfuse_hash_lookup(bm, map_key);
+    if (!map_bc || rte_atomic32_read(&map_bc->bc_ref)) goto unlock_bd;
+    SPINLOCK_LOCK(&map_bc->bc_lock);
+    if (!map_bc->bc_load || map_bc->bc_flush || map_bc->bc_locked ||
+        rte_atomic32_read(&map_bc->bc_bh_count) || map_bc->bc_pno != bd->bd_dbitmap_start ||
+        (map_bc->bc_list_type != BUFFER_TYPE_CLEAN && map_bc->bc_list_type != BUFFER_TYPE_DIRTY)) goto unlock_map;
+    map_physical = map_bc->bc_pno;
+    found = bd->bd_next_block % sb->sb_no_of_blocks_per_bg;
+    while (scanned++ < sb->sb_no_of_blocks_per_bg) {
+        if (!found) {
+            found = bd->bd_dtable_start % sb->sb_no_of_blocks_per_bg;
+            scanned += bd->bd_dtable_start % sb->sb_no_of_blocks_per_bg - 1;
+        }
+        if (!ext2fs_test_bit(found, map_bc->bc_buf)) {
+            bd->bd_next_block = found;
+            ext2fs_set_bit(found, map_bc->bc_buf);
+            blocks[count++] = bd->bd_bg_start + found;
+            if (count == wanted) break;
+        }
+        found = (found + 1) % sb->sb_no_of_blocks_per_bg;
+    }
+    if (count) {
+        nvfuse_dec_free_blocks_held(sb, bd, count);
+        bd_bc->bc_dirty = map_bc->bc_dirty = 1;
+        nvfuse_move_buffer_list_nolock(sb, bd_bc, BUFFER_TYPE_DIRTY, INSERT_HEAD);
+        nvfuse_move_buffer_list_nolock(sb, map_bc, BUFFER_TYPE_DIRTY, INSERT_HEAD);
+    }
+    list_move(&bd_bc->bc_list, &bm->bm_list[bd_bc->bc_list_type]);
+    list_move(&map_bc->bc_list, &bm->bm_list[map_bc->bc_list_type]);
+    bm->bm_cache_ref += 2; bm->bm_cache_hit += 2;
+    handled = 1;
+unlock_map:
+    SPINLOCK_UNLOCK(&map_bc->bc_lock);
+unlock_bd:
+    SPINLOCK_UNLOCK(&bd_bc->bc_lock);
+out:
+    SPINLOCK_UNLOCK(&bm->bm_lock);
+    if (handled) {
+        /* These are fixed filesystem metadata; preserve explicit tagging too. */
+        nvj_mark_metadata(sb->target->journal, bg_id * sb->sb_no_of_blocks_per_bg + NVFUSE_BD_OFFSET);
+        if (map_physical) nvj_mark_metadata(sb->target->journal, map_physical);
+        *allocated = count;
+    }
+    return handled;
+}
+#endif
+
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+static int nvfuse_append_cache_ready(struct nvfuse_buffer_cache *bc)
+{
+    return bc && !rte_atomic32_read(&bc->bc_ref) &&
+        !rte_atomic32_read(&bc->bc_bh_count) && bc->bc_load &&
+        !bc->bc_flush && !bc->bc_locked &&
+        (bc->bc_list_type == BUFFER_TYPE_CLEAN || bc->bc_list_type == BUFFER_TYPE_DIRTY);
+}
+/* The caller owns the inode and serialized FS gate. This is a bounded fast
+ * case for exactly one new append page, with an already-existing pointer
+ * path and loaded BG/bitmap pages. Every cold/boundary/fragmented/pinned case
+ * falls back before any allocation or file mutation. No persistent mapping,
+ * disk layout, reservation or durability rule changes. */
+int nvfuse_append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                               lbno_t block, const s8 *data, u32 bytes)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    struct nvfuse_inode *inode = ictx->ictx_inode;
+    struct nvfuse_buffer_cache *leaf = NULL, *bd_bc = NULL, *map_bc = NULL, *data_bc;
+    struct nvfuse_bg_descriptor *bd;
+    u32 offsets[4], boundary, *slot, physical, bg, bitmap_pno = 0, leaf_pno = 0;
+    u64 key;
+    int depth, copied = 0;
+    sb->target->buffered_fast_append_calls++;
+    if (!bytes || bytes > CLUSTER_SIZE || !S_ISREG(inode->i_mode) ||
+        inode->i_size != (u64)block * CLUSTER_SIZE) return 0;
+    assert(rte_spinlock_is_locked(&ictx->ictx_lock));
+    depth = nvfuse_block_to_path(block, offsets, &boundary);
+    if (!depth) return 0;
+    SPINLOCK_LOCK(&bm->bm_lock);
+    slot = inode->i_blocks + offsets[0];
+    for (int level = 1; level < depth; level++) {
+        struct nvfuse_buffer_cache *next;
+        physical = *slot;
+        if (!physical) goto out;
+        nvfuse_make_pbno_key(BLOCK_IO_INO, physical, &key, NVFUSE_BP_TYPE_DATA);
+        next = nvfuse_hash_lookup(bm, key);
+        if (!nvfuse_append_cache_ready(next) || next->bc_pno != physical) goto out;
+        SPINLOCK_LOCK(&next->bc_lock);
+        slot = (u32 *)next->bc_buf + offsets[level];
+        if (level == depth - 1) { leaf = next; leaf_pno = physical; }
+        else SPINLOCK_UNLOCK(&next->bc_lock);
+        /* bm_lock prevents eviction of every copied ancestor. The inode lock
+         * excludes changing its pointer path until this operation finishes. */
+    }
+    if (*slot) goto unlock_leaf; /* Includes existing fallocate mappings. */
+    bg = inode->i_ino / sb->sb_no_of_inodes_per_bg;
+    if (sb->sb_last_allocated_bgid >= 0 && sb->sb_last_allocated_bgid < sb->sb_bg_num &&
+        bg != sb->sb_last_allocated_bgid) {
+        int use_hint = inode->i_ino == sb->sb_last_allocated_bgid_by_ino;
+        if (!use_hint) {
+            nvfuse_make_pbno_key(BD_INO, bg, &key, NVFUSE_BP_TYPE_DATA);
+            struct nvfuse_buffer_cache *local = nvfuse_hash_lookup(bm, key);
+            if (!nvfuse_append_cache_ready(local)) goto unlock_leaf;
+            SPINLOCK_LOCK(&local->bc_lock);
+            use_hint = !((struct nvfuse_bg_descriptor *)local->bc_buf)->bd_free_blocks;
+            SPINLOCK_UNLOCK(&local->bc_lock);
+        }
+        if (use_hint) bg = sb->sb_last_allocated_bgid;
+    }
+    nvfuse_make_pbno_key(BD_INO, bg, &key, NVFUSE_BP_TYPE_DATA);
+    bd_bc = nvfuse_hash_lookup(bm, key);
+    if (!nvfuse_append_cache_ready(bd_bc) ||
+        bd_bc->bc_pno != bg * sb->sb_no_of_blocks_per_bg + NVFUSE_BD_OFFSET) goto unlock_leaf;
+    SPINLOCK_LOCK(&bd_bc->bc_lock);
+    bd = (struct nvfuse_bg_descriptor *)bd_bc->bc_buf;
+    if (bd->bd_id != bg || !bd->bd_free_blocks) goto unlock_bd;
+    nvfuse_make_pbno_key(DBITMAP_INO, bg, &key, NVFUSE_BP_TYPE_DATA);
+    map_bc = nvfuse_hash_lookup(bm, key);
+    if (!nvfuse_append_cache_ready(map_bc) || map_bc->bc_pno != bd->bd_dbitmap_start) goto unlock_bd;
+    SPINLOCK_LOCK(&map_bc->bc_lock);
+    u32 within = bd->bd_next_block % sb->sb_no_of_blocks_per_bg;
+    for (unsigned scan = 0; scan < 64; scan++) {
+        if (!within) within = bd->bd_dtable_start % sb->sb_no_of_blocks_per_bg;
+        if (!ext2fs_test_bit(within, map_bc->bc_buf)) break;
+        within = (within + 1) % sb->sb_no_of_blocks_per_bg;
+        if (scan == 63) goto unlock_map;
+    }
+    /* Only replace an eligible existing clean/unused buffer. Exclude our
+     * locked metadata, which deliberately has no temporary REF membership. */
+    nvfuse_make_pbno_key(inode->i_ino, block, &key, NVFUSE_BP_TYPE_DATA);
+    if (nvfuse_hash_lookup(bm, key)) goto unlock_map;
+    unsigned type;
+    if (rte_atomic32_read(&bm->bm_list_count[BUFFER_TYPE_UNUSED])) type = BUFFER_TYPE_UNUSED;
+    else if (rte_atomic32_read(&bm->bm_list_count[BUFFER_TYPE_CLEAN])) type = BUFFER_TYPE_CLEAN;
+    else goto unlock_map;
+    data_bc = list_entry(bm->bm_list[type].prev, struct nvfuse_buffer_cache, bc_list);
+    if (data_bc == leaf || data_bc == bd_bc || data_bc == map_bc ||
+        rte_atomic32_read(&data_bc->bc_ref) || rte_atomic32_read(&data_bc->bc_bh_count) ||
+        data_bc->bc_flush || data_bc->bc_locked) goto unlock_map;
+    data_bc = nvfuse_replace_buffer_cache(sb, key);
+    /* No fallible work remains after eviction. */
+    physical = bd->bd_bg_start + within;
+    nvfuse_init_bc(sb, data_bc);
+    data_bc->bc_bno = key; data_bc->bc_pno = physical;
+    data_bc->bc_list_type = BUFFER_TYPE_DIRTY;
+    INIT_LIST_HEAD(&data_bc->bc_bh_head);
+    rte_atomic32_set(&data_bc->bc_bh_count, 0);
+    memcpy(data_bc->bc_buf, data, bytes); /* init_bc zeroed the remaining bytes. */
+    data_bc->bc_load = data_bc->bc_dirty = 1;
+    hlist_add_head(&data_bc->bc_hash, &bm->bm_hash[key % HASH_NUM]);
+    rte_atomic32_inc(&bm->bm_hash_count[key % HASH_NUM]);
+    list_add(&data_bc->bc_list, &bm->bm_list[BUFFER_TYPE_DIRTY]);
+    rte_atomic32_inc(&bm->bm_list_count[BUFFER_TYPE_DIRTY]);
+    ext2fs_set_bit(within, map_bc->bc_buf);
+    bd->bd_next_block = within;
+    nvfuse_dec_free_blocks_held(sb, bd, 1);
+    *slot = physical;
+    bitmap_pno = map_bc->bc_pno;
+    bd_bc->bc_dirty = map_bc->bc_dirty = 1;
+    nvfuse_move_buffer_list_nolock(sb, bd_bc, BUFFER_TYPE_DIRTY, INSERT_HEAD);
+    nvfuse_move_buffer_list_nolock(sb, map_bc, BUFFER_TYPE_DIRTY, INSERT_HEAD);
+    list_move(&bd_bc->bc_list, &bm->bm_list[BUFFER_TYPE_DIRTY]);
+    list_move(&map_bc->bc_list, &bm->bm_list[BUFFER_TYPE_DIRTY]);
+    if (leaf) {
+        leaf->bc_dirty = 1;
+        nvfuse_move_buffer_list_nolock(sb, leaf, BUFFER_TYPE_DIRTY, INSERT_HEAD);
+        list_move(&leaf->bc_list, &bm->bm_list[BUFFER_TYPE_DIRTY]);
+    }
+    sb->sb_last_allocated_bgid = bg;
+    sb->sb_last_allocated_bgid_by_ino = inode->i_ino;
+    nvfuse_mark_inode_dirty(ictx);
+    bm->bm_cache_ref += depth + 2; bm->bm_cache_hit += depth + 1;
+    copied = 1;
+unlock_map:
+    SPINLOCK_UNLOCK(&map_bc->bc_lock);
+unlock_bd:
+    SPINLOCK_UNLOCK(&bd_bc->bc_lock);
+unlock_leaf:
+    if (leaf) SPINLOCK_UNLOCK(&leaf->bc_lock);
+out:
+    SPINLOCK_UNLOCK(&bm->bm_lock);
+    if (copied) {
+        nvj_mark_metadata(sb->target->journal, bg * sb->sb_no_of_blocks_per_bg + NVFUSE_BD_OFFSET);
+        nvj_mark_metadata(sb->target->journal, bitmap_pno);
+        if (leaf_pno) nvj_mark_metadata(sb->target->journal, leaf_pno);
+    }
+    if (copied) sb->target->buffered_fast_append_hits++;
+    return copied;
+}
+#endif
+
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 *alloc_blks, u32 num_blocks)
 {
 	struct nvfuse_bg_descriptor *bd;
@@ -2535,10 +2793,21 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 *alloc_blk
 	void *buf;
 	u32 alloc_cnt = 0;
 	u32 bg_start;
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+    if (sb->target->buffered_alloc_cached && !sb->target->journal_aio &&
+        nvfuse_alloc_cached_bitmap(sb, bg_id, alloc_blks, num_blocks, &alloc_cnt)) return alloc_cnt;
+#endif
 
 	bd_bh = nvfuse_get_bh(sb, NULL, BD_INO, bg_id, READ, NVFUSE_TYPE_META);
 	bd_bc = (struct nvfuse_buffer_cache *)bd_bh->bh_bc;
 	bd = (struct nvfuse_bg_descriptor *)bd_bc->bc_buf;
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    /* Fold the caller's free-space precheck into the held descriptor lookup. */
+    if (sb->target->buffered_alloc_fused && !bd->bd_free_blocks) {
+        nvfuse_release_bh(sb, bd_bh, 0, NVF_CLEAN);
+        return 0;
+    }
+#endif
 
 	bh = nvfuse_get_bh(sb, NULL, DBITMAP_INO, bg_id, READ, NVFUSE_TYPE_META);
 	bc = (struct nvfuse_buffer_cache *)bh->bh_bc;
@@ -2574,8 +2843,16 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 *alloc_blk
 
 	if (alloc_cnt) {
 		nvfuse_release_bh(sb, bh, 0, DIRTY);
-		nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
-		nvfuse_dec_free_blocks(sb, bg_start + free_block, alloc_cnt);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+        if (sb->target->buffered_alloc_account) {
+            nvfuse_dec_free_blocks_held(sb, bd, alloc_cnt);
+            nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
+        } else
+#endif
+        {
+            nvfuse_release_bh(sb, bd_bh, 0, DIRTY);
+            nvfuse_dec_free_blocks(sb, bg_start + free_block, alloc_cnt);
+        }
 	} else {
 		nvfuse_release_bh(sb, bh, 0, NVF_CLEAN);
 		nvfuse_release_bh(sb, bd_bh, 0, NVF_CLEAN);
@@ -2967,7 +3244,18 @@ u32 nvfuse_get_pbn(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, 
 
 	assert(ictx->ictx_ino == ino);
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (sb->target->buffered_map_cache) {
+        u32 mapped;
+        /* Reuse the existing authoritative metadata-cache lookup used by
+         * direct AIO. Cold indirect pages retain the ordinary mapper. */
+        ret = nvfuse_get_block_cached(sb, ictx, offset, 1, &mapped, &value);
+    } else {
+#endif
 	ret = nvfuse_get_block(sb, ictx, offset, 1/* num block */, NULL, &value, 0);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    }
+#endif
 	if (ret) {
 		dprintf_warn(BLOCK, " Warning: block is not allocated.");
 	}
@@ -3091,7 +3379,7 @@ void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)
 		nvfuse_queuework();
 	}
 #endif
-	dprintf_info(FLUSHWORK, " Flush complets \n");
+	/* Successful flushes are accounted below; avoid per-sync stdout I/O. */
 
 	sb->nvme_io_tsc += (spdk_get_ticks() - start_tsc);
 	sb->nvme_io_count ++;

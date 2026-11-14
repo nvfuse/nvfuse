@@ -40,14 +40,22 @@ def main():
     run('format', 'format')
     baseline = root / 'baseline.img'
     shutil.copyfile(image, baseline)
-    for phase, committed in [('ordered-data-flush', False), ('payload-flush', False),
-                             ('commit-flush', True), ('checkpoint-write', True), ('retire-flush', True)]:
+    v3 = os.environ.get('NVFUSE_JOURNAL_FORMAT_VERSION') == '3'
+    phases = ([('ordered-data-flush', False), ('v3-log-write', None),
+               ('v3-log-flush', True), ('v3-home-write', True),
+               ('v3-home-flush', True), ('v3-epoch-flush', True)] if v3 else
+              [('ordered-data-flush', False), ('payload-flush', False),
+               ('commit-flush', True), ('checkpoint-write', True), ('retire-flush', True)])
+    for phase, committed in phases:
         shutil.copyfile(baseline, image)
         with image.open('r+b') as f:
             os.fsync(f.fileno())
-        run('crash-' + phase, 'mutate', phase, 86)
-        run('recover-' + phase, 'check-new' if committed else 'check-old')
-        run('reopen-' + phase, 'check-new' if committed else 'check-old')
+        mode = 'mutate-checkpoint' if v3 and phase.startswith(('v3-home-', 'v3-epoch-')) else 'mutate'
+        run('crash-' + phase, mode, phase, 86)
+        # A completed write without its flush may survive process death.
+        check = 'check-either' if committed is None else 'check-new' if committed else 'check-old'
+        run('recover-' + phase, check)
+        run('reopen-' + phase, check)
     shutil.copyfile(baseline, image)
     run('payload-io-fault', 'io-fault', expected=87)
     run('recover-io-fault', 'check-old')
@@ -56,6 +64,10 @@ def main():
     run('reuse-seed', 'reuse-seed')
     run('reuse-create', 'reuse-create')
     run('reuse-check', 'reuse-check')
+    run('block-reuse-create', 'block-reuse-create')
+    run('block-reuse-check', 'block-reuse-check')
+    run('partial-create-crash', 'partial-create-crash', expected=86)
+    run('partial-recover', 'partial-check')
     baseline.unlink()
     report['status'] = 'pass'
     (root / 'result.json').write_text(json.dumps(report, indent=2) + '\n')

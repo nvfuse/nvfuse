@@ -63,6 +63,17 @@ static int raw_transfer(void *context, uint64_t offset, size_t bytes, void *buf,
 static int raw_flush(void *context)
 {
     struct io_target *t = context;
+#ifndef NVFUSE_USE_CEPH_SPDK
+    /* All preceding writes have completed before this barrier. SPDK promises
+     * persistence at completion when the bdev has no volatile write cache;
+     * its NVMe module already turns these flushes into inline no-ops. Avoid
+     * sending that no-op across reactors, retaining journal barrier hooks.
+     * File-backed and volatile-cache bdevs still issue their real FLUSH. */
+    if (t->journal_flush_fast && !spdk_bdev_has_write_cache(t->bdev)) {
+        t->journal_flush_elided++;
+        return 0;
+    }
+#endif
     t->journal_raw++;
     int rc = raw_request(t, 0, CLUSTER_SIZE, NULL, SPDK_BDEV_IO_TYPE_FLUSH);
     t->journal_raw--;
@@ -183,13 +194,46 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *h, int formatted)
     const char *poll = getenv("NVFUSE_JOURNAL_RAW_POLL");
     const char *version = getenv("NVFUSE_JOURNAL_FORMAT_VERSION");
     const char *collect = getenv("NVFUSE_JOURNAL_OWNER_COLLECT");
+    const char *dirty_reuse = getenv("NVFUSE_JOURNAL_DIRTY_REUSE");
+    const char *flush_fast = getenv("NVFUSE_JOURNAL_FLUSH_FAST");
+    const char *alloc_batch = getenv("NVFUSE_BUFFERED_ALLOC_BATCH");
+    const char *fast_append = getenv("NVFUSE_BUFFERED_FAST_APPEND");
+    const char *write_hit = getenv("NVFUSE_BUFFERED_WRITE_HIT");
+    const char *alloc_cached = getenv("NVFUSE_BUFFERED_ALLOC_CACHED");
+    const char *alloc_fused = getenv("NVFUSE_BUFFERED_ALLOC_FUSED");
+    const char *dirty_iov = getenv("NVFUSE_JOURNAL_DIRTY_IOV");
+    const char *alloc_account = getenv("NVFUSE_BUFFERED_ALLOC_ACCOUNT");
+    const char *bc_direct = getenv("NVFUSE_BUFFERED_BC_DIRECT");
+    const char *map_cache = getenv("NVFUSE_BUFFERED_MAP_CACHE");
     if (crc_mode && strcmp(crc_mode, "auto") && strcmp(crc_mode, "software")) return -EINVAL;
     if (mode && strcmp(mode, "0") && strcmp(mode, "1")) return -EINVAL;
     if (reuse && strcmp(reuse, "0") && strcmp(reuse, "1")) return -EINVAL;
     if (poll && strcmp(poll, "0") && strcmp(poll, "1")) return -EINVAL;
     if (version && strcmp(version, "2") && strcmp(version, "3")) return -EINVAL;
     if (collect && strcmp(collect, "0") && strcmp(collect, "1")) return -EINVAL;
+    if (dirty_reuse && strcmp(dirty_reuse, "0") && strcmp(dirty_reuse, "1")) return -EINVAL;
+    if (flush_fast && strcmp(flush_fast, "0") && strcmp(flush_fast, "1")) return -EINVAL;
+    if (alloc_batch && strcmp(alloc_batch, "0") && strcmp(alloc_batch, "1")) return -EINVAL;
+    if (map_cache && strcmp(map_cache, "0") && strcmp(map_cache, "1")) return -EINVAL;
+    if (bc_direct && strcmp(bc_direct, "0") && strcmp(bc_direct, "1")) return -EINVAL;
+    if (alloc_account && strcmp(alloc_account, "0") && strcmp(alloc_account, "1")) return -EINVAL;
+    if (alloc_fused && strcmp(alloc_fused, "0") && strcmp(alloc_fused, "1")) return -EINVAL;
+    if (alloc_cached && strcmp(alloc_cached, "0") && strcmp(alloc_cached, "1")) return -EINVAL;
+    if (fast_append && strcmp(fast_append, "0") && strcmp(fast_append, "1")) return -EINVAL;
+    if (write_hit && strcmp(write_hit, "0") && strcmp(write_hit, "1")) return -EINVAL;
+    if (dirty_iov && strcmp(dirty_iov, "0") && strcmp(dirty_iov, "1")) return -EINVAL;
     int enabled = !mode || strcmp(mode, "0");
+    int standalone = nvfuse_process_model_is_standalone();
+    t->buffered_fast_append = enabled && (fast_append ? !strcmp(fast_append, "1") : standalone);
+    t->buffered_write_hit = enabled && (write_hit ? !strcmp(write_hit, "1") : standalone);
+    t->buffered_alloc_cached = enabled && standalone && (alloc_cached ? !strcmp(alloc_cached, "1") : standalone);
+    t->buffered_alloc_fused = enabled && standalone && (alloc_fused ? !strcmp(alloc_fused, "1") : standalone);
+    t->journal_dirty_iov = enabled && (dirty_iov ? !strcmp(dirty_iov, "1") : standalone);
+    t->buffered_alloc_account = enabled && (alloc_account ? !strcmp(alloc_account, "1") : standalone);
+    t->buffered_bc_direct = enabled && (bc_direct ? !strcmp(bc_direct, "1") : standalone);
+    t->buffered_map_cache = enabled && (!map_cache || strcmp(map_cache, "0"));
+    t->buffered_alloc_batch = enabled && (!alloc_batch || strcmp(alloc_batch, "0"));
+    t->journal_flush_fast = enabled && (!flush_fast || strcmp(flush_fast, "0"));
     t->journal_owner_collect = enabled && (!collect || strcmp(collect, "0"));
     int reuse_enabled = enabled && (!reuse || strcmp(reuse, "0"));
     int poll_enabled = reuse_enabled && (!poll || strcmp(poll, "0"));
@@ -201,6 +245,14 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *h, int formatted)
         if (!t->journal_raw_task) return -ENOMEM;
         if (poll_enabled) {
             int error = reactor_task_enable_polling(t, t->journal_raw_task);
+            if (error) return error;
+        }
+    }
+    if (enabled && (!dirty_reuse || strcmp(dirty_reuse, "0"))) {
+        t->journal_dirty_task = reactor_alloc_task(t, AIO_MAX_QDEPTH);
+        if (!t->journal_dirty_task) return -ENOMEM;
+        if (poll_enabled) {
+            int error = reactor_task_enable_polling(t, t->journal_dirty_task);
             if (error) return error;
         }
     }
@@ -251,9 +303,12 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *h, int formatted)
     }
     t->journal_profile = profile && !strcmp(profile, "1");
     nvj_set_profile(t->journal, t->journal_profile);
-    printf("NVFUSE_JOURNAL_IO batch=%d profile=%d compare_reads=%d max_bytes=%u crc=%s home_batch=%d log_join=%d raw_reuse=%d raw_poll=%d owner_collect=%u\n",
+    printf("NVFUSE_JOURNAL_IO batch=%d profile=%d compare_reads=%d max_bytes=%u crc=%s home_batch=%d log_join=%d raw_reuse=%d raw_poll=%d owner_collect=%u dirty_reuse=%d\n",
            !batch || strcmp(batch, "0"), t->journal_profile, compare_enabled, JOURNAL_DMA_BYTES,
-           nvj_crc_backend(), home_enabled, join_enabled, t->journal_raw_task != NULL, poll_enabled, t->journal_owner_collect);
+           nvj_crc_backend(), home_enabled, join_enabled, t->journal_raw_task != NULL, poll_enabled, t->journal_owner_collect, t->journal_dirty_task != NULL);
+    printf("NVFUSE_BUFFERED_POLICY bc_direct=%u alloc_account=%u alloc_fused=%u alloc_cached=%u write_hit=%u fast_append=%u dirty_iov=%u\n",
+           t->buffered_bc_direct, t->buffered_alloc_account, t->buffered_alloc_fused,
+           t->buffered_alloc_cached, t->buffered_write_hit, t->buffered_fast_append, t->journal_dirty_iov);
     unsigned char block[CLUSTER_SIZE];
     if ((rc = raw_transfer(t, 0, sizeof(block), block, 0))) return rc;
     struct nvfuse_superblock_common *sb = (void *)block;
@@ -358,6 +413,11 @@ int nvfuse_primary_journal_read_header(struct io_target *t, void *buf, size_t by
 void nvfuse_primary_journal_release(struct io_target *t)
 {
     if (t->journal) {
+        printf("NVFUSE_FLUSH no_volatile_cache_barriers=%" PRIu64 " enabled=%u\n",
+               t->journal_flush_elided, t->journal_flush_fast);
+        printf("NVFUSE_FAST_APPEND calls=%" PRIu64 " hits=%" PRIu64 "\n",
+               t->buffered_fast_append_calls, t->buffered_fast_append_hits);
+        printf("NVFUSE_DIRTY_IO blocks=%" PRIu64 " requests=%" PRIu64 " iov=%u\n", t->journal_dirty_blocks,t->journal_dirty_requests,t->journal_dirty_iov);
         const struct nvj_stats *s = nvj_stats(t->journal);
         printf("NVFUSE_JOURNAL_STATS commits=%" PRIu64 " replays=%" PRIu64
                " journal_bytes=%" PRIu64 " home_bytes=%" PRIu64 " flushes=%" PRIu64
@@ -370,12 +430,15 @@ void nvfuse_primary_journal_release(struct io_target *t)
     }
     /* CQ publication can precede the submit/drain callback returning (notably
      * an inline no-op flush). Fence that callback before destroying task locks. */
-    if (t->journal_raw_task || t->journal_home_task) reactor_wait_idle(t);
+    if (t->journal_raw_task || t->journal_home_task || t->journal_dirty_task) reactor_wait_idle(t);
     if (t->journal_raw_task) {
         reactor_free_task(t, t->journal_raw_task); t->journal_raw_task = NULL;
     }
     if (t->journal_home_task) {
         reactor_free_task(t, t->journal_home_task); t->journal_home_task = NULL;
+    }
+    if (t->journal_dirty_task) {
+        reactor_free_task(t, t->journal_dirty_task); t->journal_dirty_task = NULL;
     }
     spdk_dma_free(t->journal_dma); t->journal_dma = NULL;
 }

@@ -54,3 +54,13 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb,u32 bg,u32 *out,u32 count)
 void nvfuse_free_blocks(struct nvfuse_superblock *sb,u32 block,u32 count) { (void)sb;current->ops.release(current->ops.context,block,count); }
 void nvfuse_print_bg_list(struct nvfuse_superblock *sb) { (void)sb; }
 void *nvfuse_local_dma_zmalloc(size_t bytes,size_t align,uint64_t *physical) { (void)align;(void)physical;return calloc(1,bytes); }
+
+/* This adapter writes through on put and releases storage immediately: no
+ * deferred cache alias survives to invalidate. The primary regression covers
+ * the real writeback cache and physical-block reuse. */
+void nvfuse_make_pbno_key(inode_t ino, lbno_t block, u64 *key, u32 type) {
+    (void)type; *key = ((u64)ino << 32) | block;
+}
+void nvfuse_move_bc_to_unused_list(struct nvfuse_superblock *sb, u64 key) {
+    (void)sb; (void)key;
+}

@@ -261,7 +261,11 @@ u32 nvfuse_alloc_free_block(struct nvfuse_superblock *sb, struct nvfuse_inode *i
 	next_id = bg_id;
 
 	do {
-		if (nvfuse_get_free_blocks(sb, bg_id)) {
+		if (
+#ifdef NVFUSE_PRIMARY_JOURNAL
+            sb->target->buffered_alloc_fused ||
+#endif
+            nvfuse_get_free_blocks(sb, bg_id)) {
 			ret = nvfuse_alloc_dbitmap(sb, bg_id, alloc_blks + cnt, num_blocks);
 			num_blocks -= ret;
 			cnt += ret;
@@ -732,22 +736,25 @@ s32 nvfuse_get_block(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx
 
 	count = nvfuse_blks_to_allocate(partial, indirect_blks, maxblocks, blocks_to_boundary);
 	{
-		u32 *direct_map;
-
-		direct_map = spdk_dma_zmalloc(sizeof(u32) * count, 0, NULL);
-		if(!direct_map) { err=-ENOMEM; goto cleanup; }
+        /* Allocation bookkeeping is consumed synchronously by the CPU; it is
+         * never submitted to the device. Most appends map only one block, so
+         * avoid a DMA-heap allocation/free for every 4 KiB of file growth. */
+        u32 local_map[32];
+        if (count <= 0 || count > PTRS_PER_BLOCK) { err = -EINVAL; goto cleanup; }
+        u32 *direct_map = count <= 32 ? local_map : calloc(count, sizeof(*direct_map));
+        if (!direct_map) { err = -ENOMEM; goto cleanup; }
 
 		err = nvfuse_alloc_branch(sb, ictx, ictx->ictx_inode, indirect_blks, &count, direct_map,
 					  offsets + (partial - chain), partial);
 		if (err) {
-            spdk_dma_free(direct_map);
+            if (direct_map != local_map) free(direct_map);
 			goto cleanup;
 		}
 
 		/* attach indirect block to inode */
 		nvfuse_splice_branch(sb, ictx, partial, direct_map, indirect_blks, count);
 
-		spdk_dma_free(direct_map);
+        if (direct_map != local_map) free(direct_map);
 	}
 
 got_it:
@@ -949,9 +956,13 @@ static void nvfuse_free_branches(struct nvfuse_superblock *sb, struct nvfuse_ino
 					     (u32 *)bh->bh_buf,
 					     (u32 *)bh->bh_buf + addr_per_block,
 					     depth);
-			/* FIXME: ??? needed to be revised */
-			nvfuse_release_bh(sb, bh, 0, DIRTY);
-			//nvfuse_forget_bh(sb, bh);
+            /* The detached pointer block has no remaining owner. Discard its
+             * physical-cache alias before the allocator can reuse the block;
+             * writing its cleared pointers later would overwrite the new file. */
+            u64 key;
+            nvfuse_make_pbno_key(BLOCK_IO_INO, nr, &key, NVFUSE_BP_TYPE_DATA);
+            nvfuse_release_bh(sb, bh, 0, NVF_CLEAN);
+            nvfuse_move_bc_to_unused_list(sb, key);
 			nvfuse_free_blocks(sb, nr, 1);
 			nvfuse_mark_inode_dirty(ictx);
 		}

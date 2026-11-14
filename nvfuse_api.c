@@ -1120,6 +1120,39 @@ s32 nvfuse_readfile_aio_directio(struct nvfuse_handle *nvh, u32 fid, s8 *buffer,
 }
 
 
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+/* The caller retains the authoritative inode lock and serialized FS gate.
+ * A loaded, unreferenced regular-data buffer can be dirtied in place without
+ * a temporary REF-list round trip. AIO and every uncertain state fall back. */
+static int nvfuse_write_cached_data(struct nvfuse_superblock *sb, inode_t ino,
+                                    lbno_t block, u32 offset, const s8 *data, u32 bytes)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    struct nvfuse_buffer_cache *bc;
+    u64 key;
+    int copied = 0;
+    nvfuse_make_pbno_key(ino, block, &key, NVFUSE_BP_TYPE_DATA);
+    SPINLOCK_LOCK(&bm->bm_lock);
+    bc = nvfuse_hash_lookup(bm, key);
+    if (!bc || rte_atomic32_read(&bc->bc_ref)) goto out;
+    SPINLOCK_LOCK(&bc->bc_lock);
+    if (bc->bc_load && bc->bc_pno && !bc->bc_flush && !bc->bc_locked &&
+        !rte_atomic32_read(&bc->bc_bh_count) &&
+        (bc->bc_list_type == BUFFER_TYPE_CLEAN || bc->bc_list_type == BUFFER_TYPE_DIRTY)) {
+        rte_memcpy(bc->bc_buf + offset, data, bytes);
+        bc->bc_dirty = 1;
+        nvfuse_move_buffer_list_nolock(sb, bc, BUFFER_TYPE_DIRTY, INSERT_HEAD);
+        list_move(&bc->bc_list, &bm->bm_list[BUFFER_TYPE_DIRTY]);
+        bm->bm_cache_ref++; bm->bm_cache_hit++;
+        copied = 1;
+    }
+    SPINLOCK_UNLOCK(&bc->bc_lock);
+out:
+    SPINLOCK_UNLOCK(&bm->bm_lock);
+    return copied;
+}
+#endif
+
 s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count,
 			  nvfuse_off_t woffset)
 {
@@ -1127,6 +1160,9 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 	struct nvfuse_inode *inode;
 	struct nvfuse_file_table *of;
 	struct nvfuse_buffer_head *bh = NULL;
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+    struct nvfuse_buffer_cache *data_bc = NULL;
+#endif
 	u32 offset = 0, remain = 0, wcount = 0;
 	lbno_t lblock = 0;
 	int ret;
@@ -1143,10 +1179,20 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 	of->rwoffset = woffset;
 #endif
 
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    /* The serialized owner can retain one inode acquisition across the entire
+     * write. Refresh the descriptor from the authoritative inode after truncate
+     * or extension through another descriptor, before copying any blocks. */
+    lbno_t mapped_until = 0;
+    ictx = count ? nvfuse_read_inode(sb, NULL, of->ino) : NULL;
+    inode = ictx ? ictx->ictx_inode : NULL;
+    if (inode) of->size = inode->i_size;
+#endif
 	while (count > 0) {
-
+#ifndef NVFUSE_PRIMARY_JOURNAL
 		ictx = nvfuse_read_inode(sb, NULL, of->ino);
 		inode = ictx->ictx_inode;
+#endif
 #ifdef NVFUSE_FILE_BACKEND
         /* Another descriptor may have extended this inode since open. */
         if(sb->target->journal && of->size<inode->i_size) of->size=inode->i_size;
@@ -1162,8 +1208,19 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		if (remain > count)
 			remain = count;
 
-#ifdef NVFUSE_FILE_BACKEND
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+        if (sb->target->journal && sb->target->buffered_fast_append &&
+            !sb->target->journal_aio && nvfuse_process_model_is_standalone() &&
+            !offset && count < 2 * CLUSTER_SIZE && inode->i_size == of->rwoffset &&
+            nvfuse_append_cached_page(sb, ictx, lblock, user_buf + wcount, remain)) {
+            bh = NULL;
+            goto buffered_page_copied;
+        }
+#endif
+#if defined(NVFUSE_FILE_BACKEND) || defined(NVFUSE_PRIMARY_JOURNAL)
         int fresh_block=0;
+#endif
+#ifdef NVFUSE_FILE_BACKEND
         if(sb->target->journal) {
             u32 physical=0;
             ret=nvfuse_get_block(sb,ictx,lblock,1,NULL,&physical,0);
@@ -1172,11 +1229,55 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
         } else
 #endif
 		if (count && inode->i_size <= of->rwoffset) {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+            /* Only skip the read after proving this append block is unmapped.
+             * EOF alone is insufficient: fallocate may have mapped it already.
+             * Keep the existing RMW path for a partially used EOF block. */
+            if (remain != CLUSTER_SIZE &&
+                !(inode->i_size & (CLUSTER_SIZE - 1)) &&
+                lblock == NVFUSE_SIZE_TO_BLK(inode->i_size)) {
+                u32 physical = 0;
+                if (sb->target->buffered_map_cache) {
+                    u32 mapped;
+                    ret = nvfuse_get_block_cached(sb, ictx, lblock, 1, &mapped, &physical);
+                } else ret = nvfuse_get_block(sb, ictx, lblock, 1, NULL, &physical, 0);
+                if (ret) {
+                    nvfuse_release_inode(sb, ictx, wcount ? DIRTY : NVF_CLEAN);
+                    return ret;
+                }
+                fresh_block = !physical;
+            }
+#endif
+#ifdef NVFUSE_PRIMARY_JOURNAL
+            ret = 0;
+            if (lblock >= mapped_until || lblock != NVFUSE_SIZE_TO_BLK(inode->i_size)) {
+                u32 allocated = 0, blocks = 1;
+                /* Map only full blocks in THIS append, without reserving
+                 * beyond its payload. The existing mapper stops at pointer
+                 * boundaries and existing mappings. Keep the final partial
+                 * block separate so its fresh-block zeroing proof is intact. */
+                if (sb->target->buffered_alloc_batch && !offset &&
+                    inode->i_size == of->rwoffset && count >= 2 * CLUSTER_SIZE)
+                    blocks = count / CLUSTER_SIZE > 32 ? 32 : count / CLUSTER_SIZE;
+                if (sb->target->buffered_map_cache && offset &&
+                    inode->i_size == of->rwoffset) {
+                    u32 physical;
+                    ret = nvfuse_get_block_cached(sb, ictx, lblock, 1,
+                                                  &allocated, &physical);
+                }
+                if (!ret && !allocated)
+                    ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size),
+                                          blocks, &allocated, NULL, 1);
+                if (!ret && lblock == NVFUSE_SIZE_TO_BLK(inode->i_size))
+                    mapped_until = lblock + allocated;
+            }
+#else
 			ret = nvfuse_get_block(sb, ictx, NVFUSE_SIZE_TO_BLK(inode->i_size), 1/* num block */, NULL, NULL,
 					       1);
+#endif
 			if (ret) {
 				dprintf_error(INODE, "data block allocation fails.");
-				nvfuse_release_inode(sb, ictx, NVF_CLEAN);
+				nvfuse_release_inode(sb, ictx, wcount ? DIRTY : NVF_CLEAN);
 #ifdef NVFUSE_FILE_BACKEND
                 if (sb->target->journal) return ret;
 #endif
@@ -1191,10 +1292,28 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		} else
 #endif
 		{
-#ifdef NVFUSE_FILE_BACKEND
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+            /* Regular data needs no transient buffer-head when dirty heads
+             * are not retained in the inode. Keep the existing cache lookup,
+             * mapping, reference, locking and dirty-list ownership. */
+            if (sb->target->journal && sb->target->buffered_write_hit &&
+                !sb->target->journal_aio && nvfuse_process_model_is_standalone() &&
+                !fresh_block && S_ISREG(inode->i_mode) &&
+                nvfuse_write_cached_data(sb, inode->i_ino, lblock, offset, user_buf + wcount, remain)) {
+                bh = NULL;
+            } else
+            if (sb->target->journal && sb->target->buffered_bc_direct && S_ISREG(inode->i_mode)) {
+                data_bc = nvfuse_get_bc(sb, ictx, inode->i_ino, lblock,
+                                       fresh_block || remain == CLUSTER_SIZE ? WRITE : READ);
+                bh = NULL;
+                if (fresh_block) memset(data_bc->bc_buf, 0, CLUSTER_SIZE);
+                rte_memcpy(data_bc->bc_buf + offset, user_buf + wcount, remain);
+            } else
+#endif
+            {
+#if defined(NVFUSE_FILE_BACKEND) || defined(NVFUSE_PRIMARY_JOURNAL)
             /* A newly allocated partial block must not expose freed bytes. */
-            int fresh = sb->target->journal && fresh_block;
-            if (fresh) {
+            if (fresh_block) {
                 bh = nvfuse_get_bh(sb, ictx, inode->i_ino, lblock, WRITE, NVFUSE_TYPE_DATA);
                 memset(bh->bh_buf, 0, CLUSTER_SIZE);
             } else
@@ -1213,8 +1332,12 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
             }
 #endif
 			rte_memcpy(&bh->bh_buf[offset], user_buf + wcount, remain);
+            }
 		}
 
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+buffered_page_copied:
+#endif
 		wcount += remain;
 		of->rwoffset += remain;
 		count -= remain;
@@ -1226,9 +1349,18 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
 		inode->i_size = of->size;
 		assert(inode->i_size < MAX_FILE_SIZE);
 
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+        if (data_bc) { nvfuse_release_bc(sb, data_bc, 0, DIRTY); data_bc = NULL; }
+        else
+#endif
 		if (bh) nvfuse_release_bh(sb, bh, 0, DIRTY);
+#ifndef NVFUSE_PRIMARY_JOURNAL
 		nvfuse_release_inode(sb, ictx, DIRTY);
+#endif
 	}
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (ictx) nvfuse_release_inode(sb, ictx, DIRTY);
+#endif
 
 	#ifdef NVFUSE_FILE_BACKEND
     /* The public wrapper stages dirty buffers and commits after this returns.
