@@ -2,6 +2,7 @@
  * Metadata-only fixtures; physical CRC/reopen tests cover the integrated path. */
 #include "spdk/stdinc.h"
 #include "nvfuse_core.h"
+#include "nvfuse_dep.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_indirect.h"
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x); abort(); } } while(0)

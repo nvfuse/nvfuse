@@ -457,6 +457,9 @@ static int start(const char *json, const char *bdf, int format)
     rt.started = 1; rt.format = format;
     spdk_app_opts_init(&rt.opts, sizeof(rt.opts));
     rt.opts.name = "nvfuse_fio"; rt.opts.json_config_file = json;
+    /* Embedded Python/Go hosts own process signals, including after stop. */
+    const char *embedded = getenv("NVFUSE_SPDK_EMBEDDED");
+    rt.opts.disable_signal_handlers = embedded && !strcmp(embedded, "1");
     rt.opts.reactor_mask = mask ? mask : "0x3";
     rt.opts.mem_size = NVFIO_SPDK_MEMORY_MB;
     rt.opts.num_pci_addr = 1; rt.opts.pci_allowed = malloc(sizeof(rt.address));

@@ -1,5 +1,6 @@
 #define NVFIO_TEST
 #include "../../src/nvfuse_spdk_runtime.c"
+#include "nvfuse_inode_cache.h"
 int nvfio_test_cc_tryappend(int fd,const void*data,unsigned count,uint64_t offset)
 {int result=0;return commit_cache_write(fd,data,count,offset,&result)?result:0;}
 void nvfio_test_cc_dump(int fd)
