@@ -30,6 +30,55 @@ explicit bdev. The primary build defaults to 1024 descriptor slots, including
 three reserved slots. Compile the core and every linked application with the
 same `MAX_OPEN_FILE` if overriding that limit.
 
+## External storage adapters
+
+Keep application-specific storage readers in a separate integration package.
+Build the core with `make -f Makefile.spdk`, then link the adapter against
+`build/spdk-primary/nvfuse.a` and headers from that same source revision. The
+adapter build also needs the matching SPDK/DPDK headers, event/bdev modules and
+system libraries. Follow `tests/spdk/Makefile.tools` for the link requirements;
+copying a standalone archive alone is not an installed SDK. Rebuild adapters
+when the core, SPDK or application reader ABI changes; a stable binary ABI is
+not promised by this prerelease.
+
+The core boundary is `include/nvfuse_spdk_runtime.h`. Namespace and metadata
+callbacks additionally use the corresponding `nvfuse_api.h` and core types.
+An adapter owns application buffers, file routing and its version compatibility;
+the core owns filesystem state, metadata ordering and SPDK requests. Keep
+application checksums, search scheduling and benchmark tuning outside the core.
+
+For direct reads, allocate a client and requests, open an existing immutable
+file with `nvfio_open(path, 0)`, use `nvfio_dma_alloc()` and submit reads with
+`nvfio_submit(..., write=0)`. Buffers, offsets and lengths must be 4096-byte
+aligned. Retain every request and DMA buffer until its completion has been
+consumed with `nvfio_poll()`, check each request's error, and drain all accepted
+requests even after a partial submission failure. Close files and free clients
+before the final `nvfio_stop()`. A reader must not format an existing volume;
+provisioning and full-content verification precede serving.
+
+One process owns a volume. A multi-process service needs an explicit storage
+ownership design before several workers can use the same NVFUSE device.
+Supporting one graph reader does not redirect an application's WAL, object
+storage, metadata or index builder. Qualify lifecycle/reopen, data integrity,
+recall where relevant, version compatibility and performance separately.
+Applications linking NVFUSE must evaluate the combined distribution's GPLv2
+requirements; see [NOTICE](../NOTICE) and [COPYING](../COPYING).
+
+## Process signals and NUMA allocation
+
+By default, SPDK installs its ordinary process signal handlers. For an embedding
+application that owns process signals, set `NVFUSE_SPDK_EMBEDDED=1` before starting
+the runtime. NVFUSE then sets SPDK's `disable_signal_handlers` option. The caller
+remains responsible for quiescing requests and invoking `nvfio_stop()` in normal
+thread context; this option does not make the runtime restartable.
+
+IPC rings and mempools use the calling thread's NUMA socket by default.
+`NVFUSE_IPC_SOCKET_ANY=1` passes `SPDK_ENV_SOCKET_ID_ANY` to those allocations so
+an existing arena on another node can be used. It does not provision memory,
+move cores or change the bdev. Prefer local allocation when available; remote
+allocation may add latency. Both controls recognize exactly `1`; unset or other
+values retain their defaults.
+
 ## Serialization and cache ownership
 
 A short bounded spin precedes the ordinary filesystem mutex. Loaded cached

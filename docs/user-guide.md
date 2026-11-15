@@ -259,6 +259,35 @@ stable system SDK. The [modern engine Makefile](../examples/fio_plugin/modern/Ma
 and [API tool Makefile](../tests/spdk/Makefile.tools) show the required SPDK link
 configuration; `-lnvfuse` alone does not provide SPDK/event module registration.
 
+Application-specific readers belong in a separate integration package built
+against the same core revision and SPDK build. The core source distribution
+provides the archive build, headers and ownership contract; it does not install
+a stable binary SDK or application plugins. See
+[external storage adapters](api-spdk-runtime.md#external-storage-adapters) for
+linking, request lifetime, compatibility and distribution requirements.
+
+### Process signals and NUMA allocation
+
+Set runtime options before the first `nvfio_start()` call. The defaults retain
+SPDK's signal handlers and socket-local IPC ring/mempool allocation.
+
+| Variable | Default | When to use it |
+| --- | --- | --- |
+| `NVFUSE_SPDK_EMBEDDED` | Unset | Set exactly `1` when the embedding application manages process signals; NVFUSE disables SPDK's process signal handlers. |
+| `NVFUSE_IPC_SOCKET_ANY` | Unset | Set exactly `1` to allow IPC rings and mempools on any available NUMA socket when the local hugepage arena is unavailable. |
+
+With embedded signal handling enabled, the application must coordinate shutdown:
+stop new calls, consume accepted completions and release clients before calling
+`nvfio_stop()`. Do not call these operations directly from an asynchronous signal
+handler. The option does not add support for restarting the runtime in one process.
+
+Socket-any allocation does not reserve hugepages or change reactor affinity.
+It can select remote memory; prefer device-local cores and hugepages for normal
+operation. These are integration controls, not throughput presets. See the
+[runtime guide](api-spdk-runtime.md#process-signals-and-numa-allocation).
+
+### Runtime lifecycle
+
 The lifecycle is:
 
 1. Set the explicit bdev/BDF environment and call `nvfio_start(json, bdf, 0)` to

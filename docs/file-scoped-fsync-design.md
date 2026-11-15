@@ -1,7 +1,6 @@
 # File-scoped primary fsync
 
-Status: integrated and software-qualified on the performance branch. Final
-default measurements exceed XFS for the focused LevelDB short-batch target.
+Status: integrated with software crash/recovery coverage.
 `NVFUSE_JOURNAL_FILE_SYNC` defaults ON for the standalone primary. Eligibility still requires v3; existing volume versions and
 the default format version are unchanged. Set it to `0` for the original full
 collector. No on-disk format change.
@@ -98,4 +97,7 @@ shared log transactions and device barriers can persist additional changes.
 The contract does not require that only one file reach storage. NVFUSE retains
 the full collector whenever it cannot prove a complete dependency subset.
 
-Final qualification and both filesystem-order performance results are recorded in [the performance report](performance-xfs-parity-20261114.md). The broader all-profile XFS goal remains open; physical power-cut qualification was not performed.
+Use the [validation guide](testing-guide.md#primary-fio-and-metadata-measurements)
+for correctness and performance checks, and retain each run under
+`build/test-results/`. Software recovery coverage does not establish physical
+power-loss durability or a general performance advantage over XFS.

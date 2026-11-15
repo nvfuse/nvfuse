@@ -109,35 +109,13 @@ Run-specific logs, benchmark outputs, and temporary reports belong under
 `build/test-results/`. See [TODO](TODO) for remaining qualification work.
 No fixed XFS performance parity claim applies to every workload or durability mode.
 
-## Performance snapshot
+## Performance evaluation
 
-Measured at optimization checkpoint `6da7672` on Linux using the same 7.68 TB
-NVMe namespace sequentially for XFS and NVFUSE API + SPDK, with metadata
-journaling **ON, experimental v3**. Values are medians of three trials; these
-are development measurements, not results for the default v2 format or FUSE.
-
-| Workload | NVFUSE API + SPDK | XFS | NVFUSE vs. XFS |
-| --- | ---: | ---: | ---: |
-| fio 4 KiB random read | 1.048 M IOPS | 1.370 M IOPS | −23.5% |
-| fio 4 KiB random write | 1.265 M IOPS | 1.087 M IOPS | +16.4% |
-| fio 256 KiB sequential read | 6,735 MiB/s | 6,814 MiB/s | −1.2% |
-| fio 256 KiB sequential write | 6,071 MiB/s | 5,836 MiB/s | +4.0% |
-| LevelDB 1.23 single-key sync update | 35,430 ops/s | 32,250 ops/s | +9.9% |
-| RocksDB 9.10.0 single-key sync update | 37,870 ops/s | 30,708 ops/s | +23.3% |
-
-fio 3.41 used `direct=1`, four jobs, depth 32 per job, 20 GiB per file,
-10-second trials and `end_fsync=1`; writes were not individually synced.
-DB tests used prototype NVFUSE Env adapters versus native XFS Env, 100,000 keys,
-1 KiB values, WAL enabled and `sync=true` per write/batch. Their datasets fit in
-filesystem caches; 100-key batched updates were approximately 7% slower on
-NVFUSE for both databases.
-
-Both paths had four application CPUs; NVFUSE additionally used two runtime
-cores. XFS ran first, and another device was under soak load. Cache budgets
-differed (NVFUSE 512 MiB; XFS page cache unrestricted), so this is a complete
-access-path comparison, not an equal-CPU/cache efficiency claim. See the
-[validation guide](docs/testing-guide.md#primary-fio-and-metadata-measurements)
-for measurement requirements. Physical power-loss durability was not tested.
+Use the [validation guide](docs/testing-guide.md#primary-fio-and-metadata-measurements)
+to measure the primary API/SPDK path. Match workloads, sync boundaries, total
+CPU budgets, NUMA placement and cache state when comparing filesystems. Keep
+run-specific results under `build/test-results/`; application adapters and their
+tuning can change a complete-path comparison independently of the filesystem.
 
 ## Repository layout
 

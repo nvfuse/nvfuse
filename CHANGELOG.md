@@ -34,6 +34,9 @@ are not qualified.
 
 ### Integration and documentation
 
+- Embedded applications can retain their process signal handlers with
+  `NVFUSE_SPDK_EMBEDDED=1`. IPC allocation can use an existing arena on another
+  NUMA socket with `NVFUSE_IPC_SOCKET_ANY=1`; local allocation remains the default.
 - Modern fio integration, live `nvfuse-stat` monitoring and buffered API/SPDK
   I/O share the core runtime. Database performance measurements use prototype
   adapters; a production database integration is not included.
@@ -57,8 +60,9 @@ are not qualified.
   fsync/fdatasync commits filesystem-wide; ordinary completion is not a sync.
 - Physical power-cut testing, complete device-loss/error handling,
   same-directory contention and long-duration qualification remain open.
-- README performance numbers are historical v3-ON development measurements,
-  not default-v2, equal-CPU/cache, FUSE or universal XFS-parity claims.
+- Performance qualification depends on the workload, format, durability and
+  complete CPU/cache budgets. Run-specific benchmark results and experimental
+  application adapters are outside the distributed core and user guides.
 
 See [TODO](TODO) and the [validation guide](docs/testing-guide.md) for remaining
 qualification work. GPL v2 remains the project license; see [NOTICE](NOTICE)

@@ -15,7 +15,7 @@ explicit limits. Run-specific test reports belong under `build/test-results/`.
 | [User guide](user-guide.md) | Dependencies, builds, C API example, device preparation, format/reopen, Linux mounts, monitoring and troubleshooting |
 | [Validation guide](testing-guide.md) | Which test exercises which path; local/FUSE/SPDK/fio/metadata/fault coverage and result acceptance |
 | [Interface/backend matrix](backend-matrix.md) | Build boundaries, standalone backend selection and exclusive ownership |
-| [Primary API/SPDK runtime](api-spdk-runtime.md) | Shared core library, application integration and ownership contracts |
+| [Primary API/SPDK runtime](api-spdk-runtime.md) | Shared core library, external adapter build boundary, request lifetime and ownership contracts |
 | [Primary fio integration](spdk-fio.md) | Modern asynchronous engine, environment variables, supported I/O and comparisons |
 | [Live API/SPDK monitoring](spdk-live-monitoring.md) | iostat-style counters, multiple processes/devices, and metric limits |
 | [Linux FUSE integration](linux-fuse-integration.md) | Mounted semantics, ownership, xattrs and POSIX compatibility limits |
