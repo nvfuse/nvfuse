@@ -71,7 +71,7 @@ make -f Makefile.spdk fio \
 ```
 
 This builds `build/spdk-primary/nvfuse.a` and
-`examples/fio_plugin/modern/nvfuse_spdk.so`. It accesses NVFUSE files directly
+`integrations/fio/nvfuse_spdk.so`. It accesses NVFUSE files directly
 without a mounted directory. Follow the [device preparation and first-run
 instructions](docs/user-guide.md#primary-apispdk-on-linux) before running it.
 Formatting is explicit and destroys the selected volume's contents.
@@ -109,6 +109,14 @@ Run-specific logs, benchmark outputs, and temporary reports belong under
 `build/test-results/`. See [TODO](TODO) for remaining qualification work.
 No fixed XFS performance parity claim applies to every workload or durability mode.
 
+## Application integrations
+
+See the [integration index](integrations/README.md) for fio, LevelDB, RocksDB,
+LMCache, ANN with DiskANN and Milvus. Each directory contains its adapter scope,
+version references, build steps and checks. These are optional reference
+integrations; the core archive builds independently. Experimental results,
+imported data, binaries and per-host scripts are excluded from source commits.
+
 ## Performance evaluation
 
 Use the [validation guide](docs/testing-guide.md#primary-fio-and-metadata-measurements)
@@ -124,7 +132,8 @@ tuning can change a complete-path comparison independently of the filesystem.
 | `src/` | Filesystem core, backends, journaling and primary SPDK runtime |
 | `src/spdk_runtime/` | Private SPDK runtime queue, cache, completion and writeback helpers |
 | `include/` | Library headers |
-| `examples/` | Application examples, fio adapter and Linux FUSE frontend |
+| `examples/` | Minimal API examples and Linux FUSE frontend |
+| `integrations/` | Optional application adapters, build examples and guides |
 | `tests/` | Regression, recovery and benchmark tools |
 | `scripts/` | Build-environment, monitoring and test helpers |
 | `docs/` | User guides and core design documents |
@@ -136,7 +145,7 @@ Build entry points remain at the repository root. Libraries still build to
 ## Historical examples
 
 Plain `make`, `scripts/setup.sh`, `scripts/disable_aslr.sh`, and the old
-`examples/libfuse` / `examples/fio_plugin` integration belong to the legacy
+`examples/libfuse` / `integrations/fio/legacy` integration belong to the legacy
 build. They are not the modern installation procedure. In particular, the old
 setup script can rebind multiple controllers; do not use it as a shared-host
 quick start. Current entry points are the explicit local, FUSE, and

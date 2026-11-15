@@ -13,7 +13,7 @@
 # more details.
 #
 
-NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../..)
+NVFUSE_ROOT_DIR := $(abspath $(CURDIR)/../../..)
 NVFUSE_LIBS := $(NVFUSE_ROOT_DIR)/nvfuse.a
 
 include $(NVFUSE_ROOT_DIR)/nvfuse.mk

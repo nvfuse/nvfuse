@@ -54,7 +54,7 @@ $(LIB_NVFUSE)	:	$(OBJS)
 	$(AR) rcv $@ $(OBJS)
 
 fio_plugin:
-	make -C examples/fio_plugin
+	make -C integrations/fio/legacy
 
 reactor:
 	make -C examples/reactor
@@ -89,7 +89,7 @@ control_plane_proc:
 clean:
 	rm -rf $(LEGACY_BUILD)
 	rm -f *.o *.a *~ $(LIB_NVFUSE)
-	make -C examples/fio_plugin/ clean
+	make -C integrations/fio/legacy/ clean
 	make -C examples/reactor/ clean
 	make -C examples/helloworld/ clean
 	make -C examples/libfuse/ clean

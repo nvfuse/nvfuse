@@ -1,0 +1,22 @@
+# Reusable source/configuration is tracked; generated material is not.
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.d
+*.pyc
+__pycache__/
+.venv/
+build/
+results/
+reports/
+artifacts/
+*.log
+*.img
+*.qcow2
+perf.data*
+*.dSYM/
+.pytest_cache/
+/fio/legacy/fio_plugin

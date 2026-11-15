@@ -62,7 +62,8 @@ are not qualified.
   same-directory contention and long-duration qualification remain open.
 - Performance qualification depends on the workload, format, durability and
   complete CPU/cache budgets. Run-specific benchmark results and experimental
-  application adapters are outside the distributed core and user guides.
+  outputs remain outside the source distribution. Optional reference adapters
+  and their guides are organized under `integrations/`.
 
 See [TODO](TODO) and the [validation guide](docs/testing-guide.md) for remaining
 qualification work. GPL v2 remains the project license; see [NOTICE](NOTICE)

@@ -10,3 +10,7 @@
 /docs/performance-results export-ignore
 /docs/performance-*.md export-ignore
 /experiments export-ignore
+/integrations/**/results export-ignore
+/integrations/**/reports export-ignore
+/integrations/**/artifacts export-ignore
+/integrations/**/build export-ignore

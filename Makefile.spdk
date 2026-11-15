@@ -21,7 +21,7 @@ $(SPDK_BUILD)/%.o: src/%.c
 $(SPDK_BUILD)/nvfuse.a: $(PRIMARY_OBJECTS)
 	$(AR) rcs $@ $^
 fio: $(SPDK_BUILD)/nvfuse.a
-	$(MAKE) -C examples/fio_plugin/modern SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) FIO_SOURCE_DIR=$(abspath $(FIO_SOURCE_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
+	$(MAKE) -C integrations/fio SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) FIO_SOURCE_DIR=$(abspath $(FIO_SOURCE_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
 queue-test: $(SPDK_BUILD)/nvfuse.a
 	$(MAKE) -C tests/spdk -f Makefile.queue SPDK_ROOT_DIR=$(abspath $(SPDK_ROOT_DIR)) NVFUSE_ARCHIVE=$(abspath $(SPDK_BUILD)/nvfuse.a)
 	tests/spdk/reactor_poll_queue_test

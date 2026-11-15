@@ -1,5 +1,5 @@
 [api-verify]
-ioengine=./examples/fio_plugin/modern/nvfuse_spdk.so
+ioengine=./integrations/fio/nvfuse_spdk.so
 thread=1
 numjobs=1
 nrfiles=1

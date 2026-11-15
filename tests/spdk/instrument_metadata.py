@@ -39,7 +39,7 @@ def instrument(source, output):
     files = list((source / 'src').glob('*.c')) + [source / 'Makefile.spdk']
     files += list((source / 'include').glob('*.h'))
     files += list((source / 'src').glob('*.inc')) + list((source / 'src/spdk_runtime').glob('*'))
-    files += [p for p in (source / 'examples/fio_plugin/modern').iterdir()
+    files += [p for p in (source / 'integrations/fio').iterdir()
               if p.suffix in ('.c', '.h', '.map') or p.name == 'Makefile']
     files += [source / 'tests/spdk' / n for n in
               ['metadata_bench.c', 'Makefile.tools']]

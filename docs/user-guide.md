@@ -57,7 +57,7 @@ git clone --branch fio-3.41 https://github.com/axboe/fio.git "$HOME/src/fio"
 
 Install missing dependencies reported by configure before continuing. The default
 SPDK build must include the event/bdev/NVMe components and modules used by
-`examples/fio_plugin/modern/Makefile`. This project does not download a prebuilt
+`integrations/fio/Makefile`. This project does not download a prebuilt
 SPDK library or automatically configure the host's device drivers.
 
 ## First filesystem: API + image
@@ -111,7 +111,7 @@ mkdir -p build/config build/test-results/first-spdk
 ```
 
 Outputs are `build/spdk-primary/nvfuse.a` and
-`examples/fio_plugin/modern/nvfuse_spdk.so`. `make spdk-primary` and
+`integrations/fio/nvfuse_spdk.so`. `make spdk-primary` and
 `make spdk-fio` are convenience targets. Plain `make` is the historical build.
 
 Before binding a controller, identify an unused namespace by **serial, PCI BDF,
@@ -194,7 +194,7 @@ sudo env NVFUSE_SPDK_JSON="$PWD/build/config/bdev.json" \
   NVFUSE_SPDK_CORE_MASK="$NVFUSE_TEST_CORES" \
   NVFUSE_JOURNAL=1 NVFUSE_FORMAT=1 NVFUSE_SPDK_STATS=1 \
   prlimit --core=0 --memlock=unlimited \
-  "$FIO_DIR/fio" examples/fio_plugin/modern/api-verify.fio \
+  "$FIO_DIR/fio" integrations/fio/api-verify.fio \
   --output-format=json --output="$PWD/build/test-results/first-spdk/write.json" \
   > build/test-results/first-spdk/write.log 2>&1
 ```
@@ -215,7 +215,7 @@ sudo env NVFUSE_SPDK_JSON="$PWD/build/config/bdev.json" \
   NVFUSE_SPDK_CORE_MASK="$NVFUSE_TEST_CORES" \
   NVFUSE_JOURNAL=1 NVFUSE_FORMAT=0 NVFUSE_SPDK_STATS=1 \
   prlimit --core=0 --memlock=unlimited \
-  "$FIO_DIR/fio" examples/fio_plugin/modern/api-verify.fio \
+  "$FIO_DIR/fio" integrations/fio/api-verify.fio \
   --rw=read --verify_only=1 --output-format=json \
   --output="$PWD/build/test-results/first-spdk/read.json" \
   > build/test-results/first-spdk/read.log 2>&1
@@ -224,7 +224,7 @@ sudo env NVFUSE_SPDK_JSON="$PWD/build/config/bdev.json" \
 Check the fio return code, each job's `error`, verification output, and logs for
 `NVFUSE_JOURNAL enabled=1` with the expected version and capacity. Checksum success
 and clean reopen test persistence, not physical SSD power-loss durability.
-The [fio reference](spdk-fio.md) documents alignment, queue/job limits and the
+The [fio reference](../integrations/fio/README.md) documents alignment, queue/job limits and the
 six sequential/random comparison profiles.
 
 ### Monitor and stop
@@ -255,12 +255,12 @@ changing other devices. The frontend does not perform this restoration for you.
 opener. The current in-tree application integration reference is
 [`src/nvfuse_spdk_runtime.c`](../src/nvfuse_spdk_runtime.c) with
 [`nvfuse_spdk_runtime.h`](../include/nvfuse_spdk_runtime.h). It is not an installed,
-stable system SDK. The [modern engine Makefile](../examples/fio_plugin/modern/Makefile)
+stable system SDK. The [modern engine Makefile](../integrations/fio/Makefile)
 and [API tool Makefile](../tests/spdk/Makefile.tools) show the required SPDK link
 configuration; `-lnvfuse` alone does not provide SPDK/event module registration.
 
-Application-specific readers belong in a separate integration package built
-against the same core revision and SPDK build. The core source distribution
+Application-specific readers live in [`integrations/`](../integrations/README.md)
+and build against the same core revision and SPDK build. The core source distribution
 provides the archive build, headers and ownership contract; it does not install
 a stable binary SDK or application plugins. See
 [external storage adapters](api-spdk-runtime.md#external-storage-adapters) for
@@ -307,7 +307,7 @@ The lifecycle is:
    runtime lifecycle; this reference is not restartable in the same process.
 
 See [`metadata_bench.c`](../tests/spdk/metadata_bench.c) for owner callbacks,
-[`fio_nvfuse.c`](../examples/fio_plugin/modern/fio_nvfuse.c) for asynchronous
+[`fio_nvfuse.c`](../integrations/fio/fio_nvfuse.c) for asynchronous
 submission/completion, and [primary journaling](spdk-primary-journaling.md) for
 ordering and durability. Optional `nvfuse_tx_*` application transactions are a
 separate standalone-runtime feature.

@@ -19,7 +19,7 @@ def instrument(source_dir, output_dir):
     files = list((source_dir / 'src').glob('*.c')) + [source_dir / 'Makefile.spdk']
     files += list((source_dir / 'include').glob('*.h'))
     files += list((source_dir / 'src').glob('*.inc')) + list((source_dir / 'src/spdk_runtime').glob('*'))
-    files += [p for p in (source_dir / 'examples/fio_plugin/modern').iterdir()
+    files += [p for p in (source_dir / 'integrations/fio').iterdir()
               if p.suffix in ('.c', '.h', '.map') or p.name == 'Makefile']
     manifest = {}
     for src in files:

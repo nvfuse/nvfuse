@@ -32,7 +32,8 @@ same `MAX_OPEN_FILE` if overriding that limit.
 
 ## External storage adapters
 
-Keep application-specific storage readers in a separate integration package.
+Application-specific adapters and their guides live under
+[`integrations/`](../integrations/README.md), outside the filesystem sources.
 Build the core with `make -f Makefile.spdk`, then link the adapter against
 `build/spdk-primary/nvfuse.a` and headers from that same source revision. The
 adapter build also needs the matching SPDK/DPDK headers, event/bdev modules and
@@ -164,7 +165,7 @@ point only while holding its exclusive filesystem gate in standalone mode;
 generic AIO callers keep the ordinary entry point and locking.
 Journal version remains an explicit formatting choice; use
 `NVFUSE_JOURNAL_FORMAT_VERSION=3` when creating a v3 filesystem. Existing volumes
-must be reopened with formatting disabled. See [the fio guide](spdk-fio.md) for
+must be reopened with formatting disabled. See [the fio guide](../integrations/fio/README.md) for
 build and workload commands.
 
 ## Verification

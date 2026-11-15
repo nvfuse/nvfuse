@@ -19,7 +19,7 @@ primary API/SPDK performance. Complete the [user guide](user-guide.md) first.
 | Broader mounted behavior/reference workload? | `make fuse-extended-test` | Extended FUSE tests including an independently built fsx |
 | API/FUSE backend combinations? | `make backend-regression` | Three rounds of the four Linux image/kernel combinations, with sanitizers |
 | All six combinations? | `make backend-regression-qemu` | Dedicated QEMU fixture, including the synchronous SPDK transport |
-| Primary API/SPDK data path? | Modern fio engine and `tests/spdk/run_primary_fio.py` | Actual asynchronous filesystem requests and CRC verification |
+| Primary API/SPDK data path? | Modern fio engine and `integrations/fio/verify.py` | Actual asynchronous filesystem requests and CRC verification |
 
 Standalone exhaustion tests do not imply complete primary-path ENOSPC handling.
 Functional regression targets are not benchmark results. Read individual runner
@@ -133,14 +133,14 @@ Original-volume reopen and content verification must succeed separately.
 
 ## Primary fio and metadata measurements
 
-Follow [primary fio setup](spdk-fio.md) using SPDK v26.09 and the exact fio 3.41
+Follow [primary fio setup](../integrations/fio/README.md) using SPDK v26.09 and the exact fio 3.41
 build. Start with CRC write/verify, then a separate-process CRC read of the same
 files. Read workloads need previously populated data. Keep journal mode, sync
 policy, file sizes, block size, queue depth, job count, NUMA placement, cache
 state and device identity with every result. Earlier OFF-mode data is not an
 ON-mode durability comparison.
 
-The optional `tests/spdk/run_primary_fio.py` regression explicitly requires
+The optional `integrations/fio/verify.py` regression explicitly requires
 `--format` and overwrites the selected volume. It does not bind devices or
 reserve hugepages. Use an image/AIO bdev or an intentionally disposable NVMe,
 never a volume containing data you want to retain. A failing step must stop
@@ -169,7 +169,7 @@ is retained. See [`metadata_bench.c`](../tests/spdk/metadata_bench.c) for option
 
 For XFS comparisons, use a real NVMe-backed XFS mount and match the durability
 condition, data set and test duration. The six-profile fio runner in
-[spdk-fio.md](spdk-fio.md#short-xfs-comparison-profiles) does not format or mount
+[spdk-fio.md](../integrations/fio/README.md#short-xfs-comparison-profiles) does not format or mount
 XFS for you. API/SPDK versus XFS/libaio measures different complete access paths;
 report CPU cost as well as IOPS/bandwidth. Avoid universal parity claims.
 

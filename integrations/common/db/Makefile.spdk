@@ -1,0 +1,13 @@
+# Link an already compiled reference Env/workload against the supplied core.
+SPDK_ROOT_DIR ?= $(HOME)/src/spdk
+NVFUSE_ROOT_DIR ?=
+NVFUSE_ARCHIVE ?= $(NVFUSE_ROOT_DIR)/build/spdk-primary/nvfuse.a
+APP = kv_app
+include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
+include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
+C_SRCS = nvbridge.c
+CFLAGS += -DDEBUG -DSPDK_ENABLED -DNVFUSE_PRIMARY_JOURNAL -D_GNU_SOURCE -I$(NVFUSE_ROOT_DIR)/include -I$(SPDK_ROOT_DIR)/dpdk/build/include
+LIBS += -Wl,--no-as-needed app.o $(DB_LIBRARY) $(DB_EXTRA_LIBS) $(NVFUSE_ARCHIVE) -lstdc++ -ldl -lm -lpthread -laio -luuid
+SPDK_LIB_LIST += event $(EVENT_BDEV_SUBSYSTEM) $(KEYRING_MODULES_LIST) $(BLOCKDEV_MODULES_LIST) $(SOCK_MODULES_LIST) bdev
+include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
+$(APP): $(NVFUSE_ARCHIVE) app.o $(DB_LIBRARY)

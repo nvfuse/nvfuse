@@ -2,7 +2,7 @@
 
 The primary reactor links the shared physical-redo journal engine through one
 serialized filesystem owner. This is the asynchronous API/SPDK path used by the
-[modern fio engine](spdk-fio.md), separate from the synchronous compatibility
+[modern fio engine](../integrations/fio/README.md), separate from the synchronous compatibility
 transport used by standalone API and FUSE mounts.
 
 ## Format and durability boundary

@@ -19,11 +19,11 @@ The reusable kernel-workload runner, `tests/spdk/fs_soak.c` and its portable
 oracle tests are included. The lab supervisor embeds a particular approved
 device identity and is not a user-facing launcher. User guides describe generic
 worker orchestration instead. Excluded local files are preserved in the working
-tree or in a separate experiment checkout. Application-specific AI adapters,
-image-download helpers, host-specific run scripts and benchmark result archives
-are outside this source PR. Keep them in their experiment checkout; the core
-and user guides must build and work without them. Generic fio/FUSE examples and
-reusable regression tools remain in scope.
+tree or in a separate experiment checkout. The optional `integrations/` tree
+contains reusable application adapters, build files, configuration examples and
+guides. It must not be required to build the core archive. Per-host automation,
+measurements, binary/index/image archives and downloaded dependencies stay out
+of the source PR. Generic FUSE examples and regression tools remain in scope.
 
 `.gitignore` guards additions; `.gitattributes` excludes the listed paths from
 `git archive`. Neither mechanism removes already committed history.
