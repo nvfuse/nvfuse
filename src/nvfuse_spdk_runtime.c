@@ -19,6 +19,7 @@
 #include "spdk_runtime/stats.h"
 #include "spdk_runtime/completion.h"
 #include "spdk_runtime/api_queue.h"
+#include "nvfuse_commit_cache.h"
 #include <sys/mman.h>
 #define CLIENT_QUEUES 4
 struct nvfio_lane { struct nvfuse_aio_queue queue; unsigned reserved; };
@@ -61,8 +62,40 @@ static void lock_fs_gate(void)
     pthread_mutex_lock(&fs_gate);
 }
 static int api_cache_owner;
+static int aio_owner_mapping;
 static uint64_t cache_owner_reads;
 static int api_cache_read = 1;
+/* Bounded retry only for the loaded-page caller path. The
+ * original owner-dispatch fallback remains mandatory for pending AIO. */
+static int api_cache_retry;
+static unsigned api_cache_retry_budget_us = 50;
+static atomic_uint_fast64_t cache_retry_attempts, cache_retry_wins, cache_retry_timeouts;
+static int commit_cache_read(int,void *,int,uint64_t,int *);
+static int try_cache_gate(int fd,void *data,int count,uint64_t offset,int *result)
+{
+    if (!pthread_mutex_trylock(&fs_gate)) return 1;
+    if (!api_cache_retry) return 0;
+    atomic_fetch_add_explicit(&cache_retry_attempts, 1, memory_order_relaxed);
+    uint64_t start = spdk_get_ticks(), ticks = spdk_get_ticks_hz() * api_cache_retry_budget_us / 1000000;
+    do {
+        for (unsigned i = 0; i < 16; i++) {
+#if defined(__x86_64__) || defined(__i386__)
+            __asm__ __volatile__("pause");
+#elif defined(__aarch64__)
+            __asm__ __volatile__("yield");
+#else
+            atomic_signal_fence(memory_order_seq_cst);
+#endif
+            if (commit_cache_read(fd,data,count,offset,result))return 2;
+            if (!pthread_mutex_trylock(&fs_gate)) {
+                atomic_fetch_add_explicit(&cache_retry_wins, 1, memory_order_relaxed);
+                return 1;
+            }
+        }
+    } while (spdk_get_ticks() - start < ticks);
+    atomic_fetch_add_explicit(&cache_retry_timeouts, 1, memory_order_relaxed);
+    return 0;
+}
 /* Descriptor sizes stay valid until the next serialized callback. Mutations
  * and AIO client lifecycle changes must run through the same gate. */
 static int api_size_epoch = 1;
@@ -107,6 +140,7 @@ struct call {
     int (*work)(struct nvfuse_handle *, void *);
     void *argument;
 };
+#include "spdk_runtime/commit_cache.inc"
 #include "spdk_runtime/buffered_wb.inc"
 static int service_clients(void *unused);
 static int publish_stats(void *unused)
@@ -331,6 +365,19 @@ static int start(const char *json, const char *bdf, int format)
             return -EINVAL;
         gate_spin_us = (unsigned)value;
     }
+    const char *cc=getenv("NVFUSE_API_COMMIT_CACHE");
+    if(cc && strcmp(cc,"0") && strcmp(cc,"1"))return -EINVAL;
+    commit_cache_enabled=!cc||!strcmp(cc,"1");
+#ifdef NVFUSE_KEEP_DIRTY_BH_IN_ICTX
+    commit_cache_enabled=0;
+#endif
+    memset(&commit_cache,0,sizeof(commit_cache));
+    const char *dc=getenv("NVFUSE_API_DATA_CACHE");
+    if(dc && strcmp(dc,"0") && strcmp(dc,"1"))return -EINVAL;
+    data_cache_enabled=commit_cache_enabled && (!dc||!strcmp(dc,"1"));
+    commit_cache_excluded_ino=0;
+    data_cache_windows=data_cache_reads=data_cache_writes=data_cache_bytes=0;
+    nvfuse_commit_cache_hooks(commit_cache_open,commit_cache_close);
     const char *writeback=getenv("NVFUSE_API_BUFFERED_WB");
     if(writeback && strcmp(writeback,"0") && strcmp(writeback,"1"))return -EINVAL;
     buffered_wb_enabled=!writeback||strcmp(writeback,"0");memset(&buffered_wb,0,sizeof(buffered_wb));
@@ -342,12 +389,24 @@ static int start(const char *json, const char *bdf, int format)
         if(!*window||*window<'0'||*window>'9'||*end||errno||n<NVWB_MIN||n>NVWB_MAX)return -EINVAL;
         buffered_wb_window=(unsigned)n;}
 
+    const char *mapping=getenv("NVFUSE_AIO_OWNER_MAPPING");
+    if(mapping && strcmp(mapping,"0") && strcmp(mapping,"1"))return -EINVAL;
+    aio_owner_mapping=!mapping||strcmp(mapping,"0");
     const char *owner_cache=getenv("NVFUSE_API_CACHE_OWNER");
     if(owner_cache && strcmp(owner_cache,"0") && strcmp(owner_cache,"1"))return -EINVAL;
     api_cache_owner=!owner_cache||strcmp(owner_cache,"0");cache_owner_reads=0;
     const char *size_mode = getenv("NVFUSE_API_SIZE_EPOCH");
     if (size_mode && strcmp(size_mode, "0") && strcmp(size_mode, "1")) return -EINVAL;
     api_size_epoch = !size_mode || strcmp(size_mode, "0");
+    const char *retry = getenv("NVFUSE_API_CACHE_RETRY");
+    if (retry && strcmp(retry, "0") && strcmp(retry, "1")) return -EINVAL;
+    api_cache_retry = !retry || !strcmp(retry, "1");
+    const char *retry_budget = getenv("NVFUSE_API_CACHE_RETRY_US");
+    if (retry_budget && strcmp(retry_budget, "10") && strcmp(retry_budget, "50")) return -EINVAL;
+    api_cache_retry_budget_us = retry_budget ? (unsigned)strtoul(retry_budget, NULL, 10) : 50;
+    atomic_store(&cache_retry_attempts, 0);
+    atomic_store(&cache_retry_wins, 0);
+    atomic_store(&cache_retry_timeouts, 0);
     const char *cache_read = getenv("NVFUSE_API_CACHE_READ");
     if (cache_read && strcmp(cache_read, "0") && strcmp(cache_read, "1")) return -EINVAL;
     api_cache_read = !cache_read || strcmp(cache_read, "0");
@@ -482,6 +541,22 @@ static void close_fs(struct call *c)
     int rc = nvfuse_closefile(rt.handle, c->fd); c->result = rc < 0 ? api_error(rc) : 0;
 }
 int nvfio_close(int fd) { struct call c = {.fn = close_fs, .fd = fd}; return dispatch(&c); }
+/* Phase-boundary diagnostics only: no dispatch, writeback drain, epoch change,
+ * filesystem operation or journal mutation. Call outside benchmark timers. */
+int nvfio_file_sync_stats(uint64_t out[8])
+{
+    lock_fs_gate();
+    if (!rt.handle || !rt.handle->nvh_target->journal) {
+        pthread_mutex_unlock(&fs_gate); return -EIO;
+    }
+    struct io_target *t = rt.handle->nvh_target;
+    const struct nvj_stats *s = nvj_stats(t->journal);
+    out[0] = t->journal_file_sync_calls; out[1] = t->journal_file_sync_hits;
+    out[2] = t->journal_file_sync_deferred; out[3] = t->journal_file_sync_allocations;
+    out[4] = s->commits; out[5] = s->journal_bytes;
+    out[6] = t->journal_dirty_blocks; out[7] = t->journal_dirty_requests;
+    pthread_mutex_unlock(&fs_gate); return 0;
+}
 static void sync_fs(struct call *c)
 {
     if (rt.handle->nvh_target->journal) {
@@ -508,7 +583,9 @@ static void submit_fs(struct call *c)
         }
     if (!lane) { c->result = -EAGAIN; return; }
     r->lane = lane;
-    int rc = nvfuse_aio_queue_submission(rt.handle, &lane->queue, &r->aio);
+    int rc = aio_owner_mapping ?
+        nvfuse_aio_queue_submission_serialized(rt.handle, &lane->queue, &r->aio) :
+        nvfuse_aio_queue_submission(rt.handle, &lane->queue, &r->aio);
     if (rc) { c->result = api_error(rc); return; }
     lane->reserved += r->blocks; c->client->inflight++;
 }
@@ -696,7 +773,10 @@ int nvfio_pread(int fd, void *buffer, size_t bytes, uint64_t offset)
     if (fd < 0 || fd >= MAX_OPEN_FILE || bytes > INT32_MAX || offset > INT64_MAX ||
         (!buffer && bytes)) return -EINVAL;
     struct read_call request = {fd, buffer, bytes, offset};
-    if (api_cache_read && !pthread_mutex_trylock(&fs_gate)) {
+    int concurrent_result;
+    int acquired=api_cache_read?try_cache_gate(fd,buffer,(int)bytes,offset,&concurrent_result):0;
+    if(acquired==2)return concurrent_result;
+    if (acquired==1) {
         if (!rt.handle) { pthread_mutex_unlock(&fs_gate); return -EIO; }
         int result, hit = !rt.clients && !atomic_load_explicit(&rt.data_failed, memory_order_acquire) &&
             cached_copy(&rt.handle->nvh_sb, fd, buffer, bytes, offset, &result);
@@ -836,7 +916,10 @@ void nvfio_dma_free(void *buffer) { spdk_dma_free(buffer); }
 static void unmount_fs(struct call *c)
 {
     if (rt.clients) { c->result = -EBUSY; return; }
+    printf("NVFUSE_COMMIT_CACHE enabled=%d reads=%" PRIu64 " writes=%" PRIu64 " bytes=%" PRIu64 " misses=%" PRIu64 " windows=%" PRIu64 " state=%u\n",commit_cache_enabled,commit_cache.reads,commit_cache.writes,commit_cache.bytes,commit_cache.misses,commit_cache.windows,atomic_load(&commit_cache.state));
+    printf("NVFUSE_DATA_CACHE enabled=%d windows=%" PRIu64 " reads=%" PRIu64 " writes=%" PRIu64 " bytes=%" PRIu64 "\n",data_cache_enabled,data_cache_windows,data_cache_reads,data_cache_writes,data_cache_bytes);
     printf("NVFUSE_CACHE_OWNER enabled=%d reads=%" PRIu64 "\n",api_cache_owner,cache_owner_reads);
+    printf("NVFUSE_AIO_MAPPING enabled=%d attempts=%" PRIu64 " hits=%" PRIu64 "\n",aio_owner_mapping,rt.handle->nvh_target->aio_mapping_attempts,rt.handle->nvh_target->aio_mapping_hits);
     buffered_wb_finish();
     spdk_poller_unregister(&rt.data_poller);
     stop_stats();
@@ -851,8 +934,33 @@ int nvfio_stop(void)
     pthread_mutex_lock(&lifecycle);
     if (!references) { pthread_mutex_unlock(&lifecycle); return 0; }
     if (--references) { pthread_mutex_unlock(&lifecycle); return 0; }
+    printf("NVFUSE_CACHE_RETRY_BUDGET us=%u\n", api_cache_retry_budget_us);
+    printf("NVFUSE_CACHE_RETRY enabled=%d attempts=%" PRIu64 " wins=%" PRIu64 " timeouts=%" PRIu64 "\n",
+           api_cache_retry, (uint64_t)atomic_load(&cache_retry_attempts),
+           (uint64_t)atomic_load(&cache_retry_wins), (uint64_t)atomic_load(&cache_retry_timeouts));
     printf("NVFUSE_CALLER_CACHE hits=%" PRIu64 " misses=%" PRIu64 " fallback=%" PRIu64 "\n", (uint64_t)atomic_load(&cache_hits), (uint64_t)atomic_load(&cache_misses), (uint64_t)atomic_load(&cache_busy));
     struct call c = {.fn = unmount_fs}; int rc = dispatch(&c);
     if (!rc) { spdk_app_stop(0); pthread_join(rt.thread, NULL); }
     pthread_mutex_unlock(&lifecycle); return rc;
+}
+
+/* Read-only snapshot. The gate also excludes a borrowed cache executor. */
+int nvfio_commit_cache_stats(uint64_t out[8])
+{
+    if (!out) return -EINVAL;
+    lock_fs_gate();
+    if (!rt.handle) {
+        pthread_mutex_unlock(&fs_gate);
+        return -EIO;
+    }
+    out[0] = commit_cache.reads;
+    out[1] = commit_cache.writes;
+    out[2] = commit_cache.bytes;
+    out[3] = commit_cache.windows;
+    out[4] = data_cache_windows;
+    out[5] = data_cache_reads;
+    out[6] = data_cache_writes;
+    out[7] = data_cache_bytes;
+    pthread_mutex_unlock(&fs_gate);
+    return 0;
 }

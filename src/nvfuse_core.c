@@ -49,6 +49,7 @@
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_inode_cache.h"
 #include "nvfuse_core.h"
+#include "nvfuse_commit_cache.h"
 #include "nvfuse_io_manager.h"
 #include "nvfuse_gettimeofday.h"
 #include "nvfuse_indirect.h"
@@ -218,6 +219,9 @@ u32 nvfuse_find_free_inode(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx
 
 void nvfuse_free_inode_size(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, s64 size)
 {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    if (sb->target->journal) sb->target->journal_file_sync_unsafe = 1;
+#endif
 	struct nvfuse_inode *inode;
 	lbno_t offset;
 	u32 num_block, trun_num_block;
@@ -349,6 +353,12 @@ RES:
 	ip->i_ino = alloc_ino;
 	ip->i_deleted = 0;
 	ip->i_version++;
+
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    /* Inode generations are currently reset by allocation. Do not infer
+     * lifetime identity from i_version until a full commit fences reuse. */
+    if (sb->target->journal) sb->target->journal_file_sync_unsafe = 1;
+#endif
 
 	nvfuse_release_bh(sb, bh, 0, DIRTY);
 
@@ -1009,7 +1019,7 @@ void nvfuse_release_jobs(struct nvfuse_superblock *sb, struct io_job **jobs, int
 	rte_mempool_put_bulk((struct rte_mempool *)sb->io_job_mempool, (void **)jobs, numjobs);
 }
 
-void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks)
+static void sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks, inode_t scoped_ino)
 {
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;
 	struct list_head *ptr, *temp;
@@ -1115,12 +1125,20 @@ void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks)
         sb->target->journal_dirty_blocks += num_blocks;
         sb->target->journal_dirty_requests += issued;
         reactor_submit_reqs(sb->target, task, vectors, issued);
+        int overlap=scoped_ino && nvfuse_file_data_cache_open(sb,scoped_ino);
         nvfuse_wait_aio_completion(sb, task, done, issued);
+        if(overlap)nvfuse_file_data_cache_close();
     } else
 #endif
     {
         reactor_submit_reqs(sb->target, task, jobs, num_blocks);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+        int overlap=scoped_ino && nvfuse_file_data_cache_open(sb,scoped_ino);
+#endif
         nvfuse_wait_aio_completion(sb, task, jobs, num_blocks);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+        if(overlap)nvfuse_file_data_cache_close();
+#endif
     }
 
 	nvfuse_release_jobs(sb, jobs, num_blocks);
@@ -1130,6 +1148,9 @@ void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks)
 	reactor_free_task(sb->target, task);
 #endif
 }
+
+void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb,s32 num_blocks)
+{sync_dirty_data(sb,num_blocks,0);}
 
 void nvfuse_update_sb_with_bd_info(struct nvfuse_superblock *sb, s32 bg_id, s32 is_root_container,
 				   s32 increament)
@@ -2654,8 +2675,8 @@ static int nvfuse_append_cache_ready(struct nvfuse_buffer_cache *bc)
  * path and loaded BG/bitmap pages. Every cold/boundary/fragmented/pinned case
  * falls back before any allocation or file mutation. No persistent mapping,
  * disk layout, reservation or durability rule changes. */
-int nvfuse_append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
-                               lbno_t block, const s8 *data, u32 bytes)
+static int append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                               lbno_t block, const s8 *data, u32 bytes, int frozen)
 {
     struct nvfuse_buffer_manager *bm = sb->sb_bm;
     struct nvfuse_inode *inode = ictx->ictx_inode;
@@ -2687,6 +2708,7 @@ int nvfuse_append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_
          * excludes changing its pointer path until this operation finishes. */
     }
     if (*slot) goto unlock_leaf; /* Includes existing fallocate mappings. */
+    if (frozen && leaf && !nvj_metadata_known_frozen(sb->target->journal,leaf_pno)) goto unlock_leaf;
     bg = inode->i_ino / sb->sb_no_of_inodes_per_bg;
     if (sb->sb_last_allocated_bgid >= 0 && sb->sb_last_allocated_bgid < sb->sb_bg_num &&
         bg != sb->sb_last_allocated_bgid) {
@@ -2773,7 +2795,7 @@ unlock_leaf:
     if (leaf) SPINLOCK_UNLOCK(&leaf->bc_lock);
 out:
     SPINLOCK_UNLOCK(&bm->bm_lock);
-    if (copied) {
+    if (copied && !frozen) {
         nvj_mark_metadata(sb->target->journal, bg * sb->sb_no_of_blocks_per_bg + NVFUSE_BD_OFFSET);
         nvj_mark_metadata(sb->target->journal, bitmap_pno);
         if (leaf_pno) nvj_mark_metadata(sb->target->journal, leaf_pno);
@@ -2781,6 +2803,12 @@ out:
     if (copied) sb->target->buffered_fast_append_hits++;
     return copied;
 }
+int nvfuse_append_cached_page(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                             lbno_t block,const s8 *data,u32 bytes)
+{return append_cached_page(sb,ictx,block,data,bytes,0);}
+int nvfuse_append_cached_page_frozen(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx,
+                             lbno_t block,const s8 *data,u32 bytes)
+{return append_cached_page(sb,ictx,block,data,bytes,1);}
 #endif
 
 u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 *alloc_blks, u32 num_blocks)
@@ -2863,6 +2891,10 @@ u32 nvfuse_alloc_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, u32 *alloc_blk
 
 u32 nvfuse_free_dbitmap(struct nvfuse_superblock *sb, u32 bg_id, nvfuse_loff_t offset, u32 count)
 {
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    /* Free/reallocate ABA must be resolved by a full ordered commit. */
+    if (sb->target->journal) sb->target->journal_file_sync_unsafe = 1;
+#endif
 	struct nvfuse_bg_descriptor *bd;
 	struct nvfuse_buffer_head *bd_bh, *bh;
 	struct nvfuse_buffer_cache *bd_bc, *bc;
@@ -3287,7 +3319,7 @@ int nvfuse_read_block(char *buf, unsigned long block, struct io_target *target)
 	return nvfuse_read_cluster(buf, block, target);
 }
 
-void nvfuse_flush_dirty_data(struct nvfuse_superblock *sb) 
+static void flush_dirty_data(struct nvfuse_superblock *sb, inode_t ino, int scoped)
 {
 	struct nvfuse_buffer_manager *bm = sb->sb_bm;
 	struct list_head *dirty_head, *flushing_head;
@@ -3306,6 +3338,8 @@ void nvfuse_flush_dirty_data(struct nvfuse_superblock *sb)
 		list_for_each_safe(ptr, temp, dirty_head) {
 			bc = (struct nvfuse_buffer_cache *)list_entry(ptr, struct nvfuse_buffer_cache, bc_list);
 
+            if (scoped && bc->bc_ino != ino) continue;
+
 			SPINLOCK_LOCK(&bc->bc_lock);
 
 			assert(bc->bc_dirty);
@@ -3321,8 +3355,10 @@ void nvfuse_flush_dirty_data(struct nvfuse_superblock *sb)
 		}
 		SPINLOCK_UNLOCK(&bm->bm_lock);
 
+        if (!flushing_count) { assert(scoped); break; }
+
 		/* sync dirty data to SSD */
-		nvfuse_sync_dirty_data(sb, flushing_count);
+		sync_dirty_data(sb, flushing_count, scoped ? ino : 0);
 
 		/* move dirty data to clean list */
 		SPINLOCK_LOCK(&bm->bm_lock);
@@ -3346,6 +3382,17 @@ void nvfuse_flush_dirty_data(struct nvfuse_superblock *sb)
 
 	/* flush cmd to nvme ssd */
 	reactor_sync_flush(sb->target);
+}
+
+void nvfuse_flush_dirty_data(struct nvfuse_superblock *sb)
+{
+    flush_dirty_data(sb, 0, 0);
+}
+
+void nvfuse_flush_dirty_inode_data(struct nvfuse_superblock *sb, inode_t ino)
+{
+    assert(ino >= NUM_RESV_INO);
+    flush_dirty_data(sb, ino, 1);
 }
 
 void nvfuse_check_flush_dirty(struct nvfuse_superblock *sb, s32 force)

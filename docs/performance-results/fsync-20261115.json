@@ -1,0 +1,610 @@
+{
+  "schema_version": 1,
+  "evaluation_date_kst": "2026-11-15",
+  "branch": "perf/xfs-parity",
+  "base_commit": "98848f3b6b77d65d097a1ced0239553f71cdbeef",
+  "scope": "Measured final code; compact extract of retained broad and reverse results. Historical fio throughput is not part of this final-code measurement.",
+  "environment": {
+    "host": "LNSTRTYO3SSD1507",
+    "system": "Linux LNSTRTYO3SSD1507 4.18.0-553.el8_10.x86_64 #1 SMP Fri May 24 13:05:10 UTC 2024 x86_64 x86_64 x86_64 GNU/Linux",
+    "bdf": "0000:4d:00.0",
+    "serial": "BIDCT0002I040CJ1H",
+    "capacity_bytes": 7681501126656,
+    "cpu": {
+      "application_and_db_background_threads": [
+        10,
+        12,
+        14,
+        16
+      ],
+      "nvfuse_filesystem_owner": 8,
+      "nvfuse_io_reactor": 6
+    },
+    "initial_rows": 100000,
+    "value_bytes": 1024,
+    "key_bytes": 16,
+    "nvfuse_cache_mib": 512,
+    "xfs_page_cache": "unrestricted"
+  },
+  "conditions": {
+    "path": "API+SPDK versus native XFS",
+    "journal": "v3 ON",
+    "wal": "ON",
+    "transaction_sync": true,
+    "preceding_work": "same fixed operation counts",
+    "application_and_compaction_policy": "unchanged",
+    "arms": {
+      "0": "prior-optimization baseline, scope/commit/data OFF",
+      "1": "final code, all new runtime settings UNSET to verify defaults"
+    },
+    "group_key": "application/update_operations/backend/arm",
+    "broad_order": "XFS first",
+    "reverse_order": "NVFUSE first; LevelDB 100k only"
+  },
+  "broad": {
+    "level/100000/xfs/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          248170.74,
+          248241.78,
+          249534.72
+        ],
+        "random-read-warm": [
+          173695.66,
+          173250.68,
+          173450.66
+        ],
+        "update-1": [
+          32463.06,
+          32288.89,
+          32357.18
+        ],
+        "update-100": [
+          158039.79,
+          159235.7,
+          160941.3
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.713176,
+        3.72504,
+        3.711849
+      ]
+    },
+    "level/1000000/xfs/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          249405.96,
+          249281.85,
+          249093.61
+        ],
+        "random-read-warm": [
+          173496.71,
+          174369.59,
+          174661.94
+        ],
+        "update-1": [
+          32392.33,
+          32760.97,
+          32365.06
+        ],
+        "update-100": [
+          123435.66,
+          123979.49,
+          124185.65
+        ]
+      },
+      "combined_update_samples_seconds": [
+        11.188538000000001,
+        11.118262,
+        11.142211
+      ]
+    },
+    "rocks/100000/xfs/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          216992.95,
+          215015.2,
+          217007.65
+        ],
+        "random-read-warm": [
+          177544.49,
+          176639.92,
+          176506.73
+        ],
+        "update-1": [
+          30893.21,
+          30750.37,
+          30718.52
+        ],
+        "update-100": [
+          189491.14,
+          188447.37,
+          188292.84
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.764687,
+        3.782645,
+        3.786453
+      ]
+    },
+    "rocks/1000000/xfs/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          217662.53,
+          216757.71,
+          217814.97
+        ],
+        "random-read-warm": [
+          178283.73,
+          177576.56,
+          178414.0
+        ],
+        "update-1": [
+          30728.43,
+          30929.6,
+          30868.18
+        ],
+        "update-100": [
+          186506.32,
+          186718.02,
+          186857.37
+        ]
+      },
+      "combined_update_samples_seconds": [
+        8.616064,
+        8.588816999999999,
+        8.591258
+      ]
+    },
+    "level/100000/nvfuse/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          266754.43,
+          265099.49,
+          264607.09
+        ],
+        "random-read-warm": [
+          177209.02,
+          178026.41,
+          177274.66
+        ],
+        "update-1": [
+          35192.1,
+          35064.65,
+          35276.97
+        ],
+        "update-100": [
+          144146.34,
+          140600.24,
+          143719.84
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.5352859999999997,
+        3.563111,
+        3.530509
+      ]
+    },
+    "level/100000/nvfuse/1": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          266313.45,
+          265421.22,
+          266558.63
+        ],
+        "random-read-warm": [
+          178030.12,
+          177412.57,
+          177536.21
+        ],
+        "update-1": [
+          39223.72,
+          39144.99,
+          39437.75
+        ],
+        "update-100": [
+          171074.38,
+          171847.04,
+          178561.65
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.1340190000000003,
+        3.1365190000000003,
+        3.095673
+      ]
+    },
+    "level/1000000/nvfuse/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          265430.66,
+          266900.8,
+          266403.63
+        ],
+        "random-read-warm": [
+          176813.29,
+          177959.92,
+          176875.86
+        ],
+        "update-1": [
+          35092.79,
+          35241.65,
+          35232.16
+        ],
+        "update-100": [
+          132163.5,
+          130963.6,
+          132318.48
+        ]
+      },
+      "combined_update_samples_seconds": [
+        10.415975,
+        10.47326,
+        10.395838999999999
+      ]
+    },
+    "level/1000000/nvfuse/1": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          265811.66,
+          266544.77,
+          267096.3
+        ],
+        "random-read-warm": [
+          178452.97,
+          176444.6,
+          176937.75
+        ],
+        "update-1": [
+          39566.08,
+          39195.11,
+          39455.06
+        ],
+        "update-100": [
+          138900.96,
+          138428.36,
+          138496.13
+        ]
+      },
+      "combined_update_samples_seconds": [
+        9.726792,
+        9.775291,
+        9.754947
+      ]
+    },
+    "rocks/100000/nvfuse/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          221219.98,
+          221073.12,
+          220777.42
+        ],
+        "random-read-warm": [
+          180257.36,
+          179841.25,
+          179962.05
+        ],
+        "update-1": [
+          39647.31,
+          39659.41,
+          39638.35
+        ],
+        "update-100": [
+          189581.56,
+          186730.29,
+          186334.23
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.049716,
+        3.0570019999999998,
+        3.059479
+      ]
+    },
+    "rocks/100000/nvfuse/1": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          220229.15,
+          219806.77,
+          219759.38
+        ],
+        "random-read-warm": [
+          180428.65,
+          180419.46,
+          180115.93
+        ],
+        "update-1": [
+          38592.48,
+          38524.98,
+          38461.94
+        ],
+        "update-100": [
+          186462.38,
+          186115.46,
+          184204.52
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.127479,
+        3.13302,
+        3.142848
+      ]
+    },
+    "rocks/1000000/nvfuse/0": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          220631.47,
+          221459.96,
+          221231.42
+        ],
+        "random-read-warm": [
+          180008.26,
+          180363.13,
+          179751.94
+        ],
+        "update-1": [
+          39321.46,
+          39632.63,
+          39590.05
+        ],
+        "update-100": [
+          178813.56,
+          179477.51,
+          179809.68
+        ]
+      },
+      "combined_update_samples_seconds": [
+        8.135558,
+        8.094902000000001,
+        8.087323
+      ]
+    },
+    "rocks/1000000/nvfuse/1": {
+      "n": 3,
+      "phase_samples_ops_s": {
+        "load-100": [
+          220989.58,
+          219650.57,
+          219886.86
+        ],
+        "random-read-warm": [
+          179205.8,
+          180456.06,
+          179815.39
+        ],
+        "update-1": [
+          38199.3,
+          38443.61,
+          38337.45
+        ],
+        "update-100": [
+          183516.2,
+          184484.49,
+          184575.39
+        ]
+      },
+      "combined_update_samples_seconds": [
+        8.066959,
+        8.021722,
+        8.026256
+      ]
+    }
+  },
+  "reverse_leveldb_short": {
+    "level/100000/nvfuse/1": {
+      "n": 5,
+      "phase_samples_ops_s": {
+        "load-100": [
+          267693.01,
+          260525.23,
+          266552.12,
+          266637.79,
+          267192.69
+        ],
+        "random-read-warm": [
+          178249.26,
+          177118.36,
+          176862.5,
+          176717.46,
+          177229.36
+        ],
+        "update-1": [
+          39401.47,
+          38748.09,
+          39304.86,
+          39264.28,
+          39452.95
+        ],
+        "update-100": [
+          174502.34,
+          167390.79,
+          177395.23,
+          177552.56,
+          178768.01
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.111034,
+        3.178176,
+        3.107928,
+        3.110058,
+        3.094049
+      ]
+    },
+    "level/100000/nvfuse/0": {
+      "n": 5,
+      "phase_samples_ops_s": {
+        "load-100": [
+          265525.5,
+          262827.02,
+          265565.76,
+          266523.94,
+          265301.18
+        ],
+        "random-read-warm": [
+          176532.42,
+          177566.41,
+          178317.03,
+          177263.69,
+          176862.97
+        ],
+        "update-1": [
+          34942.37,
+          35103.68,
+          35331.15,
+          35411.47,
+          35142.76
+        ],
+        "update-100": [
+          147954.6,
+          143044.67,
+          144040.15,
+          144224.0,
+          143501.66
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.537738,
+        3.5477860000000003,
+        3.524615,
+        3.51731,
+        3.542392
+      ]
+    },
+    "level/100000/xfs/0": {
+      "n": 5,
+      "phase_samples_ops_s": {
+        "load-100": [
+          248261.71,
+          248502.41,
+          249326.92,
+          249196.85,
+          249917.58
+        ],
+        "random-read-warm": [
+          173653.41,
+          174290.0,
+          173760.02,
+          174101.51,
+          175103.44
+        ],
+        "update-1": [
+          32397.86,
+          32372.45,
+          32431.41,
+          32455.83,
+          32503.15
+        ],
+        "update-100": [
+          160136.13,
+          158716.32,
+          159638.97,
+          160291.61,
+          161712.55
+        ]
+      },
+      "combined_update_samples_seconds": [
+        3.711093,
+        3.719102,
+        3.709843,
+        3.704974,
+        3.695006
+      ]
+    }
+  },
+  "qualification": {
+    "status": "focused_goal_achieved",
+    "source_archive_sha256": "094a88d4fadfc06539275bb07f5b1468c433ea62d856ac2d87ca4a368fb071be",
+    "native_journal_v3_transaction_boundary": "pass",
+    "spdk_build_commands": 18,
+    "exact_commands": {
+      "original_successful": 110,
+      "corrected_resume_successful": 12,
+      "total_successful": 122,
+      "original_failed_launch_retained": {
+        "status": "fail",
+        "rc": 127,
+        "name": "cc-format"
+      },
+      "later_full_preflight_error_retained": true
+    },
+    "full_outer_commands": 73,
+    "independent_images": 23,
+    "broad_app_trials": 42,
+    "fio_crc_and_six_profiles_settings": 2,
+    "software_fault_recovery": "pass",
+    "physical_power_cut": "not performed",
+    "server_independent_checker_sanitizers": "none; required GCC sanitizer runtimes absent",
+    "all_measured_cleanup": true,
+    "no_code_or_binary_changes_for_runner_fixes": true,
+    "broad_raw_sha256": "00d3c4cbf0395b0d8fa9a8de99f80b3152ff9aba289cd4f4cbbfe32b33b16429",
+    "broader_all_profiles_xfs_goal": "not complete; see report for RocksDB and previous fio gaps",
+    "verified_utc": "2026-11-15T02:28:27.653610+00:00",
+    "reverse_trials": 18,
+    "reverse_full_trials_per_arm": 5,
+    "reverse_metadata_note": "Original broad-scope metadata is inherited; measured-scope-note.json documents actual LevelDB short-only benchmark rows. Raw results unmodified.",
+    "final_live_audit": "pass",
+    "final_live_audit_sha256": "47d3ef7cbd455ec86a348d92849c8c7344e76cdd3ad471b115c68fe101fe0b7d",
+    "checkout_code_files_matched": 193,
+    "final_broad": {
+      "xfs": 159235.7,
+      "off": 143719.84,
+      "on": 171847.04,
+      "on_vs_off_pct": 19.570853961429414,
+      "off_vs_xfs_pct": -9.743958170184207,
+      "on_vs_xfs_pct": 7.919919967695677,
+      "on_mean_vs_xfs_pct": 9.04741968595455,
+      "all_on_above_all_xfs": true
+    },
+    "final_reverse": {
+      "xfs": 160136.13,
+      "off": 144040.15,
+      "on": 177395.23,
+      "on_vs_off_pct": 23.15679343571915,
+      "off_vs_xfs_pct": -10.051435612937576,
+      "on_vs_xfs_pct": 10.777767640569301,
+      "on_mean_vs_xfs_pct": 9.383355995544651,
+      "all_on_above_all_xfs": true
+    },
+    "reverse_raw_sha256": "62b483ac57ebaab325616085073a41ea9e69d11ee8d7a8d410623caf87b3ff0e",
+    "reverse_evidence_sha256": "fa137b15e3867096ce3d097d466d88a4cf7140d4e34f9a7e5401f1ee0a410775",
+    "commit_or_push": false
+  },
+  "code_proof": {
+    "matched_files": 193,
+    "manifest_sha256": "048994eba2428a4bd661954f63a291c1219d857f22e6be829742664779acf10f",
+    "source_archive_sha256": "094a88d4fadfc06539275bb07f5b1468c433ea62d856ac2d87ca4a368fb071be"
+  },
+  "provenance": {
+    "result.json": "00d3c4cbf0395b0d8fa9a8de99f80b3152ff9aba289cd4f4cbbfe32b33b16429",
+    "analysis.json": "c04c713ead51ede6bf24e3fa88b98d3b7835e0c739dee39993060cacc075a16b",
+    "reverse-result.json": "62b483ac57ebaab325616085073a41ea9e69d11ee8d7a8d410623caf87b3ff0e",
+    "reverse-analysis.json": "bdb55012c81731ba6247999f14354486403c2c86c64dda28b9a767bd05aab32c",
+    "final-live-audit.json": "47d3ef7cbd455ec86a348d92849c8c7344e76cdd3ad471b115c68fe101fe0b7d",
+    "qualification.json": "43832edbb4547d49515f5253f0055c1582931bb473cb6d4f3e2b3d3e4fd187b3"
+  },
+  "limitations": [
+    "Warm 100k-row DB with 1KiB values; not a multi-terabyte evaluation.",
+    "Four application CPUs per backend; NVFUSE uses two additional runtime cores.",
+    "Host also retained an unrelated failed soak; host was not idle.",
+    "Software fault/replay qualification passed; physical power-cut was not performed.",
+    "Server independent checkers ran without sanitizer runtimes.",
+    "Existing baseline truncate-gap content defect remains unresolved.",
+    "RocksDB batch is below XFS; single-update regresses versus the prior NVFUSE baseline.",
+    "Fio in the final stage is functional coverage only; prior throughput measurements predate these fsync changes."
+  ],
+  "raw_evidence_location": "build/test-results/fsync-final-20261115/ (local ignored artifacts; raw files unmodified)"
+}

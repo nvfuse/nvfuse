@@ -448,6 +448,9 @@ int reactor_cq_get_reqs(struct reactor_task *task, struct io_job **reqs, int min
             __atomic_signal_fence(__ATOMIC_ACQ_REL);
         }
         int count = available < max_reqs ? available : max_reqs;
+        /* Empty polls consume nothing. Publishing the unchanged cursor would
+         * invalidate the line the completion producer reads for every poll. */
+        if (!count) return 0;
         int tail = __atomic_load_n(&task->cq_tail, __ATOMIC_RELAXED);
         for (int n = 0; n < count; n++) {
             reqs[n] = task->cq[tail]; tail = (tail + 1) % task->qdepth;

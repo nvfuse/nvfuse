@@ -103,6 +103,9 @@ int nvj_error(const struct nvj *);
 void nvj_fail(struct nvj *, int error);
 void nvj_require_recovery(struct nvj *);
 int nvj_active(const struct nvj *);
+/* Serialized owner only. A file-scoped collector requires an empty active
+ * overlay so it cannot accidentally commit another file's evicted metadata. */
+unsigned nvj_pending_blocks(const struct nvj *);
 int nvj_recovery_required(const struct nvj *);
 const struct nvj_stats *nvj_stats(const struct nvj *);
 void nvj_set_hook(struct nvj *, nvj_hook, void *);

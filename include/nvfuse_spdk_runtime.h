@@ -25,6 +25,13 @@ int nvfio_execute_serialized(int (*work)(struct nvfuse_handle *, void *), void *
  * fsync drains these writes before the existing journal durability boundary. */
 int nvfio_pwrite(int fd, const void *data, size_t bytes, uint64_t offset);
 int nvfio_fsync(int fd);
+/* Read-only phase snapshot: calls/hits/deferred/allocations/commits/log bytes/
+ * dirty blocks/requests. No writeback drain or filesystem mutation. */
+int nvfio_file_sync_stats(uint64_t out[8]);
+/* Read-only cache-admission snapshot: reads/writes/bytes/windows, then the
+ * data-completion subset's windows/reads/writes/bytes. No writeback drain.
+ * Take diagnostic snapshots outside workload timers. */
+int nvfio_commit_cache_stats(uint64_t out[8]);
 #ifdef NVFIO_TEST
 /* Deterministic ordering hooks; absent from ordinary runtime builds. */
 int nvfio_test_buffered_wb_enabled(void);

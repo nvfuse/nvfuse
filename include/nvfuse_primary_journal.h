@@ -10,6 +10,8 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *, int formatted);
 int nvfuse_primary_journal_before_format(struct io_target *);
 /* Caller serializes all filesystem operations and drains AIO first. */
 int nvfuse_primary_journal_commit(struct nvfuse_handle *, int restart);
+/* File-specific commit; unsupported/dependent mutations use the full path. */
+int nvfuse_primary_journal_fsync(struct nvfuse_handle *, int fd);
 int nvfuse_primary_journal_stage(struct io_target *, struct io_job *);
 /* Serialized owner only. Return1 when copied/read entirely by the overlay,
  * 0 for ordinary device I/O. Never publish an owner-produced CQ completion. */

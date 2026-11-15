@@ -16,6 +16,10 @@
 #ifndef __NVFUSE_INDIRECT_H__
 #define __NVFUSE_INDIRECT_H__
 int nvfuse_block_to_path(s32 block, u32 offsets[4], u32 *boundary);
+/* Primary standalone runtime only: caller excludes all filesystem/cache
+ * mutation, with no independent flush worker. No cached pointer escapes. */
+int nvfuse_try_serialized_read_mapping(struct nvfuse_superblock *sb, inode_t ino,
+                                       s64 offset, u32 bytes, u32 *physical);
 /* Return 1 only for a complete cached read mapping; 0 uses ordinary AIO. */
 int nvfuse_try_cached_read_mapping(struct nvfuse_superblock *sb, inode_t ino,
                                   s64 offset, u32 bytes, u32 *physical);

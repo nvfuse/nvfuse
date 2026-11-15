@@ -55,6 +55,7 @@
 #include "nvfuse_bp_tree.h"
 #include "nvfuse_malloc.h"
 #include "nvfuse_api.h"
+#include "nvfuse_commit_cache.h"
 #include "nvfuse_dirhash.h"
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_debug.h"
@@ -1153,6 +1154,69 @@ out:
 }
 #endif
 
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+int nvfuse_append_cached_page_frozen(struct nvfuse_superblock *,struct nvfuse_inode_ctx *,lbno_t,const s8 *,u32);
+/* The commit snapshot is immutable and its owner touches no cache while this
+ * single executor is admitted. No I/O, BH allocation, journal mutation, dirty
+ * eviction, new pointer-path allocation, generic callback or sync is allowed.
+ * A partial result is an ordinary short pwrite; the caller may continue under
+ * the original gate. These bytes belong to the NEXT journal transaction. */
+int nvfuse_commit_cached_append(struct nvfuse_superblock *sb,int fd,const void *data,
+                               unsigned count,uint64_t offset)
+{
+    if(!count || count>8192 || offset>=MAX_FILE_SIZE || count>=MAX_FILE_SIZE-offset)return 0;
+    struct nvfuse_file_table *of=nvfuse_get_file_table(sb,fd);
+    if(!of->used || (of->flags&O_ACCMODE)==O_RDONLY || (of->flags&(O_DIRECT|O_SYNC|O_DSYNC)))return 0;
+    /* A missing inode context could make its generic allocator flush. Admit
+     * only an existing idle context, stable under our single cache executor. */
+    struct nvfuse_ictx_manager *im=sb->sb_ictxc;
+    SPINLOCK_LOCK(&im->ictxc_lock);
+    struct nvfuse_inode_ctx *known=nvfuse_ictx_hash_lookup(im,of->ino);
+    int idle=known && !known->ictx_ref && !known->ictx_bh &&
+        !rte_spinlock_is_locked(&known->ictx_lock);
+    SPINLOCK_UNLOCK(&im->ictxc_lock);if(!idle)return 0;
+    struct nvfuse_buffer_manager *bm=sb->sb_bm;u64 key;
+    nvfuse_make_pbno_key(ITABLE_INO,of->ino/INODE_ENTRY_NUM,&key,NVFUSE_BP_TYPE_DATA);
+    SPINLOCK_LOCK(&bm->bm_lock);
+    struct nvfuse_buffer_cache *ibc=nvfuse_hash_lookup(bm,key);
+    if(!ibc || rte_atomic32_read(&ibc->bc_ref)) { SPINLOCK_UNLOCK(&bm->bm_lock);return 0; }
+    SPINLOCK_LOCK(&ibc->bc_lock);
+    struct nvfuse_inode *inode=(struct nvfuse_inode *)ibc->bc_buf+of->ino%INODE_ENTRY_NUM;
+    int ready=ibc->bc_load && !ibc->bc_flush && !ibc->bc_locked &&
+        !rte_atomic32_read(&ibc->bc_bh_count) &&
+        (ibc->bc_list_type==BUFFER_TYPE_CLEAN || ibc->bc_list_type==BUFFER_TYPE_DIRTY) &&
+        inode->i_ino==of->ino && S_ISREG(inode->i_mode) && inode->i_size==offset &&
+        nvj_metadata_known_frozen(sb->target->journal,ibc->bc_pno);
+    if(!ready){SPINLOCK_UNLOCK(&ibc->bc_lock);SPINLOCK_UNLOCK(&bm->bm_lock);return 0;}
+    nvfuse_inc_bc_ref(ibc);nvfuse_move_buffer_list_nolock(sb,ibc,BUFFER_TYPE_REF,INSERT_HEAD);
+    SPINLOCK_UNLOCK(&ibc->bc_lock);SPINLOCK_UNLOCK(&bm->bm_lock);
+    /* This existing inode-cache path has no I/O or journal calls. */
+    struct nvfuse_inode_ctx *ictx=nvfuse_get_ictx(sb,of->ino);
+    if(!ictx){SPINLOCK_LOCK(&ibc->bc_lock);nvfuse_release_bc(sb,ibc,0,NVF_CLEAN);return 0;}
+    assert(!ictx->ictx_bh);ictx->ictx_inode=inode;ictx->ictx_ref++;
+    unsigned done=0;
+    while(done<count){
+        uint64_t at=offset+done;unsigned within=at&(CLUSTER_SIZE-1);
+        unsigned n=CLUSTER_SIZE-within;if(n>count-done)n=count-done;
+        int copied=within ? nvfuse_write_cached_data(sb,of->ino,at/CLUSTER_SIZE,within,(const s8 *)data+done,n) :
+            nvfuse_append_cached_page_frozen(sb,ictx,at/CLUSTER_SIZE,(const s8 *)data+done,n);
+        if(!copied)break;
+        done+=n;inode->i_type=NVFUSE_TYPE_FILE;inode->i_size=offset+done;
+        of->size=inode->i_size;of->rwoffset=inode->i_size;
+    }
+    nvfuse_release_ictx(sb,ictx,done?DIRTY:NVF_CLEAN);
+    SPINLOCK_LOCK(&ibc->bc_lock);nvfuse_release_bc(sb,ibc,0,done?DIRTY:NVF_CLEAN);
+    return (int)done;
+}
+#elif defined(NVFUSE_PRIMARY_JOURNAL)
+int nvfuse_commit_cached_append(struct nvfuse_superblock *sb, int fd,
+                               const void *data, unsigned count, uint64_t offset)
+{
+    (void)sb; (void)fd; (void)data; (void)count; (void)offset;
+    return 0;
+}
+#endif
+
 s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_buf, u32 count,
 			  nvfuse_off_t woffset)
 {
@@ -1184,6 +1248,8 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
      * write. Refresh the descriptor from the authoritative inode after truncate
      * or extension through another descriptor, before copying any blocks. */
     lbno_t mapped_until = 0;
+    lbno_t extent_start = 0, extent_end = 0;
+    pbno_t extent_physical = 0;
     ictx = count ? nvfuse_read_inode(sb, NULL, of->ino) : NULL;
     inode = ictx ? ictx->ictx_inode : NULL;
     if (inode) of->size = inode->i_size;
@@ -1303,8 +1369,33 @@ s32 nvfuse_writefile_core(struct nvfuse_superblock *sb, s32 fid, const s8 *user_
                 bh = NULL;
             } else
             if (sb->target->journal && sb->target->buffered_bc_direct && S_ISREG(inode->i_mode)) {
-                data_bc = nvfuse_get_bc(sb, ictx, inode->i_ino, lblock,
-                                       fresh_block || remain == CLUSTER_SIZE ? WRITE : READ);
+                pbno_t physical = 0;
+                if (sb->target->buffered_extent_mapping && !sb->target->journal_aio &&
+                    nvfuse_process_model_is_standalone()) {
+                    /* Only scalar mappings survive between pages, within THIS
+                     * write and its held inode lock. Stop at any noncontiguous
+                     * mapping, hole, pointer boundary or the current payload. */
+                    if (lblock < extent_start || lblock >= extent_end) {
+                        u32 mapped = 0, wanted = ((u64)offset + count + CLUSTER_SIZE - 1) / CLUSTER_SIZE;
+                        if (wanted > 32) wanted = 32;
+                        extent_start = extent_end = lblock; extent_physical = 0;
+                        if (!nvfuse_get_block_cached(sb, ictx, lblock, wanted,
+                                                    &mapped, &extent_physical) &&
+                            extent_physical && mapped)
+                            extent_end = extent_start + mapped;
+                    }
+                    if (lblock < extent_end)
+                        physical = extent_physical + lblock - extent_start;
+                }
+                if (physical && remain == CLUSTER_SIZE &&
+                    nvfuse_write_mapped_cache(sb, ictx, lblock, physical, user_buf + wcount)) {
+                    bh = NULL;
+                    goto buffered_page_copied;
+                }
+                s32 sync_read = fresh_block || remain == CLUSTER_SIZE ? WRITE : READ;
+                data_bc = physical ? nvfuse_get_bc_mapped(sb, ictx, inode->i_ino,
+                                                         lblock, sync_read, physical) :
+                                     nvfuse_get_bc(sb, ictx, inode->i_ino, lblock, sync_read);
                 bh = NULL;
                 if (fresh_block) memset(data_bc->bc_buf, 0, CLUSTER_SIZE);
                 rte_memcpy(data_bc->bc_buf + offset, user_buf + wcount, remain);
@@ -2853,7 +2944,7 @@ s32 nvfuse_fdatasync(struct nvfuse_handle *nvh, int fd)
 #ifdef NVFUSE_PRIMARY_JOURNAL
     if (nvh->nvh_target->journal) {
         if (fd < START_OPEN_FILE || fd >= MAX_OPEN_FILE || !nvh->nvh_sb.sb_file_table[fd].used) return -EBADF;
-        return nvfuse_primary_journal_commit(nvh, 1);
+        return nvfuse_primary_journal_fsync(nvh, fd);
     }
 #endif
 	struct nvfuse_superblock *sb;
@@ -2876,7 +2967,7 @@ s32 nvfuse_fsync(struct nvfuse_handle *nvh, int fd)
 #ifdef NVFUSE_PRIMARY_JOURNAL
     if (nvh->nvh_target->journal) {
         if (fd < START_OPEN_FILE || fd >= MAX_OPEN_FILE || !nvh->nvh_sb.sb_file_table[fd].used) return -EBADF;
-        return nvfuse_primary_journal_commit(nvh, 1);
+        return nvfuse_primary_journal_fsync(nvh, fd);
     }
 #endif
 	struct nvfuse_superblock *sb;

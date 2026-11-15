@@ -49,11 +49,18 @@ struct io_target {
     struct reactor_task *journal_dirty_task; /* Serialized cache writeback. */
     unsigned journal_raw, journal_aio;
     unsigned journal_owner_collect;
+    unsigned journal_file_sync, journal_file_sync_unsafe;
+    void *journal_file_sync_workspace;
+    uint64_t journal_file_sync_calls, journal_file_sync_hits;
+    uint64_t journal_file_sync_deferred, journal_file_sync_allocations;
     unsigned journal_dirty_iov;
     uint64_t journal_dirty_blocks, journal_dirty_requests;
     unsigned journal_flush_fast;
     unsigned buffered_alloc_batch;
     unsigned buffered_map_cache;
+    unsigned buffered_extent_mapping, buffered_full_copy;
+    uint64_t buffered_full_saved_bytes;
+    uint64_t buffered_extent_calls, buffered_extent_hits, buffered_extent_miss_copies;
     unsigned buffered_bc_direct;
     unsigned buffered_alloc_account;
     unsigned buffered_alloc_fused;
@@ -62,6 +69,7 @@ struct io_target {
     unsigned buffered_fast_append;
     uint64_t buffered_fast_append_calls, buffered_fast_append_hits;
     uint64_t journal_flush_elided;
+    uint64_t aio_mapping_attempts, aio_mapping_hits;
     int journal_mounting, journal_dirty;
     int journal_profile;
     uint64_t journal_collect_ns;
@@ -93,16 +101,19 @@ struct reactor_task {
     struct reactor_task *poll_next;
 
     struct io_job *sq[REACTOR_MAX_REQUEST];
-    int32_t             sq_head;
-    int32_t             sq_tail;
+    /* Polling queues have one writer per cursor on different cores. Keep
+     * their publications off the same cache line. Mempool objects are
+     * cache-line aligned; the ordinary mutex-backed path uses this layout too. */
+    int32_t             sq_head __attribute__((aligned(64)));
     int                 sq_scheduled; /* Protected by sq_mutex. */
     uint64_t            sq_batches, sq_notifications;
+    int32_t             sq_tail __attribute__((aligned(64)));
     pthread_mutex_t     sq_mutex;
     pthread_cond_t      sq_cond;
 
     struct io_job *cq[REACTOR_MAX_REQUEST];
-    int32_t             cq_head;
-    int32_t             cq_tail;
+    int32_t             cq_head __attribute__((aligned(64)));
+    int32_t             cq_tail __attribute__((aligned(64)));
     pthread_mutex_t     cq_mutex;
     pthread_cond_t      cq_cond;
 };

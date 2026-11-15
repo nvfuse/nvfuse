@@ -4,6 +4,7 @@
  * Home writes follow TWO independently flushed commit certificates. Controls
  * are retired in both copies before the next slot can overwrite payload. */
 #include "nvfuse_journal.h"
+#include "nvfuse_commit_cache.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -493,6 +494,15 @@ void nvj_close(struct nvj *j) { if(j) { wait_checkpoint(j); v3_close(j); free(j-
 void nvj_mark_filesystem_metadata(struct nvj *j) {
     if(j) j->filesystem_metadata=1;
 }
+/* Only while the filesystem owner has frozen metadata classification for
+ * commit and the independent single cache executor performs no journal calls.
+ * v3_commit/checkpoint never changes this sparse map. No wait_checkpoint here. */
+int nvj_metadata_known_frozen(const struct nvj *j,uint32_t block)
+{
+    return j && block<j->bytes/NVJ_BLOCK && !j->classification_error &&
+        ((j->filesystem_metadata && block%NVJ_GROUP_BLOCKS<4100) ||
+         lookup((struct sparse *)&j->metadata,block)->value);
+}
 void nvj_mark_metadata(struct nvj *j,uint32_t block) {
     if(!j || block>=j->bytes/NVJ_BLOCK || j->classification_error) return;
     if(j->filesystem_metadata && block%NVJ_GROUP_BLOCKS<4100) return;
@@ -534,6 +544,7 @@ int nvj_prepare_metadata(struct nvj *j,unsigned additional) {
     return 0;
 }
 unsigned nvj_budget(const struct nvj *j) { wait_checkpoint((struct nvj *)j); return j && j->active?j->budget:0; }
+unsigned nvj_pending_blocks(const struct nvj *j) { return j ? j->count : 0; }
 int nvj_full_data(const struct nvj *j) { wait_checkpoint((struct nvj *)j); return j && j->active && j->full; }
 int nvj_begin(struct nvj *j,int full,unsigned budget) {
     wait_checkpoint(j);

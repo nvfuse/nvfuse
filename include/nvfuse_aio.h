@@ -81,6 +81,9 @@ s32 nvfuse_aio_queue_enqueue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_re
 s32 nvfuse_aio_queue_dequeue(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq, s32 qtype);
 s32 nvfuse_aio_queue_move(struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq, s32 qtype);
 s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq);
+/* Primary standalone runtime's exclusive filesystem gate must remain held.
+ * Generic callers use nvfuse_aio_queue_submission and its ordinary locks. */
+s32 nvfuse_aio_queue_submission_serialized(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq);
 s32 nvfuse_aio_queue_completion(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq);
 
 void nvfuse_aio_gen_dev_cpls(void *arg);

@@ -173,7 +173,8 @@ static int buffered_write_work(struct nvfuse_handle*h,void*arg)
 int nvfio_pwrite(int fd,const void*data,size_t bytes,uint64_t offset)
 {
     if(fd<START_OPEN_FILE||fd>=MAX_OPEN_FILE||bytes>INT32_MAX||offset>INT64_MAX||bytes>(uint64_t)INT64_MAX-offset||(!data&&bytes))return -EINVAL;
-    struct buffered_write_request request={fd,data,bytes,offset};lock_fs_gate();
+    struct buffered_write_request request={fd,data,bytes,offset};int concurrent_result;
+    if(commit_cache_write_gate(fd,data,bytes,offset,&concurrent_result)==2)return concurrent_result;
     if(!rt.handle){pthread_mutex_unlock(&fs_gate);return -EIO;}
     if(rt.clients){pthread_mutex_unlock(&fs_gate);return nvfio_execute(buffered_write_work,&request);}
     struct nvfuse_file_table *of=nvfuse_get_file_table(&rt.handle->nvh_sb,fd);
@@ -204,7 +205,8 @@ int nvfio_fsync(int fd)
     struct buffered_sync_request request={fd};lock_fs_gate();
     if(!rt.handle){pthread_mutex_unlock(&fs_gate);return -EIO;}
     if(rt.clients){pthread_mutex_unlock(&fs_gate);return nvfio_execute(buffered_sync_work,&request);}
-    buffered_wb_drain();errno=0;int result=buffered_sync_work(rt.handle,&request);changed_epoch();
+    buffered_wb_drain();errno=0;commit_cache_armed=1;
+    int result=buffered_sync_work(rt.handle,&request);commit_cache_armed=0;changed_epoch();
     if(fd>=0&&fd<MAX_OPEN_FILE){buffered_wb.since_sync[fd]=0;buffered_wb.check_bytes[fd]=0;buffered_wb.scan_end[fd]=0;buffered_wb.scan_inode[fd]=0;}
     else if(fd<0){memset(buffered_wb.since_sync,0,sizeof(buffered_wb.since_sync));memset(buffered_wb.check_bytes,0,sizeof(buffered_wb.check_bytes));memset(buffered_wb.scan_end,0,sizeof(buffered_wb.scan_end));memset(buffered_wb.scan_inode,0,sizeof(buffered_wb.scan_inode));}
     pthread_mutex_unlock(&fs_gate);return result;

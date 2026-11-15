@@ -68,6 +68,10 @@ def main():
     run('block-reuse-check', 'block-reuse-check')
     run('partial-create-crash', 'partial-create-crash', expected=86)
     run('partial-recover', 'partial-check')
+    run('write-extent-seed', 'write-extent-seed')
+    run('write-extent-fsync-crash', 'write-extent-overwrite', expected=86)
+    run('write-extent-recover', 'write-extent-check')
+    run('write-extent-reopen', 'write-extent-check')
     baseline.unlink()
     report['status'] = 'pass'
     (root / 'result.json').write_text(json.dumps(report, indent=2) + '\n')

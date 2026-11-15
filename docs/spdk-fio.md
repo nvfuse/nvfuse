@@ -132,6 +132,25 @@ python3 scripts/benchmark-filesystem-fio.py \
 
 Both use `direct=1`, `thread=1`, `numjobs=4`, `iodepth=32`, group reporting and distinct per-job files. The three sequential profiles use 256 KiB blocks with 0%, 100% and 75% reads; the three random profiles use 4 KiB blocks with the same ratios. This compares complete access paths (NVFUSE API/SPDK versus XFS/libaio), including their different CPU/runtime overhead. It is not an isolated comparison of filesystem algorithms. The primary adapter's four application jobs still share a single filesystem thread and a single bdev I/O thread.
 
+Use `--jobs 1`, `--jobs 2` and `--jobs 4` to measure application-thread scaling,
+and `--iodepth` to select depth per job. Compare both fixed depth per job and
+fixed total depth: for example, 1x128, 2x64 and 4x32. The active data set is
+`jobs * size`, so report it with the results. Add `--ramp-time 2` to exclude a
+warmup period from timed statistics.
+
+For a pinned comparison, pass the same `--cpus-allowed` CPU list to both
+filesystems, with at least one distinct CPU per job. For example,
+`--cpus-allowed 10,12,14,16` gives each fio worker a separate CPU through fio's
+`split` policy. Choose CPUs from the actual host topology, avoiding the SPDK
+reactor cores and their SMT siblings. A shared `taskset` mask alone allows
+workers to migrate or share CPUs. Record affinity changes as measurement
+configuration changes, separately from code improvements. NVFUSE still uses
+its two additional runtime cores even with one fio application job.
+
+Preparation and timed profiles both use `end_fsync=1`. This requests a final
+fsync after writes; it does not make each write individually synchronous.
+Keep DB `sync=true` transaction results separate from these fio results.
+
 For live IOPS, bandwidth, API latency and queue counts, see
 [iostat-style monitoring](spdk-live-monitoring.md). Diagnostic tools such as
 `tests/spdk/instrument_hotpath.py` and `tests/spdk/instrument_primary.py` belong

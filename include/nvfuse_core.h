@@ -553,6 +553,8 @@ void nvfuse_dir_hash(s8 *filename, u32 *hash, u32 *hash2);
 /* Dirty Sync Functions */
 struct io_job;
 void nvfuse_flush_dirty_data(struct nvfuse_superblock *sb);
+/* Serialized primary owner, with all outstanding AIO fenced first. */
+void nvfuse_flush_dirty_inode_data(struct nvfuse_superblock *, inode_t);
 void nvfuse_sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks);
 void io_cancel_incomplete_ios(struct nvfuse_superblock *sb, struct io_job **jobq, int job_cnt);
 s32 nvfuse_wait_aio_completion(struct nvfuse_superblock *sb, struct reactor_task *task, struct io_job **jobq, int job_cnt);

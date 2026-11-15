@@ -87,7 +87,7 @@ void nvfuse_move_buffer_list(struct nvfuse_superblock *sb,
 #endif
 }
 
-void nvfuse_init_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc)
+static inline void reset_bc_fields(struct nvfuse_buffer_cache *bc)
 {
 	bc->bc_bno = 0;
 	bc->bc_dirty = 0;
@@ -102,8 +102,12 @@ void nvfuse_init_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc
 	/* init ref count */
 	rte_atomic32_init(&bc->bc_ref);
 	bc->bc_temp = 0;
+}
 
-	memset(bc->bc_buf, 0x00, CLUSTER_SIZE);
+void nvfuse_init_bc(struct nvfuse_superblock *sb, struct nvfuse_buffer_cache *bc)
+{
+    reset_bc_fields(bc);
+    memset(bc->bc_buf, 0, CLUSTER_SIZE);
 }
 
 struct nvfuse_buffer_cache *nvfuse_replace_buffer_cache(struct nvfuse_superblock *sb, u64 key)
@@ -374,7 +378,52 @@ void nvfuse_dec_bc_ref(struct nvfuse_buffer_cache *bc)
 	assert(rte_atomic32_read(&bc->bc_ref) >= 0);
 }
 
-struct nvfuse_buffer_cache *nvfuse_get_bc(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 sync_read)
+#if defined(NVFUSE_PRIMARY_JOURNAL) && !defined(NVFUSE_KEEP_DIRTY_BH_IN_ICTX)
+int nvfuse_write_mapped_cache(struct nvfuse_superblock *sb,
+        struct nvfuse_inode_ctx *ictx, lbno_t block, pbno_t physical, const s8 *data)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    struct nvfuse_buffer_cache *bc;
+    u64 key; unsigned type; int copied = 0;
+    sb->target->buffered_extent_calls++;
+    assert(physical && rte_spinlock_is_locked(&ictx->ictx_lock));
+    assert(test_bit(&ictx->ictx_status, INODE_STATE_LOCK));
+    assert(S_ISREG(ictx->ictx_inode->i_mode));
+    nvfuse_make_pbno_key(ictx->ictx_ino, block, &key, NVFUSE_BP_TYPE_DATA);
+    SPINLOCK_LOCK(&bm->bm_lock);
+    if (nvfuse_hash_lookup(bm, key)) goto out;
+    if (rte_atomic32_read(&bm->bm_list_count[BUFFER_TYPE_UNUSED])) type = BUFFER_TYPE_UNUSED;
+    else if (rte_atomic32_read(&bm->bm_list_count[BUFFER_TYPE_CLEAN])) type = BUFFER_TYPE_CLEAN;
+    else goto out;
+    bc = list_entry(bm->bm_list[type].prev, struct nvfuse_buffer_cache, bc_list);
+    if (rte_atomic32_read(&bc->bc_ref) || rte_atomic32_read(&bc->bc_bh_count) ||
+        bc->bc_flush || bc->bc_locked) goto out;
+    bc = nvfuse_replace_buffer_cache(sb, key);
+    /* The same clean/unused victim was proven eligible under bm_lock.
+     * No reference or evictable mapping pointer escapes this bounded copy. */
+    /* Only this proven full-page miss replaces payload initialization. The
+     * page is unpublished, unreferenced and protected by bm_lock. Partial
+     * writes, append helpers and all other initializers keep zeroing. */
+    if (sb->target->buffered_full_copy) {
+        reset_bc_fields(bc);
+        sb->target->buffered_full_saved_bytes += CLUSTER_SIZE;
+    } else nvfuse_init_bc(sb, bc);
+    bc->bc_bno = key; bc->bc_pno = physical; bc->bc_list_type = BUFFER_TYPE_DIRTY;
+    INIT_LIST_HEAD(&bc->bc_bh_head); rte_atomic32_set(&bc->bc_bh_count, 0);
+    memcpy(bc->bc_buf, data, CLUSTER_SIZE);
+    bc->bc_load = bc->bc_dirty = 1;
+    hlist_add_head(&bc->bc_hash, &bm->bm_hash[key % HASH_NUM]);
+    rte_atomic32_inc(&bm->bm_hash_count[key % HASH_NUM]);
+    list_add(&bc->bc_list, &bm->bm_list[BUFFER_TYPE_DIRTY]);
+    rte_atomic32_inc(&bm->bm_list_count[BUFFER_TYPE_DIRTY]);
+    bm->bm_cache_ref++; sb->target->buffered_extent_hits++;
+    sb->target->buffered_extent_miss_copies++; copied = 1;
+out:
+    SPINLOCK_UNLOCK(&bm->bm_lock); return copied;
+}
+#endif
+
+static struct nvfuse_buffer_cache *get_bc(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 sync_read, pbno_t physical)
 {
 	struct nvfuse_buffer_cache *bc;
 	u64 key;
@@ -388,7 +437,10 @@ struct nvfuse_buffer_cache *nvfuse_get_bc(struct nvfuse_superblock *sb, struct n
 	if (!bc->bc_pno) {
 		pbno_t new_pno;
 		/* logical to physical address translation */
-		new_pno = nvfuse_get_pbn(sb, ictx, ino, lblock);
+		new_pno = physical ? physical : nvfuse_get_pbn(sb, ictx, ino, lblock);
+#ifdef NVFUSE_PRIMARY_JOURNAL
+        if (physical) sb->target->buffered_extent_hits++;
+#endif
 		assert(new_pno);
 		bc->bc_pno = new_pno;
 	}
@@ -417,6 +469,21 @@ struct nvfuse_buffer_cache *nvfuse_get_bc(struct nvfuse_superblock *sb, struct n
 	assert(bc->bc_pno);
 
 	return bc;
+}
+
+struct nvfuse_buffer_cache *nvfuse_get_bc(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 sync_read)
+{
+    return get_bc(sb, ictx, ino, lblock, sync_read, 0);
+}
+struct nvfuse_buffer_cache *nvfuse_get_bc_mapped(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, s32 sync_read, pbno_t physical)
+{
+    assert(ictx && ictx->ictx_ino == ino && physical);
+    assert(rte_spinlock_is_locked(&ictx->ictx_lock));
+    assert(test_bit(&ictx->ictx_status, INODE_STATE_LOCK));
+#ifdef NVFUSE_PRIMARY_JOURNAL
+    sb->target->buffered_extent_calls++;
+#endif
+    return get_bc(sb, ictx, ino, lblock, sync_read, physical);
 }
 
 struct nvfuse_buffer_head *_nvfuse_get_bh(struct nvfuse_superblock *sb,
