@@ -31,7 +31,7 @@
     "source_commit": "bcafb031401d404a5dabae4853f5e23bf9e5685c"
   },
   "core_api_revision": "67c985ab173d9ff6db84f45239c368393eb47d7e",
-  "layout_validation": "Linux x86_64 focused correctness/reopen checks passed for fio, LevelDB, RocksDB, LMCache CPU bridge and diskannpy. Milvus build/import passed; native RPC, explicit shutdown and reopen remain a release gate.",
+  "layout_validation": "Linux x86_64 focused correctness/reopen checks passed for fio, LevelDB, RocksDB, LMCache CPU bridge, diskannpy and standalone Milvus native RPC with explicit shutdown and fresh-server reopen. Shared AI DMA sizing, growth, concurrent payloads and allocation-failure drain checks passed. This does not qualify production deployment or saturation workloads.",
   "etcd": {
     "version": "3.5.18",
     "linux_amd64_archive_sha256": "6ddde039a7a506badf34e7edfb38e1ea90e36f05c8cfceba602045df623d86fa"

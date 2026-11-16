@@ -5,13 +5,21 @@ Pinned consumer: Milvus 2.6.4 and Knowhere v2.6.4 source
 `../versions.json`. Knowhere's vendored DiskANN is not interchangeable with
 upstream diskannpy 0.7.0 even though this reader supplies shared entry points.
 
-**Experimental: native RPC/reopen is not release-qualified.** The pinned Linux
-check passed the build, POSIX insert/index/search, offline graph import and
-positive native graph reads. Native queries timed out after the collection
-reported `Loaded`; reader shutdown then returned `-EBUSY` and the server exited
-nonzero. The native query/lifecycle cause is unresolved. Keep this adapter behind
-the release gate until RPC recall, explicit unmount and new-server reopen all
-pass. The commands below reproduce that gate; a successful build is insufficient.
+**Experimental, version-pinned reference adapter.** The pinned Linux standalone
+fixture passes POSIX insert/index/search, offline graph import, native RPC recall,
+explicit reader/runtime shutdown and new-server reopen. These are focused
+correctness checks; production deployment, saturation and long-running workloads
+require their own qualification. The commands below reproduce the checks; a
+successful build is insufficient.
+
+The shared bridge allocates reusable DMA slots on demand. Reserving 8 MiB for
+every search thread previously exhausted the shared SPDK arena; allocation
+exceptions left DiskANN queries waiting for scratch resources, followed by
+`-EBUSY` on shutdown. Small graph reads now reserve only the slot sizes they use.
+The [DMA regression](../common/README.md#dma-buffer-regression) checks multiple
+contexts, payloads, buffer growth and draining accepted I/O after allocation
+failure. Keep context limits and the shared arena budget appropriate to the
+target workload; lazy allocation does not make memory unlimited.
 
 Build using the integration index and follow the shared
 [graph import procedure](../common/README.md#import-an-immutable-graph).

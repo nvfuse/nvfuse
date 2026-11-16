@@ -11,7 +11,7 @@
 #include <libaio.h>
 #define DEPTH 32
 #define PIECE (256 * 1024)
-struct piece { struct nvfio_request *req; void *dma, *destination; size_t bytes; int write, busy; };
+struct piece { struct nvfio_request *req; void *dma, *destination; size_t bytes, capacity; int write, busy; };
 struct channel {
     struct piece slots[DEPTH];
     struct nvfio_client *client;
@@ -40,8 +40,7 @@ static int initialize_channel(struct channel *channel) {
     int rc=channel->client?0:-ENOMEM;
     for(unsigned i=0;i<DEPTH && !rc;i++) {
         channel->slots[i].req=nvfio_request_alloc(&channel->slots[i]);
-        channel->slots[i].dma=nvfio_dma_alloc(PIECE);
-        if(!channel->slots[i].req||!channel->slots[i].dma)rc=-ENOMEM;
+        if(!channel->slots[i].req)rc=-ENOMEM;
     }
     if(rc){destroy_slots(channel);if(channel->client)nvfio_client_free(channel->client);pthread_mutex_destroy(&channel->mutex);}
     return rc;
@@ -111,6 +110,15 @@ int nvai_transfer_batch_context(void *context,int fd,void **buffers,const size_t
         for(unsigned i=0;i<DEPTH && !error && next<count;i++) {
             struct piece *p=&channel->slots[i];if(p->busy)continue;
             size_t bytes=lengths[next]-done;if(bytes>PIECE)bytes=PIECE;
+            /* Graph readers usually need 4 KiB, not 32 eager 256 KiB slots
+             * per thread. Grow only an idle slot, retaining it for reuse.
+             * An allocation failure still drains every accepted request. */
+            if(p->capacity<bytes) {
+                void *dma=nvfio_dma_alloc(bytes);
+                if(!dma){error=-ENOMEM;break;}
+                if(p->dma)nvfio_dma_free(p->dma);
+                p->dma=dma;p->capacity=bytes;
+            }
             p->destination=(char *)buffers[next]+done;p->bytes=bytes;p->write=writes[next];
             if(p->write)memcpy(p->dma,p->destination,bytes);
             int rc=nvfio_submit(channel->client,p->req,fd,p->dma,bytes,offsets[next]+done,p->write);

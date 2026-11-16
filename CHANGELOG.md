@@ -34,6 +34,10 @@ are not qualified.
 
 ### Integration and documentation
 
+- Shared AI adapters allocate DMA slots on demand and retain them for reuse,
+  avoiding eager per-thread reservations that could stall Milvus searches after
+  allocation failure. Focused checks cover buffer sizing, failure drain and
+  native Milvus RPC/shutdown/reopen.
 - Embedded applications can retain their process signal handlers with
   `NVFUSE_SPDK_EMBEDDED=1`. IPC allocation can use an existing arena on another
   NUMA socket with `NVFUSE_IPC_SOCKET_ANY=1`; local allocation remains the default.

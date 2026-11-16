@@ -19,10 +19,10 @@ the same core headers/archive and SPDK build.
 [versions.json](versions.json) records dependency pins and API compatibility scope.
 These are reference integrations, not a stable application-plugin SDK. Their
 source layout has passed Linux x86_64 builds and focused correctness/reopen
-checks for fio, LevelDB, RocksDB, the LMCache CPU bridge and diskannpy at the
-pinned versions. Milvus native RPC/reopen remains an open release gate; see its
-guide. Generated results are not shipped as proof that another host or
-application version works.
+checks for fio, LevelDB, RocksDB, the LMCache CPU bridge, diskannpy and standalone
+Milvus native RPC/shutdown/reopen at the pinned versions. The Milvus guide states
+its limited graph-reader scope. Generated results are not shipped as proof that
+another host or application version works.
 
 ## Build and use
 
@@ -77,6 +77,7 @@ versions, hashes and failures under ignored `build/test-results/`.
 | fio | CRC writes, separate-process CRC reads, supported block sizes and four-job mixed I/O |
 | LevelDB / RocksDB | Native and POSIX build, WAL/sync updates and independent full-payload/per-key-revision verification |
 | LMCache | Capacity/reclamation, FIFO overwrite order, close/drain, cold namespace and actual pinned LMCache CPU tensor bridge |
+| Shared AI bridge | Idle DMA footprint, concurrent payloads, slot growth/reuse and accepted-I/O drain after injected allocation failure |
 | ANN | New index, exact-ground-truth recall, full-byte graph import, positive native reads and clean shutdown/reopen |
 | Milvus | Actual insert/flush/DISKANN/RPC query, native graph evidence, explicit runtime shutdown and new-server reopen |
 
