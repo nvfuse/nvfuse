@@ -65,6 +65,8 @@ make local
 make local-test
 make local-journal-test
 make -f Makefile.local journal-v3-test journal-crc-test api-completion-test
+make -f Makefile.local build/local/journal_memory_test
+./build/local/journal_memory_test
 cc -std=gnu11 -D_GNU_SOURCE -DNVFUSE_FILE_BACKEND -Iinclude \
   examples/quickstart/image_api.c build/local/nvfuse.a -lpthread -lm \
   -o build/local/image-api

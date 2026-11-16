@@ -37,7 +37,8 @@ static unsigned slot(uint64_t offset) {
 static int disk_io(void *arg,uint64_t offset,size_t n,void *buf,int write) {
     struct disk *d=arg;assert(offset%NVJ_BLOCK==0 && n==NVJ_BLOCK);unsigned s=slot(offset);
     if(write){memcpy(d->bytes+(size_t)s*NVJ_BLOCK,buf,n);if(d->cut && offset==0){d->cut=0;return -EIO;}}
-    else memcpy(buf,d->bytes+(size_t)s*NVJ_BLOCK,n);return 0;
+    else memcpy(buf,d->bytes+(size_t)s*NVJ_BLOCK,n);
+    return 0;
 }
 static int disk_flush(void *arg){(void)arg;return 0;}
 static void arm(unsigned n){fail_at=n;allocations=hits=0;}
