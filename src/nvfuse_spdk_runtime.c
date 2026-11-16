@@ -21,13 +21,19 @@
 #include "spdk_runtime/api_queue.h"
 #include "nvfuse_commit_cache.h"
 #include <sys/mman.h>
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <sched.h>
 #define CLIENT_QUEUES 4
 struct nvfio_lane { struct nvfuse_aio_queue queue; unsigned reserved; };
 struct nvfio_client {
     struct nvfio_lane lanes[CLIENT_QUEUES];
-    unsigned count, inflight;
+    unsigned count, initialized, inflight;
     unsigned outstanding; /* fio worker only; includes pending and completed I/O. */
+    unsigned uncoalesced; /* Caller only: writes or requests larger than one block. */
     struct nvfio_ring pending, completed;
+    _Alignas(64) atomic_uint wait_enabled, waiting;
     struct nvfio_client *next; /* filesystem thread only */
 };
 struct nvfio_request { struct nvfuse_aio_req aio; void *user; unsigned blocks; int error; struct nvfio_lane *lane; };
@@ -481,22 +487,30 @@ int nvfio_start(const char *json, const char *bdf, int format)
     pthread_mutex_unlock(&lifecycle);
     return rc;
 }
+/* Create lanes on their filesystem owner only when the previous lanes cannot
+ * reserve a request. Small graph reads usually need just one lane; bulk I/O
+ * retains the requested maximum capacity. Every initialized lane remains live
+ * until the ordinary client drain/free, so no task can outlive its storage. */
+static int client_grow(struct nvfio_client *client)
+{
+    if (client->initialized == client->count) return -EAGAIN;
+    struct nvfuse_aio_queue *q = &client->lanes[client->initialized].queue;
+    if (nvfuse_aio_queue_init(rt.handle->nvh_target, q, AIO_MAX_QDEPTH / 2))
+        return -ENOMEM;
+    if (poll_queues && reactor_task_enable_polling(rt.handle->nvh_target, q->task)) {
+        reactor_free_task(rt.handle->nvh_target, q->task);
+        return -ENOMEM;
+    }
+    client->initialized++;
+    return 0;
+}
 static void client_init(struct call *c)
 {
-    unsigned initialized = 0;
-    for (unsigned i = 0; i < c->client->count; i++) {
-        struct nvfuse_aio_queue *q = &c->client->lanes[i].queue;
-        if (nvfuse_aio_queue_init(rt.handle->nvh_target, q, AIO_MAX_QDEPTH / 2)) goto fail;
-        initialized++;
-        if (poll_queues && reactor_task_enable_polling(rt.handle->nvh_target, q->task)) goto fail;
-    }
-    printf("NVFUSE_DATA_QUEUE mode=%s\n", poll_queues ? "poll" : "message");
+    c->result = client_grow(c->client);
+    if (c->result) return;
+    printf("NVFUSE_DATA_QUEUE mode=%s lanes=lazy max=%u\n",
+           poll_queues ? "poll" : "message", c->client->count);
     c->client->next = rt.clients; rt.clients = c->client;
-    return;
-fail:
-    for (unsigned i = 0; i < initialized; i++)
-        reactor_free_task(rt.handle->nvh_target, c->client->lanes[i].queue.task);
-    c->result = -ENOMEM;
 }
 struct nvfio_client *nvfio_client_alloc(unsigned queues)
 {
@@ -505,6 +519,7 @@ struct nvfio_client *nvfio_client_alloc(unsigned queues)
     if (posix_memalign((void **)&client, _Alignof(struct nvfio_client), sizeof(*client))) return NULL;
     memset(client, 0, sizeof(*client));
     nvfio_ring_init(&client->pending); nvfio_ring_init(&client->completed);
+    atomic_init(&client->wait_enabled, 0); atomic_init(&client->waiting, 0);
     client->count = queues;
     struct call c = {.fn = client_init, .client = client};
     if (dispatch(&c)) { free(client); return NULL; }
@@ -518,7 +533,8 @@ static void client_fini(struct call *c)
     while (*link && *link != c->client) link = &(*link)->next;
     if (!*link) { c->result = -EINVAL; return; }
     *link = c->client->next;
-    for (unsigned i = 0; i < c->client->count; i++) {
+    printf("NVFUSE_DATA_LANES initialized=%u limit=%u\n", c->client->initialized, c->client->count);
+    for (unsigned i = 0; i < c->client->initialized; i++) {
         struct nvfuse_aio_queue *q = &c->client->lanes[i].queue;
         if (q->aio_stat->aio_lat_total_count) nvfuse_aio_queue_deinit(rt.handle, q);
         reactor_free_task(rt.handle->nvh_target, q->task);
@@ -580,11 +596,15 @@ static void submit_fs(struct call *c)
 {
     struct nvfio_request *r = c->request;
     struct nvfio_lane *lane = NULL;
-    for (unsigned i = 0; i < c->client->count; i++)
+    for (unsigned i = 0; i < c->client->initialized; i++)
         if (c->client->lanes[i].reserved + r->blocks <= AIO_MAX_QDEPTH) {
             lane = &c->client->lanes[i]; break;
         }
-    if (!lane) { c->result = -EAGAIN; return; }
+    if (!lane) {
+        c->result = client_grow(c->client);
+        if (c->result) return;
+        lane = &c->client->lanes[c->client->initialized - 1];
+    }
     r->lane = lane;
     int rc = aio_owner_mapping ?
         nvfuse_aio_queue_submission_serialized(rt.handle, &lane->queue, &r->aio) :
@@ -606,13 +626,32 @@ int nvfio_submit(struct nvfio_client *client, struct nvfio_request *r, int fd, v
     r->aio.sb = &rt.handle->nvh_sb; INIT_LIST_HEAD(&r->aio.list);
     if (nvfio_ring_push(&client->pending, r)) return -EAGAIN;
     client->outstanding++;
+    if (write || r->blocks > 1) client->uncoalesced++;
     return 0;
+}
+/* There is one completion producer (the filesystem owner) and one consumer.
+ * Fence with the consumer's arm operation before waking: a completion
+ * published between the empty recheck and FUTEX_WAIT makes its expected value
+ * mismatch, rather than losing the wakeup. Poll-only clients do no exchanges. */
+static int publish_completion(struct nvfio_client *client, struct nvfio_request *r)
+{
+    int rc = nvfio_ring_push(&client->completed, r);
+    if (!rc && atomic_load_explicit(&client->wait_enabled, memory_order_acquire)) {
+        /* The SC RMW fences queue publication before observing the arm, even
+         * for a partial batch that is not ready to wake its consumer yet. */
+        unsigned goal = atomic_fetch_or_explicit(&client->waiting, 0, memory_order_seq_cst);
+        if (goal && nvfio_ring_count(&client->completed) >= goal &&
+            atomic_compare_exchange_strong_explicit(&client->waiting, &goal, 0,
+                                                     memory_order_seq_cst, memory_order_seq_cst))
+            syscall(SYS_futex, &client->waiting, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    }
+    return rc;
 }
 static void poll_fs(struct call *c)
 {
     struct nvfuse_aio_req *list[AIO_MAX_QDEPTH];
     unsigned count = 0;
-    for (unsigned lane = 0; lane < c->client->count && count < c->max; lane++) {
+    for (unsigned lane = 0; lane < c->client->initialized && count < c->max; lane++) {
         struct nvfuse_aio_queue *q = &c->client->lanes[lane].queue;
         int n = nvfuse_io_getevents(&rt.handle->nvh_sb, q, 0, c->max - count, list);
         if (n < 0) { c->result = n; return; }
@@ -655,7 +694,7 @@ static int drain_clients(void)
                 if (submit.result) {
                     r->error = -submit.result;
                     if (rt.stats_map) rt.stats.word[NS_ERRORS]++;
-                    int rc = nvfio_ring_push(&client->completed, r);
+                    int rc = publish_completion(client, r);
                     assert(!rc); (void)rc;
                 }
                 rt.submitted++; rt.submit_passes++;
@@ -666,7 +705,7 @@ static int drain_clients(void)
             poll_fs(&poll);
             if (poll.result < 0) return poll.result;
             for (int i = 0; i < poll.result; i++) {
-                int rc = nvfio_ring_push(&client->completed, completed[i]);
+                int rc = publish_completion(client, completed[i]);
                 assert(!rc); (void)rc;
             }
             rt.completed += poll.result;
@@ -857,7 +896,7 @@ static int service_clients(void *unused)
                 return SPDK_POLLER_BUSY;
             }
             for (int i = 0; i < poll.result; i++) {
-                int rc = nvfio_ring_push(&client->completed, completed[i]);
+                int rc = publish_completion(client, completed[i]);
                 assert(!rc); (void)rc;
             }
             work += poll.result; rt.completed += poll.result;
@@ -874,7 +913,7 @@ static int service_clients(void *unused)
             if (submit.result) {
                 r->error = -submit.result;
                 if (rt.stats_map) rt.stats.word[NS_ERRORS]++;
-                int rc = nvfio_ring_push(&client->completed, r);
+                int rc = publish_completion(client, r);
                 assert(!rc); (void)rc;
             }
             batch++;
@@ -898,6 +937,8 @@ static int service_clients(void *unused)
         journal_deadline = spdk_get_ticks() + journal_interval;
     }
     pthread_mutex_unlock(&fs_gate);
+    /* Share an idle filesystem owner with runnable application workers. */
+    if (!work && rt.clients) sched_yield();
     return work ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 int nvfio_poll(struct nvfio_client *client, unsigned max, struct nvfio_request **completed)
@@ -908,11 +949,50 @@ int nvfio_poll(struct nvfio_client *client, unsigned max, struct nvfio_request *
         struct nvfio_request *r = nvfio_ring_peek(&client->completed);
         if (!r) break;
         completed[n++] = r;
+        if (r->aio.opcode == WRITE || r->blocks > 1) {
+            assert(client->uncoalesced); client->uncoalesced--;
+        }
         nvfio_ring_consume(&client->completed);
     }
     assert(n <= client->outstanding); client->outstanding -= n;
     if (!n && atomic_load_explicit(&rt.data_failed, memory_order_acquire)) return -EIO;
     return n;
+}
+/* Enable notifications on their producer before arming the first wait. This
+ * owner round trip occurs only once and prevents the first publication from
+ * observing a stale disabled flag after the caller's empty-queue recheck. */
+static void enable_client_wait(struct call *c)
+{
+    atomic_store_explicit(&c->client->wait_enabled, 1, memory_order_release);
+}
+int nvfio_wait(struct nvfio_client *client, unsigned max,
+               struct nvfio_request **completed, unsigned timeout_us)
+{
+    if (timeout_us > 1000000) return -EINVAL;
+    int n = nvfio_poll(client, max, completed);
+    if (n || !timeout_us || !client->outstanding) return n;
+    if (!atomic_load_explicit(&client->wait_enabled, memory_order_acquire)) {
+        struct call c = {.fn = enable_client_wait, .client = client};
+        int rc = dispatch(&c);
+        if (rc) return rc;
+    }
+    /* Small read batches already wait for every member before reuse. Avoid
+     * waking their consumer for each partial completion. Large I/O and writes
+     * retain first-completion notification for streaming refill. */
+    unsigned goal = client->uncoalesced ? 1 :
+        (max < client->outstanding ? max : client->outstanding);
+    atomic_exchange_explicit(&client->waiting, goal, memory_order_seq_cst);
+    n = nvfio_poll(client, max, completed);
+    if (!n && client->outstanding) {
+        struct timespec timeout = {.tv_sec = timeout_us / 1000000,
+            .tv_nsec = (long)(timeout_us % 1000000) * 1000};
+        int rc = syscall(SYS_futex, &client->waiting, FUTEX_WAIT_PRIVATE, goal,
+                         &timeout, NULL, 0);
+        if (rc < 0 && errno != EAGAIN && errno != EINTR && errno != ETIMEDOUT)
+            n = -errno;
+    }
+    atomic_exchange_explicit(&client->waiting, 0, memory_order_seq_cst);
+    return n ? n : nvfio_poll(client, max, completed);
 }
 void *nvfio_dma_alloc(size_t size) { return spdk_dma_zmalloc(size, CLUSTER_SIZE, NULL); }
 void nvfio_dma_free(void *buffer) { spdk_dma_free(buffer); }

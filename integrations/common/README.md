@@ -13,13 +13,35 @@ make -C integrations ann SPDK_ROOT_DIR="$SPDK_SOURCE"
 Outputs remain beside these sources and are ignored. The C bridge also retains
 XFS batching helpers for the LMCache reference path. The bridge selects embedded
 signals and socket-any IPC allocation; verify actual NUMA placement. Default
-wait policy is pause and queues per context are four. The reader defaults to 32
-contexts. DMA slots are allocated on first use and grow to the largest request
-piece seen by that slot, up to 8 MiB per context inside the shared 2 GiB SPDK
+wait policy is `block` and the queue capacity per context is four. The reader
+defaults to 32 contexts. DMA slots are allocated on first use and grow to the
+largest request piece seen by that slot, up to 8 MiB per context inside the shared 2 GiB SPDK
 arena. A full 32-slot batch of 4 KiB graph reads needs 128 KiB, rather than
 reserving 8 MiB for every search thread. Allocation failures drain accepted I/O
 before returning an error.
+
+The core also creates AIO lanes on demand up to the requested context limit.
+This is separate from DMA buffer growth: a small graph batch generally needs one
+core lane, while bulk I/O retains the full requested reservation capacity.
+
+An empty completion poll uses the core `nvfio_wait()` API with a 1000-microsecond
+sleep limit. This releases the application CPU while the filesystem and I/O
+reactors make progress. `NVAI_WAIT_POLICY=pause` restores the previous spin loop;
+`yield` uses the scheduler instead. Invalid values fail startup. The wait setting
+applies to the shared NVFUSE bridge; the XFS batching helper keeps its Linux AIO
+completion path. Rebuild the bridge against the matching core to use the new API.
+Small 4 KiB read batches can coalesce notifications in the core; larger I/O and
+writes keep first-completion notification. Signals, timeouts and already-ready
+results can return partial batches, which the bridge continues to drain.
+
 Keep these options fixed when comparing core versions.
+
+Arena provisioning runs before requests are served. The bridge allocates at most
+1 GiB at a time and explicitly fsyncs each chunk, then truncates to the requested
+size and fsyncs again. The primary SPDK fallocate path does not commit on return,
+and a long owner callback prevents periodic commits; bounded chunks alone would
+still accumulate journal metadata. This setup rule bounds that accumulation. It
+does not extend the core's arbitrary single-call fallocate transaction capacity.
 
 The [DB reference adapter](db/README.md) is shared by LevelDB and RocksDB. Host
 paths, result files, data sets and benchmark summaries do not belong here.

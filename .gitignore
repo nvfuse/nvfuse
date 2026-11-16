@@ -39,3 +39,6 @@ __pycache__/
 /docs/performance-results/
 /docs/performance-*.md
 /experiments/
+
+# Standalone read-only completion-wait qualification tool.
+/tests/spdk/completion_wait_test

@@ -21,6 +21,7 @@ struct channel {
 static struct channel primary;
 static int running;
 static int wait_yield;
+static int wait_block;
 static pthread_mutex_t mutex=PTHREAD_MUTEX_INITIALIZER;
 static void destroy_slots(struct channel *channel) {
     for(unsigned i=0;i<DEPTH;i++) {
@@ -36,7 +37,7 @@ static int initialize_channel(struct channel *channel) {
         queues=(unsigned)value;}
     pthread_mutex_init(&channel->mutex,NULL);
     channel->client=nvfio_client_alloc(queues);
-    if(channel==&primary)fprintf(stderr,"NVAI_CONTEXT_CONFIG queues=%u piece=%u depth=%u wait=%s\n",queues,PIECE,DEPTH,wait_yield?"yield":"pause");
+    if(channel==&primary)fprintf(stderr,"NVAI_CONTEXT_CONFIG queues=%u piece=%u depth=%u wait=%s\n",queues,PIECE,DEPTH,wait_block?"block":wait_yield?"yield":"pause");
     int rc=channel->client?0:-ENOMEM;
     for(unsigned i=0;i<DEPTH && !rc;i++) {
         channel->slots[i].req=nvfio_request_alloc(&channel->slots[i]);
@@ -60,10 +61,11 @@ int nvai_start(int format) {
     pthread_mutex_lock(&mutex);
     if(running){pthread_mutex_unlock(&mutex);return -EBUSY;}
     const char *policy=getenv("NVAI_WAIT_POLICY");
-    if(policy && strcmp(policy,"pause") && strcmp(policy,"yield")){
+    if(policy && strcmp(policy,"pause") && strcmp(policy,"yield") && strcmp(policy,"block")){
         pthread_mutex_unlock(&mutex);return -EINVAL;
     }
     wait_yield=policy && !strcmp(policy,"yield");
+    wait_block=!policy || !strcmp(policy,"block");
     setenv("NVFUSE_SPDK_EMBEDDED","1",1);
     setenv("NVFUSE_IPC_SOCKET_ANY","1",1);
     int rc=nvfio_start(getenv("NVFUSE_SPDK_JSON"),getenv("NVFUSE_SPDK_BDF"),format);
@@ -81,7 +83,17 @@ static int arena_owner(struct nvfuse_handle *h,void *opaque) {
     int fd=nvfuse_openfile_path(h,a->path,O_CREAT|O_RDWR|O_DIRECT,0600);
     if(fd<0)return fd;
     if(rc==-ENOENT || (uint64_t)st.st_size<a->bytes){
-        rc=nvfuse_fallocate(h,a->path,0,a->bytes);
+        /* The SPDK owner callback prevents periodic commits while running.
+         * Commit bounded allocation chunks before serving any requests. */
+        const uint64_t chunk=UINT64_C(1)<<30;
+        rc=0;
+        for(uint64_t offset=0;offset<a->bytes && !rc;) {
+            uint64_t bytes=a->bytes-offset;
+            if(bytes>chunk)bytes=chunk;
+            rc=nvfuse_fallocate(h,a->path,offset,bytes);
+            if(!rc)rc=nvfuse_fsync(h,fd);
+            offset+=bytes;
+        }
         if(!rc)rc=nvfuse_ftruncate(h,fd,a->bytes);
         if(!rc)rc=nvfuse_fsync(h,fd);
         if(rc){nvfuse_closefile(h,fd);return rc;}
@@ -131,6 +143,8 @@ int nvai_transfer_batch_context(void *context,int fd,void **buffers,const size_t
         if(error && !inflight)break;
         struct nvfio_request *completed[DEPTH];
         int n=nvfio_poll(channel->client,DEPTH,completed);
+        if(!n && inflight && wait_block)
+            n=nvfio_wait(channel->client,DEPTH,completed,1000);
         /* A fatal runtime that cannot retire accepted DMA cannot be recovered
          * safely by returning to a caller which will reuse those buffers. */
         if(n<0 && inflight){fprintf(stderr,"NVAI_FATAL_POLL %d\n",n);abort();}

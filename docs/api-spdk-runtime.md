@@ -52,10 +52,45 @@ For direct reads, allocate a client and requests, open an existing immutable
 file with `nvfio_open(path, 0)`, use `nvfio_dma_alloc()` and submit reads with
 `nvfio_submit(..., write=0)`. Buffers, offsets and lengths must be 4096-byte
 aligned. Retain every request and DMA buffer until its completion has been
-consumed with `nvfio_poll()`, check each request's error, and drain all accepted
-requests even after a partial submission failure. Close files and free clients
-before the final `nvfio_stop()`. A reader must not format an existing volume;
+consumed with `nvfio_poll()` or `nvfio_wait()`, check each request's error, and
+drain all accepted requests even after a partial submission failure. Close files
+and free clients before the final `nvfio_stop()`. A reader must not format an existing volume;
 provisioning and full-content verification precede serving.
+
+`nvfio_poll()` remains nonblocking. A caller which would otherwise spin on an
+empty completion queue can use `nvfio_wait(client, max, completed, timeout_us)`.
+It polls first, then arms a Linux private futex and rechecks the queue before
+sleeping. The first blocking call enables notifications on the filesystem owner;
+subsequent waits reuse that state until the client is freed. Each client keeps
+its calls serialized, including submit, poll, wait and free.
+
+When only 4 KiB reads remain outstanding, an empty wait may coalesce completion
+notifications up to `min(max, outstanding)`. Writes and larger requests keep
+first-completion notification for streaming refill. Already-ready completions,
+signals and timeouts can still return a partial batch. Use `max=1` when an empty
+wait should request notification for the first completion. This changes neither
+`nvfio_poll()` nor the requirement to retire every accepted request.
+
+`timeout_us` accepts 0 through 1,000,000. Zero only polls. A zero return can also
+mean a timeout, signal or spurious wakeup; keep waiting for every accepted request.
+The timeout bounds the futex sleep, rather than providing a scheduling deadline
+for the entire call. Positive returns contain ordinary completions, whose request
+errors must still be checked. Request and DMA lifetimes and journal ordering
+retain their usual rules. Poll-only applications can keep their existing loop.
+
+The requested AIO lane count remains the client's capacity limit. The filesystem
+owner initializes one lane and adds lanes when existing reservations cannot fit
+a request. Initialized lanes live through the usual client drain and free; no
+request can outlive its lane. Small graph batches usually use one lane, while
+bulk I/O can grow to the requested limit. Later lane allocation can fail during
+submission, so callers must keep the usual accepted-request error and drain rules.
+
+After an empty AIO service pass, the filesystem owner yields outside its gate
+while clients are live, allowing runnable application workers to use that CPU.
+The filesystem and I/O owners remain separate; callbacks and periodic journal
+work keep their existing ordering. A yield does not provide a latency deadline.
+Include both runtime owners when assigning and reporting an application's CPU
+budget.
 
 One process owns a volume. A multi-process service needs an explicit storage
 ownership design before several workers can use the same NVFUSE device.
@@ -180,6 +215,21 @@ I/O failure, inode/block reuse and partial appends on a disposable AIO image.
 Run v2 and v3 separately. Buffered fault fixtures use a test-only hook under the
 filesystem gate to pause periodic publication during the controlled failure
 window; explicit fsync remains active and production timer limits are unchanged.
+
+The read-only completion-wait test uses an existing immutable NVFUSE file and a
+full POSIX copy with the same 4096-byte-aligned length. With the usual runtime
+variables set and the volume exclusively owned, build and run from the root:
+
+```sh
+make -C tests/spdk -f Makefile.tools APP=completion_wait_test \
+  SPDK_ROOT_DIR="$SPDK_SOURCE"
+tests/spdk/completion_wait_test /demo.disk.index "$GRAPH_FILE"
+```
+
+It checks full payloads, exactly-once retirement, partial drains, zero/short waits,
+signals, an accepted out-of-range read error and rejection of freeing a busy
+client. It reopens the existing filesystem with formatting disabled.
+
 Process exits and software fault injection are not physical
 power-cut qualification. Performance results must identify the exact source,
 application settings, CPU placement, cache state and durability policy.
