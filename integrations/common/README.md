@@ -26,14 +26,14 @@ From `integrations/`, set the core runtime variables as described in the
 [core guide](../../docs/user-guide.md#primary-apispdk-on-linux). Use an already
 prepared, exclusively owned test volume and an absolute path for each placeholder.
 `GRAPH_FILE` must be nonempty and padded to a multiple of 4096 bytes. Choose a
-new NVFUSE destination such as `/graphs/demo.disk.index` and keep the original
+new NVFUSE destination such as `/demo.disk.index` and keep the original
 POSIX header and auxiliary files available to the application.
 
 ```sh
 mkdir -p ../build/integration-checks
 python3 tools/import_graph.py \
   --library "$PWD/common/libnvfuse_ai.so" \
-  --file "$GRAPH_FILE=/graphs/demo.disk.index" \
+  --file "$GRAPH_FILE=/demo.disk.index" \
   --output ../build/integration-checks/graph-import.json
 ```
 

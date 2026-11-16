@@ -59,5 +59,5 @@ pass does not establish LMCache end-to-end support.
 The key index is process-local. Restarting a connector gives cache misses for
 old slots; this is a disposable cache, not a persistent key/value database.
 Close the connector to drain accepted work before stopping the process. Linux
-`eventfd` and the pinned native-plugin API are required. The new directory layout
-needs Linux build and integration checks before distribution.
+`eventfd` and the pinned native-plugin API are required. The focused release checks exercise the pinned CPU bridge; they do not qualify
+a GPU inference server.

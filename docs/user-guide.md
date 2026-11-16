@@ -44,6 +44,14 @@ sudo apt-get install clang make python3 pkg-config fuse3 libfuse3-dev
 sudo dnf install clang make python3 fuse3 fuse3-devel pkgconf-pkg-config
 ```
 
+If GCC is installed instead of Clang, use `make local CC=gcc` and
+`make local-test CC=gcc`. On Rocky Linux with an installed GCC toolset, enable
+it first, for example `source /opt/rh/gcc-toolset-15/enable`. Native API/SPDK
+builds were checked with GCC 15; a runtime library package alone does not supply
+all link-time development files. Install the matching UUID, OpenSSL and libaio
+development packages required by the selected SPDK build (`libuuid-devel`,
+`openssl-devel`, `libaio-devel` on Rocky Linux).
+
 SPDK has additional distribution-specific build dependencies. Follow the
 [SPDK build instructions](https://github.com/spdk/spdk#building) for the selected
 version. A typical source build, in separate checkouts, is:

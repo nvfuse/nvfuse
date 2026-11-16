@@ -1097,9 +1097,12 @@ static void sync_dirty_data(struct nvfuse_superblock *sb, s32 num_blocks, inode_
     /* The owner consumes the entire batch before returning its buffers to the
      * clean list. Reuse its task and existing SPSC polling completion path. */
     task = sb->target->journal ? sb->target->journal_dirty_task : NULL;
-    if (!task)
+    if (!task) {
+        task = reactor_alloc_task(sb->target, num_blocks);
+    }
+#else
+    task = reactor_alloc_task(sb->target, num_blocks);
 #endif
-	task = reactor_alloc_task(sb->target, num_blocks);
 	//dprintf_info(REACTOR, " allocated task %p numblocks = %d \n", task, num_blocks);
 	assert(task);
 	assert(num_blocks);

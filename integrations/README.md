@@ -18,9 +18,11 @@ the same core headers/archive and SPDK build.
 
 [versions.json](versions.json) records dependency pins and API compatibility scope.
 These are reference integrations, not a stable application-plugin SDK. Their
-source implementations were used before this directory reorganization; Linux
-build/load and end-to-end checks must be repeated for the new layout. Generated
-results are not shipped as proof that another host or application version works.
+source layout has passed Linux x86_64 builds and focused correctness/reopen
+checks for fio, LevelDB, RocksDB, the LMCache CPU bridge and diskannpy at the
+pinned versions. Milvus native RPC/reopen remains an open release gate; see its
+guide. Generated results are not shipped as proof that another host or
+application version works.
 
 ## Build and use
 
@@ -60,3 +62,26 @@ and filesystem changes require separate comparisons.
 
 Project adapter sources follow the root [COPYING](../COPYING) and
 [NOTICE](../NOTICE); evaluate the combined application's distribution terms.
+
+## Release checks
+
+Run the [core release checks](../docs/releasing.md#verify-the-release-contents)
+from an actual commit archive, then each application's focused checks using
+sources from that same archive. Third-party applications and dependency builds
+are supplied separately at the pinned versions; do not reuse a previous NVFUSE
+archive, adapter binary or untracked application fixture. Retain command lines,
+versions, hashes and failures under ignored `build/test-results/`.
+
+| Integration | Required evidence |
+| --- | --- |
+| fio | CRC writes, separate-process CRC reads, supported block sizes and four-job mixed I/O |
+| LevelDB / RocksDB | Native and POSIX build, WAL/sync updates and independent full-payload/per-key-revision verification |
+| LMCache | Capacity/reclamation, FIFO overwrite order, close/drain, cold namespace and actual pinned LMCache CPU tensor bridge |
+| ANN | New index, exact-ground-truth recall, full-byte graph import, positive native reads and clean shutdown/reopen |
+| Milvus | Actual insert/flush/DISKANN/RPC query, native graph evidence, explicit runtime shutdown and new-server reopen |
+
+The ANN and Milvus guides contain small fixture generators and verification
+commands. Their data, traces and output JSON are generated files and remain
+outside source commits. A mock, symbol check or build pass alone does not qualify
+an application's end-to-end operation. Track application-server shutdown
+failures separately from a successful NVFUSE unmount; both matter for delivery.

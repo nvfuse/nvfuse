@@ -227,3 +227,11 @@ report includes the source revision/local patch, build flags, OS/CPU, backend,
 controller/namespace identity, journal version, workload seed, first failing
 operation and the retained-volume reopen result. Inspect shared logs for secrets
 before publishing them.
+
+## Application release checks
+
+The [integration release checklist](../integrations/README.md#release-checks)
+covers fio, LevelDB, RocksDB, LMCache and the actual DiskANN/Milvus search paths.
+Use an isolated commit archive and each application's guide. Small correctness
+fixtures establish payload/recall/reopen behavior; they do not establish a
+large-working-set or device-saturation performance claim.
