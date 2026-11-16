@@ -41,6 +41,27 @@ controller, downloads an application or runs a workload. Normal readers reopen
 an existing filesystem. Formatting is a separate intentional provisioning step;
 read each command before using it on a disposable test volume.
 
+### Runtime environment for native examples
+
+After the core guide's first-format and reopen checks, export the same settings
+in the shell that will run the application examples. The core guide sets
+`NVFUSE_TEST_BDF`, `NVFUSE_TEST_BDEV` and `NVFUSE_TEST_CORES`; reuse those reviewed
+values and the existing bdev JSON:
+
+```sh
+export NVFUSE_SPDK_JSON="$PWD/build/config/bdev.json"
+export NVFUSE_SPDK_BDF="$NVFUSE_TEST_BDF"
+export NVFUSE_SPDK_BDEV="$NVFUSE_TEST_BDEV"
+export NVFUSE_SPDK_CORE_MASK="$NVFUSE_TEST_CORES"
+export NVFUSE_JOURNAL=1
+export NVFUSE_FORMAT=0
+```
+
+Keep the prepared device/hugepage access permissions and memlock limit available
+to these processes. Environment variables supplied to one earlier `sudo env`
+command do not remain exported for later commands. The native examples below
+reopen the prepared volume; do not carry `NVFUSE_FORMAT=1` into them.
+
 The core [external adapter contract](../docs/api-spdk-runtime.md#external-storage-adapters)
 covers linking, request/DMA lifetime, shutdown and one-owner-per-volume rules.
 Application API, scheduling, checksums and route choices belong to the adapter.

@@ -30,15 +30,16 @@ the upstream database. The Env implementation is in `common/db/kv_app.cc`.
 
 ## Run and verify
 
-First prepare a disposable NVFUSE volume using the core user guide. Set bdev
-name and runtime environment as documented there. The native path below is an
+First prepare a disposable NVFUSE volume using the core user guide. Export the
+[native runtime environment](../README.md#runtime-environment-for-native-examples).
+The native path below is an
 NVFUSE path; the POSIX path is an absent child directory on the chosen XFS mount.
 Both runs create/write the specified database and keep it for verification.
 
 ```sh
 export KV_BATCH_ITERATIONS=1000
-build/integrations/rocksdb/native/kv_app /rocksdb-demo 1000 1000 run "$BDEV_JSON" "$BDF" 0
-build/integrations/rocksdb/native/kv_app /rocksdb-demo 1000 1000 verify "$BDEV_JSON" "$BDF" 0
+build/integrations/rocksdb/native/kv_app /rocksdb-demo 1000 1000 run "$NVFUSE_SPDK_JSON" "$NVFUSE_SPDK_BDF" 0
+build/integrations/rocksdb/native/kv_app /rocksdb-demo 1000 1000 verify "$NVFUSE_SPDK_JSON" "$NVFUSE_SPDK_BDF" 0
 build/integrations/rocksdb/posix/kv_app "$XFS_NEW_DB" 1000 1000 run
 build/integrations/rocksdb/posix/kv_app "$XFS_NEW_DB" 1000 1000 verify
 ```
@@ -47,5 +48,5 @@ Require `KVVERIFY ... full_payload=ok per_key_revision=ok` from both processes.
 A new `run` requires a new database path; retain failed databases and logs.
 These small counts are correctness examples. Choose and record an appropriate
 working set, repetition count, CPU budget, cache and sync policy for performance
-measurements. The source relocation and portable build entry points still need
-Linux build/end-to-end qualification on the selected dependency versions.
+measurements. Build and runtime qualification applies to the pinned dependency
+version; repeat these checks when changing the database or toolchain.
