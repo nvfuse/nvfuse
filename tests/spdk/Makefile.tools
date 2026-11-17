@@ -5,6 +5,18 @@ APP ?= primary_journal_test
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk
 include $(SPDK_ROOT_DIR)/mk/spdk.modules.mk
 C_SRCS = $(APP).c
+ifeq ($(APP),commit_cache_v2_test)
+C_SRCS = commit_cache_v2_test.c commit_cache_v2_runtime.c
+endif
+ifeq ($(APP),fsync_data_overlap_test)
+C_SRCS = fsync_data_overlap_test.c commit_cache_v2_runtime.c
+endif
+ifeq ($(APP),fsync_overlap_test)
+C_SRCS = fsync_overlap_test.c commit_cache_v2_runtime.c
+endif
+ifeq ($(APP),commit-cache-extra-test)
+C_SRCS = commit-cache-extra-test.c commit_cache_v2_runtime.c
+endif
 ifeq ($(APP),api_cache_test)
 C_SRCS = api_cache_test.c api_cache_runtime.c
 endif
@@ -17,3 +29,5 @@ SPDK_LIB_LIST += event $(EVENT_BDEV_SUBSYSTEM) $(KEYRING_MODULES_LIST) $(BLOCKDE
 include $(SPDK_ROOT_DIR)/mk/spdk.app.mk
 $(APP): $(NVFUSE_ARCHIVE)
 api_cache_runtime.o: ../../src/nvfuse_spdk_runtime.c ../../include/nvfuse_spdk_runtime.h $(wildcard ../../src/spdk_runtime/*.h ../../src/spdk_runtime/*.inc)
+
+commit_cache_v2_runtime.o: ../../src/nvfuse_spdk_runtime.c ../../include/nvfuse_spdk_runtime.h $(wildcard ../../src/spdk_runtime/*.h ../../src/spdk_runtime/*.inc)

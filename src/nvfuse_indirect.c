@@ -646,6 +646,59 @@ s32 nvfuse_get_block_cached(struct nvfuse_superblock *sb, struct nvfuse_inode_ct
     return rc < 0 ? rc : 0;
 }
 
+/* Runtime-only mapping while its single filesystem gate excludes ALL cache
+ * mutation. Standalone primary has no flush worker and the I/O reactor does
+ * not modify cache metadata. No evictable pointer escapes this function.
+ * Referenced, loading or flushing pages retain the ordinary locked mapper. */
+static struct nvfuse_buffer_cache *serialized_mapping_page(
+        struct nvfuse_superblock *sb, inode_t ino, u32 block, u32 physical)
+{
+    struct nvfuse_buffer_manager *bm = sb->sb_bm;
+    u64 key;
+    nvfuse_make_pbno_key(ino, block, &key, NVFUSE_BP_TYPE_DATA);
+    struct nvfuse_buffer_cache *bc = nvfuse_hash_lookup(bm, key);
+    if (!bc || !bc->bc_load || bc->bc_flush || bc->bc_locked ||
+        rte_atomic32_read(&bc->bc_ref) || (physical && bc->bc_pno != physical))
+        return NULL;
+    if (bm->bm_list[bc->bc_list_type].next != &bc->bc_list)
+        list_move(&bc->bc_list, &bm->bm_list[bc->bc_list_type]);
+    bm->bm_cache_ref++; bm->bm_cache_hit++;
+    return bc;
+}
+int nvfuse_try_serialized_read_mapping(struct nvfuse_superblock *sb, inode_t ino,
+                                       s64 offset, u32 bytes, u32 *physical)
+{
+    u32 path[INDIRECT_BLOCKS_LEVEL], boundary;
+    if (!nvfuse_process_model_is_standalone() || ino < ROOT_INO || offset < 0 ||
+        !bytes || offset % CLUSTER_SIZE || bytes % CLUSTER_SIZE ||
+        offset >= MAX_FILE_SIZE || bytes > MAX_FILE_SIZE - offset)
+        return 0;
+    int depth = nvfuse_block_to_path(offset / CLUSTER_SIZE, path, &boundary);
+    u32 count = bytes / CLUSTER_SIZE;
+    if (!depth || count > boundary + 1) return 0;
+    struct nvfuse_buffer_cache *bc = serialized_mapping_page(sb, ITABLE_INO,
+                                                            ino / INODE_ENTRY_NUM, 0);
+    if (!bc) return 0;
+    const struct nvfuse_inode *inode = (const struct nvfuse_inode *)bc->bc_buf +
+                                      ino % INODE_ENTRY_NUM;
+    if (inode->i_ino != ino || !S_ISREG(inode->i_mode) ||
+        offset > inode->i_size || bytes > inode->i_size - offset) return 0;
+    const u32 *pointers = inode->i_blocks;
+    for (int level = 0; level < depth - 1; level++) {
+        u32 next = pointers[path[level]];
+        if (!next) return 0;
+        bc = serialized_mapping_page(sb, BLOCK_IO_INO, next, next);
+        if (!bc) return 0;
+        pointers = (const u32 *)bc->bc_buf;
+    }
+    u32 index = path[depth - 1], first = pointers[index];
+    if (!first) return 0;
+    for (u32 i = 1; i < count; i++)
+        if (pointers[index + i] != first + i) return 0;
+    *physical = first;
+    return 1;
+}
+
 /* A read-only fast path for a complete contiguous cached extent. All inode
  * and tree fields remain protected by the same inode lock as ordinary AIO.
  * A cold block, hole, EOF or fragmented extent falls back without data I/O. */

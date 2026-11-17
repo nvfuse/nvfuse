@@ -218,9 +218,61 @@ static int block_reuse(struct nvfuse_handle *h, int create)
     }
     return get(h, "/primary-epoch-block-reuse-data", 0x5a);
 }
+/* Interleaved allocation forces fragmented mappings. Each overwrite/reopen
+ * starts in a new process, so data-page hits cannot hide the mapped miss path. */
+static int write_extent_fixture(struct nvfuse_handle *h, const char *mode)
+{
+    const size_t bytes = 1100 * CLUSTER_SIZE + 731;
+    const size_t chunks[] = {65536, 131072, 1048576, 4097, 32761};
+    char *expected = malloc(bytes), *actual = malloc(bytes);
+    CHECK(expected && actual);
+    int seed = !strcmp(mode, "write-extent-seed");
+    int overwrite = !strcmp(mode, "write-extent-overwrite");
+    for (size_t i=0;i<bytes;i++) expected[i]=(char)(i*19+i/251);
+    int fd=nvfuse_openfile_path(h,"/write-extent-data",seed?O_CREAT|O_EXCL|O_RDWR:(overwrite?O_RDWR:O_RDONLY),0600);
+    CHECK(fd>=0);
+    if(seed) {
+        int spacer=nvfuse_openfile_path(h,"/write-extent-spacer",O_CREAT|O_EXCL|O_RDWR,0600);CHECK(spacer>=0);
+        char block[CLUSTER_SIZE];memset(block,0x6d,sizeof(block));
+        for(size_t off=0;off<bytes;off+=CLUSTER_SIZE) {
+            size_t n=bytes-off<CLUSTER_SIZE?bytes-off:CLUSTER_SIZE;
+            CHECK(nvfuse_writefile(h,fd,expected+off,n,off)==(s32)n);
+            CHECK(nvfuse_writefile(h,spacer,block,sizeof(block),off)==sizeof(block));
+            if(!(off%(128*CLUSTER_SIZE)))CHECK(!nvfuse_fsync(h,fd));
+        }
+        CHECK(!nvfuse_fsync(h,fd));CHECK(!nvfuse_closefile(h,spacer));
+    } else {
+        for(size_t i=0;i<bytes;i++)expected[i]^=0x37;
+        if(overwrite) {
+            struct stat st;CHECK(!nvfuse_getattr(h,"/write-extent-data",&st));
+            struct nvfuse_inode_ctx *ctx=nvfuse_read_inode(&h->nvh_sb,NULL,st.st_ino);CHECK(ctx);
+            u32 mapped,physical;CHECK(!nvfuse_get_block_cached(&h->nvh_sb,ctx,0,8,&mapped,&physical));
+            CHECK(physical&&mapped==1);nvfuse_release_inode(&h->nvh_sb,ctx,NVF_CLEAN);
+            for(size_t off=0,k=0;off<bytes;k++) {
+                size_t n=chunks[k%5];if(n>bytes-off)n=bytes-off;
+                CHECK(nvfuse_writefile(h,fd,expected+off,n,off)==(s32)n);off+=n;
+            }
+            if (h->nvh_target->buffered_extent_mapping) {
+                CHECK(h->nvh_target->buffered_extent_hits>1000);
+                CHECK(h->nvh_target->buffered_extent_miss_copies>1000);
+            }
+            CHECK(!nvfuse_ftruncate(h,fd,CLUSTER_SIZE+113));
+            for(size_t off=CLUSTER_SIZE+113,k=0;off<bytes;k++) {
+                size_t n=chunks[k%5];if(n>bytes-off)n=bytes-off;
+                CHECK(nvfuse_writefile(h,fd,expected+off,n,off)==(s32)n);off+=n;
+            }
+            CHECK(!nvfuse_fsync(h,fd));
+            fprintf(stderr,"EXPECTED_CRASH phase=write-extent-after-fsync\n");fflush(NULL);_exit(86);
+        }
+    }
+    CHECK(nvfuse_readfile(h,fd,actual,bytes,0)==(s32)bytes);CHECK(!memcmp(actual,expected,bytes));
+    CHECK(!nvfuse_readfile(h,fd,actual,1,bytes));
+    CHECK(!nvfuse_closefile(h,fd));free(actual);free(expected);return 0;
+}
 static int run(struct nvfuse_handle *h, void *argument)
 {
     const char *mode = argument;
+    if (!strncmp(mode,"write-extent-",13)) return write_extent_fixture(h,mode);
     if (!strcmp(mode, "partial-long-create") || !strcmp(mode, "partial-long-check")) return partial_writes_long(h, !strcmp(mode, "partial-long-create"));
     CHECK(h->nvh_target->journal);
     if (!strcmp(mode, "partial-create") || !strcmp(mode, "partial-check") ||

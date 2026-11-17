@@ -195,7 +195,7 @@ void nvfuse_aio_gen_dev_cpls(void *arg)
 	nvfuse_aio_queue_enqueue(areq->queue, areq, NVFUSE_COMPLETION_QUEUE);
 }
 
-s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq)
+static s32 gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq, int serialized)
 {
 	s64 start, length;
 	s32 count = 0;
@@ -228,7 +228,13 @@ s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queu
         (write ? areq->bytes >= MAX_FILE_SIZE - areq->offset :
                  areq->bytes > MAX_FILE_SIZE - areq->offset)) goto free_jobs;
     of = nvfuse_get_file_table(sb, areq->fid);
-    if (!write) fast_read = nvfuse_try_cached_read_mapping(sb, of->ino,
+    if (!write && serialized) {
+        sb->target->aio_mapping_attempts++;
+        fast_read = nvfuse_try_serialized_read_mapping(sb, of->ino,
+                               areq->offset, areq->bytes, &fast_read_physical);
+        sb->target->aio_mapping_hits += fast_read;
+    }
+    if (!write && !fast_read) fast_read = nvfuse_try_cached_read_mapping(sb, of->ino,
                                areq->offset, areq->bytes, &fast_read_physical);
     ictx = fast_read ? NULL : nvfuse_read_inode(sb, NULL, of->ino);
     if (!ictx && !fast_read) goto free_jobs;
@@ -366,7 +372,12 @@ free_jobs:
 #endif
 }
 
-s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq)
+s32 nvfuse_aio_gen_dev_reqs(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq)
+{
+    return gen_dev_reqs(sb, aioq, areq, 0);
+}
+
+static s32 queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq, int serialized)
 {
 	struct list_head *head, *ptr, *temp;
 	u32 bytes;
@@ -415,7 +426,7 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 		assert(nvfuse_is_directio(&nvh->nvh_sb, areq->fid));
 		/* direct i/o without buffer head */
 		areq->bio_job_count = NVFUSE_SIZE_TO_BLK(areq->bytes);
-		res = nvfuse_aio_gen_dev_reqs(&nvh->nvh_sb, aioq, areq);
+		res = gen_dev_reqs(&nvh->nvh_sb, aioq, areq, serialized);
 		if (res < 0) {
 			nvfuse_aio_queue_dequeue(aioq, areq, NVFUSE_SUBMISSION_QUEUE);
 			return -1;
@@ -425,6 +436,16 @@ s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_que
 	}
 
 	return 0;
+}
+
+s32 nvfuse_aio_queue_submission(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq)
+{
+    return queue_submission(nvh, aioq, areq, 0);
+}
+
+s32 nvfuse_aio_queue_submission_serialized(struct nvfuse_handle *nvh, struct nvfuse_aio_queue *aioq, struct nvfuse_aio_req *areq)
+{
+    return queue_submission(nvh, aioq, areq, 1);
 }
 
 s32 nvfuse_aio_wait_dev_cpls(struct nvfuse_superblock *sb, struct nvfuse_aio_queue *aioq, s32 min_nr, s32 nr)

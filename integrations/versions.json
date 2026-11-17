@@ -1,0 +1,39 @@
+{
+  "diskannpy": {
+    "version": "0.7.0",
+    "source_commit": "df225d32da81db87596a3ce7c040ad0f78709a7c",
+    "source_repository": "https://github.com/microsoft/DiskANN"
+  },
+  "milvus": {
+    "version": "2.6.4",
+    "image_digest": "sha256:a830715b5a894bed3a8007f0440abc49b8b8cca5d56b1248a261b1184bdc2430"
+  },
+  "knowhere": {
+    "tag": "v2.6.4",
+    "source_commit": "500f4a89338e66086cd8c9f687ac8da459f34b95",
+    "source_repository": "https://github.com/zilliztech/knowhere",
+    "diskann": "vendored thirdparty/DiskANN; not interchangeable with upstream 0.7.0"
+  },
+  "method": "ELF replacement of original reader member entry points; no original class layout, construction or vtable changes; unsupported async-only entry points fail closed",
+  "aligned_read": {
+    "size": 24,
+    "offset": 0,
+    "len": 8,
+    "buf": 16
+  },
+  "scope": "Immutable graph read path only. Loader graph-header metadata, file manager, index build, auxiliary/PQ files, object chunks and WAL retain POSIX behavior. Not an official plugin and not a full Milvus rebuild.",
+  "spdk": "26.09",
+  "fio": "3.41",
+  "leveldb": "1.23",
+  "rocksdb": "9.10.0",
+  "lmcache": {
+    "version": "0.5.0.dev20261114",
+    "source_commit": "bcafb031401d404a5dabae4853f5e23bf9e5685c"
+  },
+  "core_api_revision": "67c985ab173d9ff6db84f45239c368393eb47d7e",
+  "layout_validation": "Linux x86_64 focused correctness/reopen checks passed for fio, LevelDB, RocksDB, LMCache CPU bridge, diskannpy and standalone Milvus native RPC with explicit shutdown and fresh-server reopen. Shared AI DMA sizing, growth, concurrent payloads and allocation-failure drain checks passed. This does not qualify production deployment or saturation workloads.",
+  "etcd": {
+    "version": "3.5.18",
+    "linux_amd64_archive_sha256": "6ddde039a7a506badf34e7edfb38e1ea90e36f05c8cfceba602045df623d86fa"
+  }
+}

@@ -19,14 +19,21 @@
 #include "spdk_runtime/stats.h"
 #include "spdk_runtime/completion.h"
 #include "spdk_runtime/api_queue.h"
+#include "nvfuse_commit_cache.h"
 #include <sys/mman.h>
+#include <linux/futex.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <sched.h>
 #define CLIENT_QUEUES 4
 struct nvfio_lane { struct nvfuse_aio_queue queue; unsigned reserved; };
 struct nvfio_client {
     struct nvfio_lane lanes[CLIENT_QUEUES];
-    unsigned count, inflight;
+    unsigned count, initialized, inflight;
     unsigned outstanding; /* fio worker only; includes pending and completed I/O. */
+    unsigned uncoalesced; /* Caller only: writes or requests larger than one block. */
     struct nvfio_ring pending, completed;
+    _Alignas(64) atomic_uint wait_enabled, waiting;
     struct nvfio_client *next; /* filesystem thread only */
 };
 struct nvfio_request { struct nvfuse_aio_req aio; void *user; unsigned blocks; int error; struct nvfio_lane *lane; };
@@ -61,8 +68,40 @@ static void lock_fs_gate(void)
     pthread_mutex_lock(&fs_gate);
 }
 static int api_cache_owner;
+static int aio_owner_mapping;
 static uint64_t cache_owner_reads;
 static int api_cache_read = 1;
+/* Bounded retry only for the loaded-page caller path. The
+ * original owner-dispatch fallback remains mandatory for pending AIO. */
+static int api_cache_retry;
+static unsigned api_cache_retry_budget_us = 50;
+static atomic_uint_fast64_t cache_retry_attempts, cache_retry_wins, cache_retry_timeouts;
+static int commit_cache_read(int,void *,int,uint64_t,int *);
+static int try_cache_gate(int fd,void *data,int count,uint64_t offset,int *result)
+{
+    if (!pthread_mutex_trylock(&fs_gate)) return 1;
+    if (!api_cache_retry) return 0;
+    atomic_fetch_add_explicit(&cache_retry_attempts, 1, memory_order_relaxed);
+    uint64_t start = spdk_get_ticks(), ticks = spdk_get_ticks_hz() * api_cache_retry_budget_us / 1000000;
+    do {
+        for (unsigned i = 0; i < 16; i++) {
+#if defined(__x86_64__) || defined(__i386__)
+            __asm__ __volatile__("pause");
+#elif defined(__aarch64__)
+            __asm__ __volatile__("yield");
+#else
+            atomic_signal_fence(memory_order_seq_cst);
+#endif
+            if (commit_cache_read(fd,data,count,offset,result))return 2;
+            if (!pthread_mutex_trylock(&fs_gate)) {
+                atomic_fetch_add_explicit(&cache_retry_wins, 1, memory_order_relaxed);
+                return 1;
+            }
+        }
+    } while (spdk_get_ticks() - start < ticks);
+    atomic_fetch_add_explicit(&cache_retry_timeouts, 1, memory_order_relaxed);
+    return 0;
+}
 /* Descriptor sizes stay valid until the next serialized callback. Mutations
  * and AIO client lifecycle changes must run through the same gate. */
 static int api_size_epoch = 1;
@@ -107,6 +146,7 @@ struct call {
     int (*work)(struct nvfuse_handle *, void *);
     void *argument;
 };
+#include "spdk_runtime/commit_cache.inc"
 #include "spdk_runtime/buffered_wb.inc"
 static int service_clients(void *unused);
 static int publish_stats(void *unused)
@@ -331,6 +371,19 @@ static int start(const char *json, const char *bdf, int format)
             return -EINVAL;
         gate_spin_us = (unsigned)value;
     }
+    const char *cc=getenv("NVFUSE_API_COMMIT_CACHE");
+    if(cc && strcmp(cc,"0") && strcmp(cc,"1"))return -EINVAL;
+    commit_cache_enabled=!cc||!strcmp(cc,"1");
+#ifdef NVFUSE_KEEP_DIRTY_BH_IN_ICTX
+    commit_cache_enabled=0;
+#endif
+    memset(&commit_cache,0,sizeof(commit_cache));
+    const char *dc=getenv("NVFUSE_API_DATA_CACHE");
+    if(dc && strcmp(dc,"0") && strcmp(dc,"1"))return -EINVAL;
+    data_cache_enabled=commit_cache_enabled && (!dc||!strcmp(dc,"1"));
+    commit_cache_excluded_ino=0;
+    data_cache_windows=data_cache_reads=data_cache_writes=data_cache_bytes=0;
+    nvfuse_commit_cache_hooks(commit_cache_open,commit_cache_close);
     const char *writeback=getenv("NVFUSE_API_BUFFERED_WB");
     if(writeback && strcmp(writeback,"0") && strcmp(writeback,"1"))return -EINVAL;
     buffered_wb_enabled=!writeback||strcmp(writeback,"0");memset(&buffered_wb,0,sizeof(buffered_wb));
@@ -342,12 +395,24 @@ static int start(const char *json, const char *bdf, int format)
         if(!*window||*window<'0'||*window>'9'||*end||errno||n<NVWB_MIN||n>NVWB_MAX)return -EINVAL;
         buffered_wb_window=(unsigned)n;}
 
+    const char *mapping=getenv("NVFUSE_AIO_OWNER_MAPPING");
+    if(mapping && strcmp(mapping,"0") && strcmp(mapping,"1"))return -EINVAL;
+    aio_owner_mapping=!mapping||strcmp(mapping,"0");
     const char *owner_cache=getenv("NVFUSE_API_CACHE_OWNER");
     if(owner_cache && strcmp(owner_cache,"0") && strcmp(owner_cache,"1"))return -EINVAL;
     api_cache_owner=!owner_cache||strcmp(owner_cache,"0");cache_owner_reads=0;
     const char *size_mode = getenv("NVFUSE_API_SIZE_EPOCH");
     if (size_mode && strcmp(size_mode, "0") && strcmp(size_mode, "1")) return -EINVAL;
     api_size_epoch = !size_mode || strcmp(size_mode, "0");
+    const char *retry = getenv("NVFUSE_API_CACHE_RETRY");
+    if (retry && strcmp(retry, "0") && strcmp(retry, "1")) return -EINVAL;
+    api_cache_retry = !retry || !strcmp(retry, "1");
+    const char *retry_budget = getenv("NVFUSE_API_CACHE_RETRY_US");
+    if (retry_budget && strcmp(retry_budget, "10") && strcmp(retry_budget, "50")) return -EINVAL;
+    api_cache_retry_budget_us = retry_budget ? (unsigned)strtoul(retry_budget, NULL, 10) : 50;
+    atomic_store(&cache_retry_attempts, 0);
+    atomic_store(&cache_retry_wins, 0);
+    atomic_store(&cache_retry_timeouts, 0);
     const char *cache_read = getenv("NVFUSE_API_CACHE_READ");
     if (cache_read && strcmp(cache_read, "0") && strcmp(cache_read, "1")) return -EINVAL;
     api_cache_read = !cache_read || strcmp(cache_read, "0");
@@ -398,6 +463,9 @@ static int start(const char *json, const char *bdf, int format)
     rt.started = 1; rt.format = format;
     spdk_app_opts_init(&rt.opts, sizeof(rt.opts));
     rt.opts.name = "nvfuse_fio"; rt.opts.json_config_file = json;
+    /* Embedded Python/Go hosts own process signals, including after stop. */
+    const char *embedded = getenv("NVFUSE_SPDK_EMBEDDED");
+    rt.opts.disable_signal_handlers = embedded && !strcmp(embedded, "1");
     rt.opts.reactor_mask = mask ? mask : "0x3";
     rt.opts.mem_size = NVFIO_SPDK_MEMORY_MB;
     rt.opts.num_pci_addr = 1; rt.opts.pci_allowed = malloc(sizeof(rt.address));
@@ -419,22 +487,30 @@ int nvfio_start(const char *json, const char *bdf, int format)
     pthread_mutex_unlock(&lifecycle);
     return rc;
 }
+/* Create lanes on their filesystem owner only when the previous lanes cannot
+ * reserve a request. Small graph reads usually need just one lane; bulk I/O
+ * retains the requested maximum capacity. Every initialized lane remains live
+ * until the ordinary client drain/free, so no task can outlive its storage. */
+static int client_grow(struct nvfio_client *client)
+{
+    if (client->initialized == client->count) return -EAGAIN;
+    struct nvfuse_aio_queue *q = &client->lanes[client->initialized].queue;
+    if (nvfuse_aio_queue_init(rt.handle->nvh_target, q, AIO_MAX_QDEPTH / 2))
+        return -ENOMEM;
+    if (poll_queues && reactor_task_enable_polling(rt.handle->nvh_target, q->task)) {
+        reactor_free_task(rt.handle->nvh_target, q->task);
+        return -ENOMEM;
+    }
+    client->initialized++;
+    return 0;
+}
 static void client_init(struct call *c)
 {
-    unsigned initialized = 0;
-    for (unsigned i = 0; i < c->client->count; i++) {
-        struct nvfuse_aio_queue *q = &c->client->lanes[i].queue;
-        if (nvfuse_aio_queue_init(rt.handle->nvh_target, q, AIO_MAX_QDEPTH / 2)) goto fail;
-        initialized++;
-        if (poll_queues && reactor_task_enable_polling(rt.handle->nvh_target, q->task)) goto fail;
-    }
-    printf("NVFUSE_DATA_QUEUE mode=%s\n", poll_queues ? "poll" : "message");
+    c->result = client_grow(c->client);
+    if (c->result) return;
+    printf("NVFUSE_DATA_QUEUE mode=%s lanes=lazy max=%u\n",
+           poll_queues ? "poll" : "message", c->client->count);
     c->client->next = rt.clients; rt.clients = c->client;
-    return;
-fail:
-    for (unsigned i = 0; i < initialized; i++)
-        reactor_free_task(rt.handle->nvh_target, c->client->lanes[i].queue.task);
-    c->result = -ENOMEM;
 }
 struct nvfio_client *nvfio_client_alloc(unsigned queues)
 {
@@ -443,6 +519,7 @@ struct nvfio_client *nvfio_client_alloc(unsigned queues)
     if (posix_memalign((void **)&client, _Alignof(struct nvfio_client), sizeof(*client))) return NULL;
     memset(client, 0, sizeof(*client));
     nvfio_ring_init(&client->pending); nvfio_ring_init(&client->completed);
+    atomic_init(&client->wait_enabled, 0); atomic_init(&client->waiting, 0);
     client->count = queues;
     struct call c = {.fn = client_init, .client = client};
     if (dispatch(&c)) { free(client); return NULL; }
@@ -456,7 +533,8 @@ static void client_fini(struct call *c)
     while (*link && *link != c->client) link = &(*link)->next;
     if (!*link) { c->result = -EINVAL; return; }
     *link = c->client->next;
-    for (unsigned i = 0; i < c->client->count; i++) {
+    printf("NVFUSE_DATA_LANES initialized=%u limit=%u\n", c->client->initialized, c->client->count);
+    for (unsigned i = 0; i < c->client->initialized; i++) {
         struct nvfuse_aio_queue *q = &c->client->lanes[i].queue;
         if (q->aio_stat->aio_lat_total_count) nvfuse_aio_queue_deinit(rt.handle, q);
         reactor_free_task(rt.handle->nvh_target, q->task);
@@ -482,6 +560,22 @@ static void close_fs(struct call *c)
     int rc = nvfuse_closefile(rt.handle, c->fd); c->result = rc < 0 ? api_error(rc) : 0;
 }
 int nvfio_close(int fd) { struct call c = {.fn = close_fs, .fd = fd}; return dispatch(&c); }
+/* Phase-boundary diagnostics only: no dispatch, writeback drain, epoch change,
+ * filesystem operation or journal mutation. Call outside benchmark timers. */
+int nvfio_file_sync_stats(uint64_t out[8])
+{
+    lock_fs_gate();
+    if (!rt.handle || !rt.handle->nvh_target->journal) {
+        pthread_mutex_unlock(&fs_gate); return -EIO;
+    }
+    struct io_target *t = rt.handle->nvh_target;
+    const struct nvj_stats *s = nvj_stats(t->journal);
+    out[0] = t->journal_file_sync_calls; out[1] = t->journal_file_sync_hits;
+    out[2] = t->journal_file_sync_deferred; out[3] = t->journal_file_sync_allocations;
+    out[4] = s->commits; out[5] = s->journal_bytes;
+    out[6] = t->journal_dirty_blocks; out[7] = t->journal_dirty_requests;
+    pthread_mutex_unlock(&fs_gate); return 0;
+}
 static void sync_fs(struct call *c)
 {
     if (rt.handle->nvh_target->journal) {
@@ -502,13 +596,19 @@ static void submit_fs(struct call *c)
 {
     struct nvfio_request *r = c->request;
     struct nvfio_lane *lane = NULL;
-    for (unsigned i = 0; i < c->client->count; i++)
+    for (unsigned i = 0; i < c->client->initialized; i++)
         if (c->client->lanes[i].reserved + r->blocks <= AIO_MAX_QDEPTH) {
             lane = &c->client->lanes[i]; break;
         }
-    if (!lane) { c->result = -EAGAIN; return; }
+    if (!lane) {
+        c->result = client_grow(c->client);
+        if (c->result) return;
+        lane = &c->client->lanes[c->client->initialized - 1];
+    }
     r->lane = lane;
-    int rc = nvfuse_aio_queue_submission(rt.handle, &lane->queue, &r->aio);
+    int rc = aio_owner_mapping ?
+        nvfuse_aio_queue_submission_serialized(rt.handle, &lane->queue, &r->aio) :
+        nvfuse_aio_queue_submission(rt.handle, &lane->queue, &r->aio);
     if (rc) { c->result = api_error(rc); return; }
     lane->reserved += r->blocks; c->client->inflight++;
 }
@@ -526,13 +626,32 @@ int nvfio_submit(struct nvfio_client *client, struct nvfio_request *r, int fd, v
     r->aio.sb = &rt.handle->nvh_sb; INIT_LIST_HEAD(&r->aio.list);
     if (nvfio_ring_push(&client->pending, r)) return -EAGAIN;
     client->outstanding++;
+    if (write || r->blocks > 1) client->uncoalesced++;
     return 0;
+}
+/* There is one completion producer (the filesystem owner) and one consumer.
+ * Fence with the consumer's arm operation before waking: a completion
+ * published between the empty recheck and FUTEX_WAIT makes its expected value
+ * mismatch, rather than losing the wakeup. Poll-only clients do no exchanges. */
+static int publish_completion(struct nvfio_client *client, struct nvfio_request *r)
+{
+    int rc = nvfio_ring_push(&client->completed, r);
+    if (!rc && atomic_load_explicit(&client->wait_enabled, memory_order_acquire)) {
+        /* The SC RMW fences queue publication before observing the arm, even
+         * for a partial batch that is not ready to wake its consumer yet. */
+        unsigned goal = atomic_fetch_or_explicit(&client->waiting, 0, memory_order_seq_cst);
+        if (goal && nvfio_ring_count(&client->completed) >= goal &&
+            atomic_compare_exchange_strong_explicit(&client->waiting, &goal, 0,
+                                                     memory_order_seq_cst, memory_order_seq_cst))
+            syscall(SYS_futex, &client->waiting, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    }
+    return rc;
 }
 static void poll_fs(struct call *c)
 {
     struct nvfuse_aio_req *list[AIO_MAX_QDEPTH];
     unsigned count = 0;
-    for (unsigned lane = 0; lane < c->client->count && count < c->max; lane++) {
+    for (unsigned lane = 0; lane < c->client->initialized && count < c->max; lane++) {
         struct nvfuse_aio_queue *q = &c->client->lanes[lane].queue;
         int n = nvfuse_io_getevents(&rt.handle->nvh_sb, q, 0, c->max - count, list);
         if (n < 0) { c->result = n; return; }
@@ -575,7 +694,7 @@ static int drain_clients(void)
                 if (submit.result) {
                     r->error = -submit.result;
                     if (rt.stats_map) rt.stats.word[NS_ERRORS]++;
-                    int rc = nvfio_ring_push(&client->completed, r);
+                    int rc = publish_completion(client, r);
                     assert(!rc); (void)rc;
                 }
                 rt.submitted++; rt.submit_passes++;
@@ -586,7 +705,7 @@ static int drain_clients(void)
             poll_fs(&poll);
             if (poll.result < 0) return poll.result;
             for (int i = 0; i < poll.result; i++) {
-                int rc = nvfio_ring_push(&client->completed, completed[i]);
+                int rc = publish_completion(client, completed[i]);
                 assert(!rc); (void)rc;
             }
             rt.completed += poll.result;
@@ -696,7 +815,10 @@ int nvfio_pread(int fd, void *buffer, size_t bytes, uint64_t offset)
     if (fd < 0 || fd >= MAX_OPEN_FILE || bytes > INT32_MAX || offset > INT64_MAX ||
         (!buffer && bytes)) return -EINVAL;
     struct read_call request = {fd, buffer, bytes, offset};
-    if (api_cache_read && !pthread_mutex_trylock(&fs_gate)) {
+    int concurrent_result;
+    int acquired=api_cache_read?try_cache_gate(fd,buffer,(int)bytes,offset,&concurrent_result):0;
+    if(acquired==2)return concurrent_result;
+    if (acquired==1) {
         if (!rt.handle) { pthread_mutex_unlock(&fs_gate); return -EIO; }
         int result, hit = !rt.clients && !atomic_load_explicit(&rt.data_failed, memory_order_acquire) &&
             cached_copy(&rt.handle->nvh_sb, fd, buffer, bytes, offset, &result);
@@ -774,7 +896,7 @@ static int service_clients(void *unused)
                 return SPDK_POLLER_BUSY;
             }
             for (int i = 0; i < poll.result; i++) {
-                int rc = nvfio_ring_push(&client->completed, completed[i]);
+                int rc = publish_completion(client, completed[i]);
                 assert(!rc); (void)rc;
             }
             work += poll.result; rt.completed += poll.result;
@@ -791,7 +913,7 @@ static int service_clients(void *unused)
             if (submit.result) {
                 r->error = -submit.result;
                 if (rt.stats_map) rt.stats.word[NS_ERRORS]++;
-                int rc = nvfio_ring_push(&client->completed, r);
+                int rc = publish_completion(client, r);
                 assert(!rc); (void)rc;
             }
             batch++;
@@ -815,6 +937,8 @@ static int service_clients(void *unused)
         journal_deadline = spdk_get_ticks() + journal_interval;
     }
     pthread_mutex_unlock(&fs_gate);
+    /* Share an idle filesystem owner with runnable application workers. */
+    if (!work && rt.clients) sched_yield();
     return work ? SPDK_POLLER_BUSY : SPDK_POLLER_IDLE;
 }
 int nvfio_poll(struct nvfio_client *client, unsigned max, struct nvfio_request **completed)
@@ -825,18 +949,60 @@ int nvfio_poll(struct nvfio_client *client, unsigned max, struct nvfio_request *
         struct nvfio_request *r = nvfio_ring_peek(&client->completed);
         if (!r) break;
         completed[n++] = r;
+        if (r->aio.opcode == WRITE || r->blocks > 1) {
+            assert(client->uncoalesced); client->uncoalesced--;
+        }
         nvfio_ring_consume(&client->completed);
     }
     assert(n <= client->outstanding); client->outstanding -= n;
     if (!n && atomic_load_explicit(&rt.data_failed, memory_order_acquire)) return -EIO;
     return n;
 }
+/* Enable notifications on their producer before arming the first wait. This
+ * owner round trip occurs only once and prevents the first publication from
+ * observing a stale disabled flag after the caller's empty-queue recheck. */
+static void enable_client_wait(struct call *c)
+{
+    atomic_store_explicit(&c->client->wait_enabled, 1, memory_order_release);
+}
+int nvfio_wait(struct nvfio_client *client, unsigned max,
+               struct nvfio_request **completed, unsigned timeout_us)
+{
+    if (timeout_us > 1000000) return -EINVAL;
+    int n = nvfio_poll(client, max, completed);
+    if (n || !timeout_us || !client->outstanding) return n;
+    if (!atomic_load_explicit(&client->wait_enabled, memory_order_acquire)) {
+        struct call c = {.fn = enable_client_wait, .client = client};
+        int rc = dispatch(&c);
+        if (rc) return rc;
+    }
+    /* Small read batches already wait for every member before reuse. Avoid
+     * waking their consumer for each partial completion. Large I/O and writes
+     * retain first-completion notification for streaming refill. */
+    unsigned goal = client->uncoalesced ? 1 :
+        (max < client->outstanding ? max : client->outstanding);
+    atomic_exchange_explicit(&client->waiting, goal, memory_order_seq_cst);
+    n = nvfio_poll(client, max, completed);
+    if (!n && client->outstanding) {
+        struct timespec timeout = {.tv_sec = timeout_us / 1000000,
+            .tv_nsec = (long)(timeout_us % 1000000) * 1000};
+        int rc = syscall(SYS_futex, &client->waiting, FUTEX_WAIT_PRIVATE, goal,
+                         &timeout, NULL, 0);
+        if (rc < 0 && errno != EAGAIN && errno != EINTR && errno != ETIMEDOUT)
+            n = -errno;
+    }
+    atomic_exchange_explicit(&client->waiting, 0, memory_order_seq_cst);
+    return n ? n : nvfio_poll(client, max, completed);
+}
 void *nvfio_dma_alloc(size_t size) { return spdk_dma_zmalloc(size, CLUSTER_SIZE, NULL); }
 void nvfio_dma_free(void *buffer) { spdk_dma_free(buffer); }
 static void unmount_fs(struct call *c)
 {
     if (rt.clients) { c->result = -EBUSY; return; }
+    printf("NVFUSE_COMMIT_CACHE enabled=%d reads=%" PRIu64 " writes=%" PRIu64 " bytes=%" PRIu64 " misses=%" PRIu64 " windows=%" PRIu64 " state=%u\n",commit_cache_enabled,commit_cache.reads,commit_cache.writes,commit_cache.bytes,commit_cache.misses,commit_cache.windows,atomic_load(&commit_cache.state));
+    printf("NVFUSE_DATA_CACHE enabled=%d windows=%" PRIu64 " reads=%" PRIu64 " writes=%" PRIu64 " bytes=%" PRIu64 "\n",data_cache_enabled,data_cache_windows,data_cache_reads,data_cache_writes,data_cache_bytes);
     printf("NVFUSE_CACHE_OWNER enabled=%d reads=%" PRIu64 "\n",api_cache_owner,cache_owner_reads);
+    printf("NVFUSE_AIO_MAPPING enabled=%d attempts=%" PRIu64 " hits=%" PRIu64 "\n",aio_owner_mapping,rt.handle->nvh_target->aio_mapping_attempts,rt.handle->nvh_target->aio_mapping_hits);
     buffered_wb_finish();
     spdk_poller_unregister(&rt.data_poller);
     stop_stats();
@@ -851,8 +1017,33 @@ int nvfio_stop(void)
     pthread_mutex_lock(&lifecycle);
     if (!references) { pthread_mutex_unlock(&lifecycle); return 0; }
     if (--references) { pthread_mutex_unlock(&lifecycle); return 0; }
+    printf("NVFUSE_CACHE_RETRY_BUDGET us=%u\n", api_cache_retry_budget_us);
+    printf("NVFUSE_CACHE_RETRY enabled=%d attempts=%" PRIu64 " wins=%" PRIu64 " timeouts=%" PRIu64 "\n",
+           api_cache_retry, (uint64_t)atomic_load(&cache_retry_attempts),
+           (uint64_t)atomic_load(&cache_retry_wins), (uint64_t)atomic_load(&cache_retry_timeouts));
     printf("NVFUSE_CALLER_CACHE hits=%" PRIu64 " misses=%" PRIu64 " fallback=%" PRIu64 "\n", (uint64_t)atomic_load(&cache_hits), (uint64_t)atomic_load(&cache_misses), (uint64_t)atomic_load(&cache_busy));
     struct call c = {.fn = unmount_fs}; int rc = dispatch(&c);
     if (!rc) { spdk_app_stop(0); pthread_join(rt.thread, NULL); }
     pthread_mutex_unlock(&lifecycle); return rc;
+}
+
+/* Read-only snapshot. The gate also excludes a borrowed cache executor. */
+int nvfio_commit_cache_stats(uint64_t out[8])
+{
+    if (!out) return -EINVAL;
+    lock_fs_gate();
+    if (!rt.handle) {
+        pthread_mutex_unlock(&fs_gate);
+        return -EIO;
+    }
+    out[0] = commit_cache.reads;
+    out[1] = commit_cache.writes;
+    out[2] = commit_cache.bytes;
+    out[3] = commit_cache.windows;
+    out[4] = data_cache_windows;
+    out[5] = data_cache_reads;
+    out[6] = data_cache_writes;
+    out[7] = data_cache_bytes;
+    pthread_mutex_unlock(&fs_gate);
+    return 0;
 }

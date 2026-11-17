@@ -5,3 +5,12 @@
 /tmp export-ignore
 /.DS_Store export-ignore
 /tests/run_nvme_soak.py export-ignore
+/examples/ai_integration export-ignore
+/tools/pull_milvus_image.py export-ignore
+/docs/performance-results export-ignore
+/docs/performance-*.md export-ignore
+/experiments export-ignore
+/integrations/**/results export-ignore
+/integrations/**/reports export-ignore
+/integrations/**/artifacts export-ignore
+/integrations/**/build export-ignore

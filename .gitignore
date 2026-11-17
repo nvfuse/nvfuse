@@ -32,3 +32,13 @@ __pycache__/
 /output/
 /tmp/
 /tests/run_nvme_soak.py
+
+# Application experiments and run reports are maintained separately from core PRs.
+/examples/ai_integration/
+/tools/pull_milvus_image.py
+/docs/performance-results/
+/docs/performance-*.md
+/experiments/
+
+# Standalone read-only completion-wait qualification tool.
+/tests/spdk/completion_wait_test

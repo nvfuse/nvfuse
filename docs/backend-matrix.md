@@ -176,7 +176,7 @@ groups. Reopen (`.format = 0, .size_bytes = 0`) discovers the existing filesyste
 geometry and never formats. Image creation still requires an explicit size.
 A nonzero device size remains available to bound disposable test fixtures.
 The primary API/SPDK fio configuration selects the full namespace directly;
-see [primary SPDK fio](spdk-fio.md).
+see [primary SPDK fio](../integrations/fio/README.md).
 
 For example, on an explicitly approved unused device:
 

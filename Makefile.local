@@ -56,7 +56,7 @@ clean:
 
 $(LOCAL_BUILD)/journal_engine_test: tests/journal_engine_test.c src/nvfuse_journal.c src/nvfuse_journal_v3.inc include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_engine_test.c src/nvfuse_journal.c -o $@
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_engine_test.c src/nvfuse_journal.c -lpthread -o $@
 $(LOCAL_BUILD)/journal_v3_test: tests/journal_v3_test.c src/nvfuse_journal.c src/nvfuse_journal_v3.inc include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude tests/journal_v3_test.c src/nvfuse_journal.c -lpthread -o $@
@@ -146,7 +146,7 @@ $(LOCAL_BUILD)/directory_resilience_test: tests/directory_resilience_test.cpp $(
 
 $(LOCAL_BUILD)/journal_memory_test: tests/journal_memory_test.c src/nvfuse_journal.c include/nvfuse_journal.h
 	@mkdir -p $(dir $@)
-	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< -o $@
+	$(CC) -std=gnu11 $(LOCAL_CFLAGS) -Wall -Wextra -Werror -Iinclude $< -lpthread -o $@
 
 .PHONY: resilience-test chaos-test
 resilience-test: $(LOCAL_BUILD)/resilience_test $(LOCAL_BUILD)/directory_resilience_test $(LOCAL_BUILD)/journal_memory_test $(LOCAL_BUILD)/metadata_check

@@ -1,6 +1,6 @@
 SPDK_ROOT_DIR ?= $(HOME)/src/spdk
 FIO_SOURCE_DIR ?= $(HOME)/src/fio
-NVFUSE_ROOT_DIR := $(abspath ../../..)
+NVFUSE_ROOT_DIR := $(abspath ../..)
 NVFUSE_ARCHIVE ?= $(NVFUSE_ROOT_DIR)/build/spdk-primary/nvfuse.a
 APP = nvfuse_spdk.so
 include $(SPDK_ROOT_DIR)/mk/spdk.common.mk

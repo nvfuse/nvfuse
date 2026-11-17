@@ -19,8 +19,14 @@ The reusable kernel-workload runner, `tests/spdk/fs_soak.c` and its portable
 oracle tests are included. The lab supervisor embeds a particular approved
 device identity and is not a user-facing launcher. User guides describe generic
 worker orchestration instead. Excluded local files are preserved in the working
-tree. `.gitignore` guards additions; `.gitattributes` excludes the listed paths
-from `git archive`. Neither mechanism removes already committed history.
+tree or in a separate experiment checkout. The optional `integrations/` tree
+contains reusable application adapters, build files, configuration examples and
+guides. It must not be required to build the core archive. Per-host automation,
+measurements, binary/index/image archives and downloaded dependencies stay out
+of the source PR. Generic FUSE examples and regression tools remain in scope.
+
+`.gitignore` guards additions; `.gitattributes` excludes the listed paths from
+`git archive`. Neither mechanism removes already committed history.
 
 Before the release commit, review the complete candidate file list, including
 new source paths, licenses, guides and examples. Do not use an unreviewed
@@ -59,6 +65,8 @@ make local
 make local-test
 make local-journal-test
 make -f Makefile.local journal-v3-test journal-crc-test api-completion-test
+make -f Makefile.local build/local/journal_memory_test
+./build/local/journal_memory_test
 cc -std=gnu11 -D_GNU_SOURCE -DNVFUSE_FILE_BACKEND -Iinclude \
   examples/quickstart/image_api.c build/local/nvfuse.a -lpthread -lm \
   -o build/local/image-api

@@ -1,0 +1,16 @@
+{
+  "type": "native_plugin",
+  "module_path": "lmcache_nvfuse",
+  "class_name": "NVFUSEConnector",
+  "max_capacity_gb": 1.0,
+  "adapter_params": {
+    "backend": "nvfuse",
+    "arena_path": "/lmcache.arena",
+    "object_bytes": 262144,
+    "slots": 4096,
+    "library": "/absolute/path/to/nvfuse/integrations/common/libnvfuse_ai.so",
+    "policy": "fifo",
+    "max_batches": 64,
+    "max_queued_bytes": 134217728
+  }
+}

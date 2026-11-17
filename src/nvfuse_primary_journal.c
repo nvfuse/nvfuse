@@ -9,6 +9,17 @@
 #include "nvfuse_api.h"
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_primary_journal.h"
+#include "nvfuse_commit_cache.h"
+static int (*cache_window_open)(struct nvfuse_handle *,uint32_t);
+static void (*cache_window_close)(void);
+void nvfuse_commit_cache_hooks(int (*open_fn)(struct nvfuse_handle *,uint32_t),void (*close_fn)(void))
+{cache_window_open=open_fn;cache_window_close=close_fn;}
+/* Called only after a scoped batch is fully submitted. Submission has finished
+ * journal staging; the owner will only consume completions before closing. */
+int nvfuse_file_data_cache_open(struct nvfuse_superblock *sb,uint32_t ino)
+{return cache_window_open && cache_window_open(sb->sb_nvh,ino);}
+void nvfuse_file_data_cache_close(void)
+{if(cache_window_close)cache_window_close();}
 
 #define JOURNAL_DMA_BYTES (32u * CLUSTER_SIZE)
 
@@ -207,6 +218,14 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *h, int formatted)
     const char *alloc_account = getenv("NVFUSE_BUFFERED_ALLOC_ACCOUNT");
     const char *bc_direct = getenv("NVFUSE_BUFFERED_BC_DIRECT");
     const char *map_cache = getenv("NVFUSE_BUFFERED_MAP_CACHE");
+    const char *file_sync = getenv("NVFUSE_JOURNAL_FILE_SYNC");
+    if (file_sync && strcmp(file_sync, "0") && strcmp(file_sync, "1")) return -EINVAL;
+    /* V3 and dependency eligibility are checked at fsync time; legacy
+     * volumes and unsupported process models retain the full collector. */
+    t->journal_file_sync = file_sync ? !strcmp(file_sync, "1") : nvfuse_process_model_is_standalone();
+#ifdef NVFUSE_KEEP_DIRTY_BH_IN_ICTX
+    t->journal_file_sync = 0;
+#endif
     if (crc_mode && strcmp(crc_mode, "auto") && strcmp(crc_mode, "software")) return -EINVAL;
     if (mode && strcmp(mode, "0") && strcmp(mode, "1")) return -EINVAL;
     if (reuse && strcmp(reuse, "0") && strcmp(reuse, "1")) return -EINVAL;
@@ -234,6 +253,12 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *h, int formatted)
     t->buffered_alloc_account = enabled && (alloc_account ? !strcmp(alloc_account, "1") : standalone);
     t->buffered_bc_direct = enabled && (bc_direct ? !strcmp(bc_direct, "1") : standalone);
     t->buffered_map_cache = enabled && (!map_cache || strcmp(map_cache, "0"));
+    const char *extent = getenv("NVFUSE_BUFFERED_EXTENT_MAPPING");
+    if (extent && strcmp(extent,"0") && strcmp(extent,"1")) return -EINVAL;
+    t->buffered_extent_mapping = enabled && (extent ? !strcmp(extent, "1") : standalone);
+    const char *full_copy = getenv("NVFUSE_BUFFERED_FULL_COPY");
+    if (full_copy && strcmp(full_copy,"0") && strcmp(full_copy,"1")) return -EINVAL;
+    t->buffered_full_copy = enabled && standalone && (!full_copy || !strcmp(full_copy,"1"));
     t->buffered_alloc_batch = enabled && (!alloc_batch || strcmp(alloc_batch, "0"));
     t->journal_flush_fast = enabled && (!flush_fast || strcmp(flush_fast, "0"));
     t->journal_owner_collect = enabled && (!collect || strcmp(collect, "0"));
@@ -308,6 +333,8 @@ int nvfuse_primary_journal_prepare(struct nvfuse_handle *h, int formatted)
     printf("NVFUSE_JOURNAL_IO batch=%d profile=%d compare_reads=%d max_bytes=%u crc=%s home_batch=%d log_join=%d raw_reuse=%d raw_poll=%d owner_collect=%u dirty_reuse=%d\n",
            !batch || strcmp(batch, "0"), t->journal_profile, compare_enabled, JOURNAL_DMA_BYTES,
            nvj_crc_backend(), home_enabled, join_enabled, t->journal_raw_task != NULL, poll_enabled, t->journal_owner_collect, t->journal_dirty_task != NULL);
+    printf("NVFUSE_WRITE_EXTENT enabled=%u\n",t->buffered_extent_mapping);
+    printf("NVFUSE_FULL_COPY enabled=%u\n",t->buffered_full_copy);
     printf("NVFUSE_BUFFERED_POLICY bc_direct=%u alloc_account=%u alloc_fused=%u alloc_cached=%u write_hit=%u fast_append=%u dirty_iov=%u\n",
            t->buffered_bc_direct, t->buffered_alloc_account, t->buffered_alloc_fused,
            t->buffered_alloc_cached, t->buffered_write_hit, t->buffered_fast_append, t->journal_dirty_iov);
@@ -382,6 +409,14 @@ int nvfuse_primary_journal_collect(struct io_target *t, const struct nvj_home_wr
     }
     return 1;
 }
+#include "nvfuse_file_fsync.inc"
+
+int nvfuse_primary_journal_fsync(struct nvfuse_handle *h, int fd)
+{
+    int rc = file_sync_try(h, fd);
+    return rc < 0 ? rc : rc ? 0 : nvfuse_primary_journal_commit(h, 1);
+}
+
 int nvfuse_primary_journal_commit(struct nvfuse_handle *h, int restart)
 {
     struct io_target *t = h->nvh_target;
@@ -397,9 +432,14 @@ int nvfuse_primary_journal_commit(struct nvfuse_handle *h, int restart)
         t->journal_super_ns += end - dirty_end;
         t->journal_collect_ns += end - start;
     }
-    if (!rc) rc = nvj_commit(t->journal);
+    if (!rc) {
+        int overlap=cache_window_open && cache_window_open(h,0);
+        rc=nvj_commit(t->journal);
+        if(overlap)cache_window_close();
+    }
     if (rc) { nvj_require_recovery(t->journal); return rc; }
     t->journal_dirty = 0;
+    t->journal_file_sync_unsafe = 0;
     return restart ? nvj_begin(t->journal, 0, 0) : 0;
 }
 int nvfuse_primary_journal_read_header(struct io_target *t, void *buf, size_t bytes)
@@ -414,11 +454,19 @@ int nvfuse_primary_journal_read_header(struct io_target *t, void *buf, size_t by
 }
 void nvfuse_primary_journal_release(struct io_target *t)
 {
+    printf("NVFUSE_FILE_SYNC enabled=%u calls=%" PRIu64 " hits=%" PRIu64
+           " deferred=%" PRIu64 " allocations=%" PRIu64 "\n",
+           t->journal_file_sync, t->journal_file_sync_calls, t->journal_file_sync_hits,
+           t->journal_file_sync_deferred, t->journal_file_sync_allocations);
+    free(t->journal_file_sync_workspace); t->journal_file_sync_workspace = NULL;
     if (t->journal) {
         printf("NVFUSE_FLUSH no_volatile_cache_barriers=%" PRIu64 " enabled=%u\n",
                t->journal_flush_elided, t->journal_flush_fast);
         printf("NVFUSE_FAST_APPEND calls=%" PRIu64 " hits=%" PRIu64 "\n",
                t->buffered_fast_append_calls, t->buffered_fast_append_hits);
+        printf("NVFUSE_WRITE_EXTENT calls=%" PRIu64 " hits=%" PRIu64 "\n",t->buffered_extent_calls,t->buffered_extent_hits);
+        printf("NVFUSE_WRITE_EXTENT miss_copies=%" PRIu64 "\n",t->buffered_extent_miss_copies);
+        printf("NVFUSE_FULL_COPY saved_bytes=%" PRIu64 "\n",t->buffered_full_saved_bytes);
         printf("NVFUSE_DIRTY_IO blocks=%" PRIu64 " requests=%" PRIu64 " iov=%u\n", t->journal_dirty_blocks,t->journal_dirty_requests,t->journal_dirty_iov);
         const struct nvj_stats *s = nvj_stats(t->journal);
         printf("NVFUSE_JOURNAL_STATS commits=%" PRIu64 " replays=%" PRIu64

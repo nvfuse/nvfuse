@@ -25,6 +25,13 @@ int nvfio_execute_serialized(int (*work)(struct nvfuse_handle *, void *), void *
  * fsync drains these writes before the existing journal durability boundary. */
 int nvfio_pwrite(int fd, const void *data, size_t bytes, uint64_t offset);
 int nvfio_fsync(int fd);
+/* Read-only phase snapshot: calls/hits/deferred/allocations/commits/log bytes/
+ * dirty blocks/requests. No writeback drain or filesystem mutation. */
+int nvfio_file_sync_stats(uint64_t out[8]);
+/* Read-only cache-admission snapshot: reads/writes/bytes/windows, then the
+ * data-completion subset's windows/reads/writes/bytes. No writeback drain.
+ * Take diagnostic snapshots outside workload timers. */
+int nvfio_commit_cache_stats(uint64_t out[8]);
 #ifdef NVFIO_TEST
 /* Deterministic ordering hooks; absent from ordinary runtime builds. */
 int nvfio_test_buffered_wb_enabled(void);
@@ -49,6 +56,15 @@ void *nvfio_request_user(struct nvfio_request *request);
 int nvfio_request_error(struct nvfio_request *request);
 int nvfio_submit(struct nvfio_client *client, struct nvfio_request *request, int fd, void *buf, size_t size, uint64_t offset, int write);
 int nvfio_poll(struct nvfio_client *client, unsigned max, struct nvfio_request **completed);
+/* Same single-consumer contract as poll. Poll, then sleep up to timeout_us
+ * (0..1000000); the first blocking call enables owner notifications. A zero
+ * return can mean timeout, signal or spurious wakeup.
+ * Empty small-read waits can coalesce up to min(max, outstanding) completions;
+ * timeout/signal/already-ready returns may still contain partial batches.
+ * Accepted requests and DMA remain live until their ordinary completion.
+ * Poll-only clients retain the existing nonblocking path. */
+int nvfio_wait(struct nvfio_client *client, unsigned max,
+               struct nvfio_request **completed, unsigned timeout_us);
 void *nvfio_dma_alloc(size_t size);
 void nvfio_dma_free(void *buffer);
 int nvfio_stop(void);

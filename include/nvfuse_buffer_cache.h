@@ -173,6 +173,14 @@ struct nvfuse_buffer_head *_nvfuse_get_bh(struct nvfuse_superblock *sb,
 											struct nvfuse_inode_ctx *ictx, inode_t ino, lbno_t lblock, 
 											s32 sync_read, s32 is_meta);
 
+/* Full-page mapped miss only; serialized inode owner, existing cache/victim
+ * policy. Returns zero without mutation for every unsupported cache state. */
+int nvfuse_write_mapped_cache(struct nvfuse_superblock *sb,
+        struct nvfuse_inode_ctx *ctx, lbno_t block, pbno_t physical, const s8 *data);
+/* Caller retains the authoritative inode lock for this one mapped extent. */
+struct nvfuse_buffer_cache *nvfuse_get_bc_mapped(struct nvfuse_superblock *sb,
+        struct nvfuse_inode_ctx *ctx, inode_t ino, lbno_t lblock,
+        s32 sync_read, pbno_t physical);
 struct nvfuse_buffer_cache *nvfuse_get_bc(struct nvfuse_superblock *sb, struct nvfuse_inode_ctx *ctx, inode_t ino, lbno_t lblock, s32 sync_read);
 /* alloc and return buffer_head (bh) with inode, inoe number and lba number */
 struct nvfuse_buffer_head *nvfuse_get_new_bh(struct nvfuse_superblock *sb,

@@ -14,6 +14,7 @@
 */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
@@ -49,6 +50,14 @@
 #include "nvfuse_buffer_cache.h"
 #include "nvfuse_ipc_ring.h"
 #include "nvfuse_debug.h"
+
+/* Embedded runtimes may use an existing hugepage arena on another node.
+ * Preserve socket-local IPC allocation unless explicitly requested. */
+static int nvfuse_ipc_socket_id(void)
+{
+    const char *any = getenv("NVFUSE_IPC_SOCKET_ANY");
+    return any && !strcmp(any, "1") ? SPDK_ENV_SOCKET_ID_ANY : rte_socket_id();
+}
 
 #define MAX_STAT_MSG 5
 static s8 *_STAT_MSG_POOL[MAX_STAT_MSG] = {
@@ -396,11 +405,11 @@ int perf_stat_ring_create(struct rte_ring **stat_rx_ring, struct rte_mempool **s
 	assert(type < NUM_STAT_TYPE);
 	assert(type < MAX_STAT_MSG);
 
-	*stat_rx_ring = rte_ring_create(_STAT_RX_RING[type], ring_size, rte_socket_id(), flags);
+	*stat_rx_ring = rte_ring_create(_STAT_RX_RING[type], ring_size, nvfuse_ipc_socket_id(), flags);
 	*stat_message_pool = rte_mempool_create(_STAT_MSG_POOL[type], pool_size,
 						string_size, pool_cache, priv_data_sz,
 						NULL, NULL, NULL, NULL,
-						rte_socket_id(), flags);
+						nvfuse_ipc_socket_id(), flags);
 
 	if (*stat_rx_ring == NULL)
 		rte_exit(EXIT_FAILURE, "Problem getting stat rx ring\n");
@@ -509,12 +518,12 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 
 	if (rte_eal_process_type() == RTE_PROC_PRIMARY) {
 		for (i = 0; i < SPDK_NUM_CORES; i++) {
-			ipc_ctx->send_ring[i] = rte_ring_create(ipc_ctx->_PRI_2_SEC[i], ring_size, rte_socket_id(), flags);
+			ipc_ctx->send_ring[i] = rte_ring_create(ipc_ctx->_PRI_2_SEC[i], ring_size, nvfuse_ipc_socket_id(), flags);
 			if (ipc_ctx->send_ring[i] == NULL)
 				rte_exit(EXIT_FAILURE, "Problem getting sending ring\n");
 
 			if (i == 0) {
-				ipc_ctx->recv_ring[i] = rte_ring_create(ipc_ctx->_SEC_2_PRI[i], ring_size, rte_socket_id(), flags);
+				ipc_ctx->recv_ring[i] = rte_ring_create(ipc_ctx->_SEC_2_PRI[i], ring_size, nvfuse_ipc_socket_id(), flags);
 				if (ipc_ctx->recv_ring[i] == NULL)
 					rte_exit(EXIT_FAILURE, "Problem getting receiving ring\n");
 			} else {
@@ -528,9 +537,9 @@ int nvfuse_ipc_init(struct nvfuse_ipc_context *ipc_ctx)
 		ipc_ctx->message_pool = rte_mempool_create(ipc_ctx->_MSG_POOL, pool_size,
 					NVFUSE_IPC_MSG_SIZE, pool_cache, priv_data_sz,
 					NULL, NULL, NULL, NULL,
-					rte_socket_id(), flags);
+					nvfuse_ipc_socket_id(), flags);
 
-		ipc_ctx->id_gen = rte_ring_create(ipc_ctx->ID_GEN, ring_size, rte_socket_id(), flags);
+		ipc_ctx->id_gen = rte_ring_create(ipc_ctx->ID_GEN, ring_size, nvfuse_ipc_socket_id(), flags);
 		if (ipc_ctx->id_gen == NULL)
 			rte_exit(EXIT_FAILURE, "Problem getting id_gen ring\n");
 
